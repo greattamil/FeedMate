@@ -26,6 +26,18 @@ abstract class LocalDatabase {
   Future<void> markInvoiceSynced(String clientTransactionId, {String? serverInvoiceNumber});
   Future<void> markInvoiceFailed(String clientTransactionId, String error);
 
+  /// Every outbox entry regardless of status, newest-first — for a review
+  /// screen showing PENDING/FAILED/SYNCED sales, not just what's about to
+  /// sync.
+  Future<List<Map<String, Object?>>> allOutboxEntries();
+
+  /// Resets a FAILED entry back to PENDING (clearing the recorded error) so
+  /// the next sync attempt retries it — e.g. after a cashier fixes whatever
+  /// made the sale unsyncable (a product was reactivated, a credit limit was
+  /// raised). A no-op if the entry isn't currently FAILED, so it can't
+  /// accidentally resurrect an already-SYNCED sale.
+  Future<void> retryInvoice(String clientTransactionId);
+
   Future<void> setCache(String key, String valueJson);
   Future<String?> getCache(String key);
 }
@@ -192,6 +204,21 @@ class SqlLocalDatabase implements LocalDatabase {
       'outbox_invoices',
       {'status': 'FAILED', 'last_error': error},
       where: 'client_transaction_id = ?',
+      whereArgs: [clientTransactionId],
+    );
+  }
+
+  @override
+  Future<List<Map<String, Object?>>> allOutboxEntries() async {
+    return db.query('outbox_invoices', orderBy: 'created_at DESC');
+  }
+
+  @override
+  Future<void> retryInvoice(String clientTransactionId) async {
+    await db.update(
+      'outbox_invoices',
+      {'status': 'PENDING', 'last_error': null},
+      where: "client_transaction_id = ? AND status = 'FAILED'",
       whereArgs: [clientTransactionId],
     );
   }

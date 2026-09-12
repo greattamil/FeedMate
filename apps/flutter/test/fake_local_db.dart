@@ -81,6 +81,21 @@ class FakeLocalDatabase implements LocalDatabase {
   }
 
   @override
+  Future<List<Map<String, Object?>>> allOutboxEntries() async {
+    final rows = _outbox.values.toList()
+      ..sort((a, b) => (b['created_at'] as String).compareTo(a['created_at'] as String));
+    return rows;
+  }
+
+  @override
+  Future<void> retryInvoice(String clientTransactionId) async {
+    final row = _outbox[clientTransactionId];
+    if (row == null || row['status'] != 'FAILED') return;
+    row['status'] = 'PENDING';
+    row['last_error'] = null;
+  }
+
+  @override
   Future<void> setCache(String key, String valueJson) async => _cache[key] = valueJson;
 
   @override

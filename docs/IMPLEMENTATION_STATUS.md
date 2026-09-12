@@ -368,6 +368,23 @@ for.
 16. **`customer_ledger_entries` had no reliable posting-order column.** Both `entry_date` and `created_at` default to `now()`, which Postgres freezes for the entire transaction — two entries posted in the same transaction (exactly what the new ledger integration test did, and a real occurrence whenever a single business operation posts more than one ledger row) get an *identical* timestamp, so `ORDER BY entry_date DESC` silently fell back to comparing `id`, a random UUID with no relationship to insertion order. The test caught this immediately (asserted order came back reversed). Fixed with migration `0016`: added a `bigserial seq` column, monotonically increasing regardless of transaction timing, and reordered by that instead.
 17. **A second, cascading bug the same migration exposed**: migration `0012`'s `ALTER DEFAULT PRIVILEGES` only covered future *tables*, not future *sequences* — so the new `seq` column's backing sequence was invisible to `app_user`/`app_admin`, and every `INSERT` into the table failed with "permission denied for sequence" the moment the test tried to post a ledger entry. Fixed both narrowly (an explicit `GRANT` on the new sequence) and at the root cause (`ALTER DEFAULT PRIVILEGES ... GRANT ... ON SEQUENCES`, so no future migration adding a serial/bigserial column hits this again). Applied to the dev database directly (the migration had already run once) and folded into `0016`'s script for any future fresh install.
 
+## Phase 18 — Offline Outbox Review Screen
+
+Phase 16 documented a known gap: a `FAILED` sale intent had no UI at all — it
+just sat invisibly in the local database. This phase adds `OutboxScreen`,
+reachable from the sync icon on the search screen (which now navigates
+there instead of syncing blindly on tap), listing every outbox entry
+(PENDING/FAILED/SYNCED) with its own manual sync button and a Retry action
+on FAILED entries.
+
+| Area | Status | Evidence |
+|---|---|---|
+| `LocalDatabase.allOutboxEntries()` / `retryInvoice()` (both implementations) | **VERIFIED** | New `local_db_test.dart` case: all three statuses returned correctly, and `retryInvoice` verified to be a no-op on PENDING/SYNCED entries — only a FAILED entry is ever reset |
+| `OutboxScreen`: status list, per-entry error message, Retry re-enqueues and re-syncs immediately | **VERIFIED** | 3 widget tests (`test/outbox_screen_test.dart`) covering the empty state, a FAILED entry's Retry succeeding, and the manual Sync Now button |
+| Live on the emulator | **VERIFIED, live** | Queued a sale offline, opened the outbox screen while still offline and saw it listed PENDING alongside an earlier session's SYNCED entry with its real invoice number; re-enabling connectivity triggered the existing automatic connectivity-based sync (Phase 16) before the manual sync button was even tapped — confirmed the entry became SYNCED as `INV-2627-00013` in the live database, and a subsequent manual sync correctly reported "Nothing to sync" |
+
+No new bugs found — this phase closed a documented UI gap rather than surfacing a defect.
+
 ## Not Yet Started
 
 Customer/supplier aging (30/60/90-day buckets) and margin reports,
@@ -379,8 +396,7 @@ readable now — Phase 17 — but a receipt-entry screen posting a real
 `RECEIPT` row doesn't exist yet, so paying down a balance still requires
 direct SQL/API), idempotency/outbox infrastructure for external side
 effects (printer/WhatsApp), the rest of the Flutter app (supplier ledger
-screen, procurement/GRN screens, EOD/reports screens, a settings screen to
-review/retry `FAILED` outbox entries), a WhatsApp provider adapter,
+screen, procurement/GRN screens, EOD/reports screens), a WhatsApp provider adapter,
 hardware adapters (scale/printer/scanner), seed/config workflows, CI/CD,
 the rest of the test suites (E2E/offline/chaos/load/security), backup/DR
 tooling, and the remaining documentation set. These will be built in
@@ -393,7 +409,7 @@ reporting → DevOps).
 
 **NOT READY**, but substantially further along than a first read of "Not Yet
 Started" suggests — that list is what's missing, not a summary of what
-exists. As of Phase 17: the Go backend has verified, tested business domain
+exists. As of Phase 18: the Go backend has verified, tested business domain
 logic for auth/RBAC, product search, inventory/batches, accounting, POS
 sales (cash + credit + credit-limit override), procurement/GRN, returns,
 supplier payables, UPI payment intents + webhooks, contra/buy-back, EOD cash
@@ -402,15 +418,15 @@ with a full ledger/Khata statement endpoint — all covered by integration
 tests against live PostgreSQL and exercised via real HTTP calls. The Flutter
 client is a real running app (not a mock): login, Tamil/phonetic product
 search, cart/checkout with cash and credit tenders, a customer picker, a
-Khata statement screen, and encrypted offline storage with a working
-offline-sale-then-sync path — all verified live on an Android emulator,
-including with connectivity actually disabled.
+Khata statement screen, encrypted offline storage with a working
+offline-sale-then-sync path, and an outbox review/retry screen — all
+verified live on an Android emulator, including with connectivity actually
+disabled.
 
 What's still genuinely missing, and why this isn't production-ready: no
 real payment gateway (sandbox only), no WhatsApp integration, no hardware
 adapters (scanner/scale/printer), no CI/CD pipeline, no aging/margin
 reports, no way to record a Khata receipt from the app itself, several
-Flutter screens still absent (procurement/GRN, EOD/reports, an outbox
-failed-sale review screen), no backup/DR tooling, and the test suite is
-integration + widget level only — no E2E, chaos, load, or security test
-suites exist yet.
+Flutter screens still absent (procurement/GRN, EOD/reports), no backup/DR
+tooling, and the test suite is integration + widget level only — no E2E,
+chaos, load, or security test suites exist yet.

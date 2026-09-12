@@ -6,10 +6,10 @@ import 'package:provider/provider.dart';
 import '../../core/api_error.dart';
 import '../../core/auth_session.dart';
 import '../../core/local_db.dart';
-import '../../core/sync_service.dart';
 import '../auth/generate_pairing_code_screen.dart';
 import '../auth/login_screen.dart';
 import '../khata/khata_customer_list_screen.dart';
+import '../sync/outbox_screen.dart';
 import 'cart_model.dart';
 import 'cart_screen.dart';
 import 'product.dart';
@@ -47,16 +47,11 @@ class _ProductSearchScreenState extends State<ProductSearchScreen> {
     setState(() => _pendingSyncCount = count);
   }
 
-  Future<void> _syncNow() async {
-    final syncService = context.read<SyncService>();
-    final result = await syncService.syncPendingInvoices();
-    if (!mounted) return;
+  Future<void> _openOutbox() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const OutboxScreen()),
+    );
     await _refreshPendingSyncCount();
-    final message = result.synced == 0 && result.failed == 0
-        ? (result.remaining > 0 ? 'Still offline — nothing synced' : 'Nothing to sync')
-        : 'Synced ${result.synced} sale(s)'
-            '${result.failed > 0 ? ', ${result.failed} need review' : ''}';
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
   void _onQueryChanged(String query) {
@@ -118,14 +113,14 @@ class _ProductSearchScreenState extends State<ProductSearchScreen> {
         actions: [
           IconButton(
             key: const Key('sync_button'),
-            tooltip: 'Sync pending sales',
+            tooltip: 'Offline sales outbox',
             icon: Badge(
               key: const Key('pending_sync_badge'),
               label: Text('$_pendingSyncCount'),
               isLabelVisible: _pendingSyncCount > 0,
               child: const Icon(Icons.sync),
             ),
-            onPressed: _syncNow,
+            onPressed: _openOutbox,
           ),
           IconButton(
             key: const Key('khata_button'),

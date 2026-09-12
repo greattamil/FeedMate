@@ -117,6 +117,31 @@ void main() {
       expect(await db.pendingInvoiceCount(), 0);
       expect(await db.pendingInvoices(), isEmpty);
     });
+
+    test('allOutboxEntries returns every status, and retryInvoice resets only a FAILED one', () async {
+      final db = await openTestLocalDatabase();
+      await db.enqueueInvoice(clientTransactionId: 'tx-pending', payloadJson: '{}');
+      await db.enqueueInvoice(clientTransactionId: 'tx-failed', payloadJson: '{}');
+      await db.enqueueInvoice(clientTransactionId: 'tx-synced', payloadJson: '{}');
+      await db.markInvoiceFailed('tx-failed', 'boom');
+      await db.markInvoiceSynced('tx-synced', serverInvoiceNumber: 'INV-0001');
+
+      final all = await db.allOutboxEntries();
+      expect(all, hasLength(3));
+      final statuses = {for (final row in all) row['client_transaction_id']: row['status']};
+      expect(statuses, {'tx-pending': 'PENDING', 'tx-failed': 'FAILED', 'tx-synced': 'SYNCED'});
+
+      // Retrying a PENDING or SYNCED entry must be a no-op — only a FAILED
+      // entry should ever be resurrected back to PENDING.
+      await db.retryInvoice('tx-pending');
+      await db.retryInvoice('tx-synced');
+      expect(await db.pendingInvoiceCount(), 1);
+
+      await db.retryInvoice('tx-failed');
+      expect(await db.pendingInvoiceCount(), 2);
+      final retried = (await db.pendingInvoices()).firstWhere((r) => r['client_transaction_id'] == 'tx-failed');
+      expect(retried['last_error'], isNull);
+    });
   });
 
   group('generic cache', () {

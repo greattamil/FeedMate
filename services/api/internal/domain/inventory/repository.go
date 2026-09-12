@@ -37,19 +37,23 @@ type Batch struct {
 // the caller's transaction. This is the entry point used by GRN posting and
 // controlled opening-stock workflows (never a bare stock_balances edit).
 func CreateBatch(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, b *Batch, movementType, sourceType string, sourceID *uuid.UUID, deviceID, userID *uuid.UUID) error {
+	// available_qty starts at 0 here and is set to received_qty exclusively by
+	// the PostStockMovement call below (its batches.available_qty UPDATE) —
+	// PostStockMovement is documented as the only function that should ever
+	// change inventory, so seeding available_qty directly in this INSERT as
+	// well would double-count the receipt the moment the movement posts.
 	row := tx.QueryRow(ctx, `
 		INSERT INTO batches (
 			tenant_id, product_id, supplier_id, batch_code, manufacture_date, expiry_date,
 			received_date, received_qty, available_qty, received_uom_id, unit_cost, location_id,
 			quality_status, status
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8,$9,$10,$11,$12,'ACTIVE')
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,0,$9,$10,$11,$12,'ACTIVE')
 		RETURNING id, status
 	`, tenantID, b.ProductID, b.SupplierID, b.BatchCode, b.ManufactureDate, b.ExpiryDate,
 		b.ReceivedDate, b.ReceivedQty, b.ReceivedUOMID, b.UnitCost, b.LocationID, b.QualityStatus)
 	if err := row.Scan(&b.ID, &b.Status); err != nil {
 		return err
 	}
-	b.AvailableQty = b.ReceivedQty
 
 	if err := PostStockMovement(ctx, tx, tenantID, StockMovement{
 		ProductID:      b.ProductID,
@@ -67,6 +71,7 @@ func CreateBatch(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, b *Batch, m
 	}); err != nil {
 		return err
 	}
+	b.AvailableQty = b.ReceivedQty
 	return nil
 }
 

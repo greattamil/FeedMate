@@ -107,16 +107,29 @@ so it received the heaviest testing of any module so far.
 ### Real bug found and fixed this session (Phase 4)
 7. **Credit-limit override was silently automatic for any user whose role happened to include the `credit.override` permission** — the first version of the code treated "the caller's JWT carries this permission" as sufficient authorization to bypass a customer's credit limit, with no explicit per-sale decision and no recorded reason. In practice this meant any Owner-role POS session (which reasonably holds every permission) could blow through a customer's credit limit with zero friction and zero audit trail explaining why — directly contradicting PRD 10.1 ("over-limit credit requires configured owner/manager approval and records approver identity/reason"). Caught by manually testing a 40-bag credit sale against a ₹5,000 limit and watching it succeed silently. Fixed by requiring the client to explicitly send `override_credit_limit: true` plus a non-empty `override_reason`; the handler still checks the permission, but the permission alone is no longer sufficient. The override reason is now recorded in a dedicated `CREDIT_OVERRIDE` audit log entry and in the customer ledger description. Covered by three permanent integration test cases (rejected without override, succeeds with reasoned override + audit trail verified, rejected if override requested without a reason).
 
+## Phase 5 — Procurement: GRN with Mandatory Tare Validation
+
+| Area | Status | Evidence |
+|---|---|---|
+| GRN posting (atomic: batch creation, stock receipt, supplier payable, balanced journal) | **VERIFIED** | `internal/domain/procurement/service.go`; integration-tested against the live DB |
+| Tare calculation — both COUNT_BASED (bag count × standard tare/bag) and MEASURED methods | **VERIFIED** | `internal/domain/procurement/tare.go`; `CalculateTare` never assumes a tare value without an explicit method (PRD A7) |
+| Tare threshold enforcement, rejected by default, explicit reasoned override | **VERIFIED** | Over-threshold GRN rejected by default; succeeds only with `override_tare` + reason, gated on `grn.override_tare` permission, and produces a `TARE_OVERRIDE` audit entry — same explicit-override pattern as the POS credit-limit fix |
+| Negative/implausible net weight rejected | **VERIFIED** | A GRN with tare heavier than gross weight is rejected outright |
+| Rejected/damaged/quarantined receipts never enter sellable stock | **VERIFIED** | A fully `REJECTED` GRN line posts (for traceability) but the resulting batch is immediately `QUARANTINED`, and `available_qty` for the product stays zero |
+| Supplier payable ledger (liability convention: credit increases payable) | **VERIFIED** | `internal/domain/supplier`; confirmed the outstanding payable after a GRN matches the exact received value |
+
+### Real bug found and fixed this session (Phase 5)
+8. **Inventory double-counted every batch receipt**: `inventory.CreateBatch` set `batches.available_qty` directly in its INSERT (to `received_qty`) *and* then called `PostStockMovement`, which — per its own documented contract of being "the only function that should ever change inventory" — also runs `UPDATE batches SET available_qty = available_qty + <received_qty>`. The result: every batch ever created through the normal GRN path silently started with **double** its real received quantity in `available_qty` (though `stock_movements`, the authoritative ledger, was correct throughout — only the projection was wrong). This had not been caught earlier because the POS test fixtures seeded batches with raw SQL `INSERT`s that bypassed `CreateBatch` entirely; it was only caught once GRN posting — which is the real, only intended way batches get created — was exercised end-to-end and the resulting quantity was checked against the DB rather than just checking that the call succeeded. Fixed by inserting `available_qty` as `0` and letting `PostStockMovement`'s own update be the single source of the increment, consistent with the comment already on that function. Covered by an integration test that asserts the exact received quantity, not just success/failure.
+
 ## Not Yet Started
 
-Remaining business domain modules (procurement/GRN with tare validation,
-sales returns/refunds, payment/UPI integration, contra/buy-back, cash
-sessions/EOD, reports/dashboards), idempotency/outbox infrastructure for
-external side effects (printer/WhatsApp), Flutter app (offline-first,
-SQLCipher, POS UI), payment/GST/WhatsApp provider adapters, hardware
-adapters (scale/printer/scanner), seed/config workflows, CI/CD, the rest of
-the test suites (E2E/offline/chaos/load), backup/DR tooling, and the
-remaining documentation set. These will be built in subsequent sessions, in the
+Remaining business domain modules (sales returns/refunds, payment/UPI
+integration, contra/buy-back, cash sessions/EOD, reports/dashboards),
+idempotency/outbox infrastructure for external side effects (printer/
+WhatsApp), Flutter app (offline-first, SQLCipher, POS UI), payment/GST/
+WhatsApp provider adapters, hardware adapters (scale/printer/scanner), seed/
+config workflows, CI/CD, the rest of the test suites (E2E/offline/chaos/
+load), backup/DR tooling, and the remaining documentation set. These will be built in subsequent sessions, in the
 priority order set by the master specification (security → financial
 integrity → tenant isolation → inventory → payments → compliance → offline
 sync → API → backend → Flutter → hardware → UI → reporting → DevOps).

@@ -192,20 +192,55 @@ Every report here reads directly from the same authoritative tables every other 
 
 No new bugs found; all 4 tests passed on the first run.
 
+## Phase 11 — Flutter Client (Online Vertical Slice)
+
+This is the first Flutter work in the project: a real, running mobile app
+that talks to the real Go backend. It intentionally does **not** yet include
+offline-first storage (SQLCipher) — see the gap note below — so it should be
+understood as "online-only POS foundation," not the full offline client the
+PRD describes.
+
+| Area | Status | Evidence |
+|---|---|---|
+| Project scaffold (Android + Windows targets) | IMPLEMENTED | `apps/flutter/`; builds cleanly for both |
+| API client with auth-retry-on-401 | **VERIFIED** | `lib/core/api_client.dart`; exercised for real against the live Go backend |
+| Secure token storage, dependency-injectable for testing | **VERIFIED** | `lib/core/secure_storage.dart`; the DI seam this required (see bug below) is what made the test suite actually testable at all |
+| Login screen + product search screen | **VERIFIED** | Both screens exercised via widget tests (mocked HTTP) and via a real end-to-end run |
+| **Real end-to-end test: Android emulator → live Go API → live PostgreSQL** | **VERIFIED** | `integration_test/app_test.dart`, run twice for a clean confirmation: real login against the seeded dev fixture, then a real product (created via `curl` against the live API) found through real product search on-device |
+| `flutter analyze` clean, `flutter test` (4/4) passing | **VERIFIED** | Both run to completion with zero issues |
+
+### Real bugs found and fixed this session (Phase 11)
+9. **Widget tests hung indefinitely on `pumpAndSettle`**: `SecureStorage` wrapped `FlutterSecureStorage` directly with no way to substitute it, and that plugin's native platform channel isn't available under `flutter test` — every token read/write call never resolved, silently hanging any test that touched auth. Fixed by extracting a `KeyValueStore` interface with a `PlatformSecureKeyValueStore` (production) and `InMemoryKeyValueStore` (test) implementation, and making `SecureStorage` accept either via constructor injection. This is the same dependency-injection lesson already learned twice on the Go backend (the dual-pool database fix, the claims-context fix) — recurring here on the client for the identical underlying reason: hard-wiring a concrete implementation makes correct behavior untestable.
+10. **A genuine, user-facing financial display bug**: `Text('₹${p.sellingPrice}')` used `Decimal.toString()` directly, which strips trailing zeros — a ₹1200.00 price rendered as "₹1200" instead of "₹1200.00". This is exactly the kind of formatting inconsistency the PRD's numeric-precision rules exist to prevent, and it would have shipped to real users had the widget test not asserted the exact expected string rather than just "a price is shown somewhere." Fixed by using `toStringAsFixed(2)` for all currency display.
+
+### Real environment issues found and resolved, not code bugs
+- The Windows desktop build failed (`flutter_secure_storage_windows` needs the ATL headers, which this machine's Visual Studio Build Tools installation doesn't include) — a genuine toolchain gap, not fixed; Windows desktop testing was abandoned in favor of the Android emulator target, which is a fully valid and arguably more representative target for this shop's actual hardware anyway.
+- The Android emulator's virtual disk was 94% full and rejected the app install (`INSTALL_FAILED_INSUFFICIENT_STORAGE`); resolved by wiping the disposable dev AVD's data (no user work was on it).
+- Android blocks cleartext (plain HTTP) traffic by default for apps targeting recent API levels, which silently prevented the app from ever reaching the local dev backend. Fixed correctly and narrowly: `android:usesCleartextTraffic="true"` was added **only** to the debug-variant manifest (`android/app/src/debug/AndroidManifest.xml`), which is never merged into a release build — production must and will use HTTPS.
+- A real device has no way to know it should present the specific device UUID a backend fixture expects (there is no self-service device-registration flow yet — see gaps below); the end-to-end test needed the same `SecureStorage` DI seam to pre-seed a known device UUID matching a fixture already registered via the admin path, mirroring how backend integration tests seed their own fixtures.
+
+### Known gaps in this phase
+- **No offline storage.** SQLCipher-backed local persistence (products, prices, customers, credit snapshots, pending invoices, sync queue — PRD 14.1) is not implemented. The app is online-only: every screen requires a live connection to the backend.
+- **No device self-registration flow.** Devices must currently be created via the admin/SQL path exactly as backend integration tests do; there is no in-app "register this device" step a real shop could use standalone.
+- **No POS cart / invoice finalization screen yet.** Product search is wired up; turning search results into a cart and calling `POST /api/v1/pos/invoices` is the natural next step.
+- **No hardware integration** (barcode scanner as HID input, weighing scale, ESC/POS printer).
+
 ## Not Yet Started
 
 Customer/supplier aging (30/60/90-day buckets) and margin reports,
 per-device cash session tracking (schema exists, not wired up), a real
 payment provider adapter (production gateway credentials are the external
-dependency — the interface and sandbox are done),
-idempotency/outbox infrastructure for external side effects (printer/
-WhatsApp), Flutter app (offline-first, SQLCipher, POS UI), payment/GST/
-WhatsApp provider adapters, hardware adapters (scale/printer/scanner), seed/
-config workflows, CI/CD, the rest of the test suites (E2E/offline/chaos/
-load), backup/DR tooling, and the remaining documentation set. These will be built in subsequent sessions, in the
-priority order set by the master specification (security → financial
-integrity → tenant isolation → inventory → payments → compliance → offline
-sync → API → backend → Flutter → hardware → UI → reporting → DevOps).
+dependency — the interface and sandbox are done), idempotency/outbox
+infrastructure for external side effects (printer/WhatsApp), the rest of the
+Flutter app (offline-first SQLCipher storage, POS cart/checkout screens,
+device self-registration, Khata/customer screens, procurement/GRN screens,
+EOD/reports screens), WhatsApp provider adapter, hardware adapters (scale/
+printer/scanner), seed/config workflows, CI/CD, the rest of the test suites
+(E2E/offline/chaos/load), backup/DR tooling, and the remaining documentation
+set. These will be built in subsequent sessions, in the priority order set
+by the master specification (security → financial integrity → tenant
+isolation → inventory → payments → compliance → offline sync → API →
+backend → Flutter → hardware → UI → reporting → DevOps).
 
 ## Production Readiness
 

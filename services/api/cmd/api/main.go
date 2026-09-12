@@ -15,6 +15,7 @@ import (
 	"github.com/andipatti/feedmate/services/api/internal/config"
 	"github.com/andipatti/feedmate/services/api/internal/dbctx"
 	"github.com/andipatti/feedmate/services/api/internal/domain/contra"
+	"github.com/andipatti/feedmate/services/api/internal/domain/customer"
 	"github.com/andipatti/feedmate/services/api/internal/domain/devicepairing"
 	"github.com/andipatti/feedmate/services/api/internal/domain/eod"
 	"github.com/andipatti/feedmate/services/api/internal/domain/identity"
@@ -59,6 +60,7 @@ func main() {
 	reportsSvc := reports.NewService(db)
 	locationSvc := location.NewService(db)
 	devicePairingSvc := devicepairing.NewService(db)
+	customerSvc := customer.NewService(db)
 
 	var provider paymentprovider.Provider
 	switch cfg.PaymentProvider {
@@ -82,6 +84,7 @@ func main() {
 	reportsHandlers := &httpapi.ReportsHandlers{Reports: reportsSvc}
 	locationHandlers := &httpapi.LocationHandlers{Location: locationSvc}
 	deviceHandlers := &httpapi.DeviceHandlers{DevicePairing: devicePairingSvc}
+	customerHandlers := &httpapi.CustomerHandlers{Customer: customerSvc}
 
 	r := chi.NewRouter()
 	r.Use(appmw.RequestID)
@@ -140,7 +143,12 @@ func main() {
 			r.With(appmw.RequirePermission("report.view")).Get("/reports/customer-balances", reportsHandlers.CustomerBalances)
 			r.With(appmw.RequirePermission("report.view")).Get("/reports/eod-history", reportsHandlers.EODHistory)
 
-			// Further authenticated routes (customers, inventory, etc.) are
+			r.Get("/customers", customerHandlers.List)
+			r.Get("/customers/{id}", customerHandlers.Get)
+			r.With(appmw.RequirePermission("credit.configure")).Post("/customers", customerHandlers.Create)
+			r.With(appmw.RequirePermission("credit.configure")).Put("/customers/{id}/credit-limit", customerHandlers.SetCreditLimit)
+
+			// Further authenticated routes (inventory, suppliers, etc.) are
 			// registered here as each domain module is implemented.
 		})
 	})

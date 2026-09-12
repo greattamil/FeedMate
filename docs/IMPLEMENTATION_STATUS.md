@@ -273,9 +273,39 @@ a row. This phase builds the sanctioned self-service path.
 ### A systemic finding, investigated to its root cause rather than left as a one-off
 Chasing bug #13 led to discovering that **every integration test's tenant cleanup has been silently failing all session**: `device_pairing_codes.tenant_id` (and every other tenant-owned table) references `tenants(id)` without `ON DELETE CASCADE`, so the `t.Cleanup(() => DELETE FROM tenants WHERE id = ...)` pattern used throughout every test file in this project raises a foreign-key violation on every single run — an error every one of those cleanup functions silently discards (`_ = db.WithAdminTx(...)`). The dev database has accumulated 354 orphaned test tenants as a result. This does **not** corrupt any test's correctness (each test generates a fresh random tenant UUID, so leftover rows never collide with a new run) — it only affects a table with a *global*, non-tenant-scoped unique constraint (`code`), which is exactly what bug #13 hit. Deliberately **not fixed** by adding `ON DELETE CASCADE` to the production schema: that would make it trivially easy to mass-delete a tenant's entire financial history with a single statement, which directly contradicts this project's own "never make financial data casually deletable" principle — the cascade would only ever fire from a test, but the schema can't tell in advance which caller it's protecting against. The correct fix is a dedicated, explicit test-teardown helper that deletes child rows in dependency order (or simply resetting the dev database via `docker compose down -v` periodically) — recorded here as a known gap rather than silently living with it.
 
+## Phase 14 — Customer Master HTTP API
+
+The `customer` domain package already existed (used internally by `pos`,
+`returns`, `payment`, `contra` to post ledger entries), but had **no HTTP
+routes at all** — there was no way to create a customer, look one up, search
+for one, or set a credit limit through the API. Found by grepping `main.go`
+for customer routes and finding none, in direct response to "implement all,
+never miss any single piece."
+
+| Area | Status | Evidence |
+|---|---|---|
+| `POST /api/v1/customers` (create, gated on `credit.configure`) | **VERIFIED** | Real HTTP call created `SMOKE01` against the live server; integration test also covers duplicate `customer_code` rejection |
+| `GET /api/v1/customers?q=` (search by name/code/phone) | **VERIFIED** | Real HTTP call + integration test covering name-substring, phone-substring, and unfiltered listing |
+| `GET /api/v1/customers/{id}` (customer + credit profile + live outstanding balance) | **VERIFIED** | Real HTTP call returned `credit_limit`, `risk_status`, `outstanding_balance`, `available_credit` computed from the ledger, not a stored field |
+| `PUT /api/v1/customers/{id}/credit-limit` (gated on `credit.configure`, audit-logged) | **VERIFIED** | Real HTTP call changed `SMOKE01`'s limit 2000.00 → 5000.00 against the live server, confirmed via a follow-up GET; integration test covers negative-limit rejection and unknown-customer rejection |
+| `customer.Repository`/`Service` extended with `Create`, `List`, `SetCreditLimit` | **VERIFIED** | 4 new integration tests, all passing against live Postgres; full `go test -tags=integration ./...` re-run clean afterward (no regressions in the other 9 domain packages) |
+
+No new bugs surfaced in this phase. Reused the existing `credit.configure`
+permission for both customer creation and credit-limit changes rather than
+inventing a new `customer.manage` permission not present in the seeded
+catalogue (migration 0002) — a deliberate, documented scope choice rather
+than an oversight.
+
+Server restarted with the new routes live at `127.0.0.1:8081` (the address
+the Android emulator's app talks to via `10.0.2.2:8081`).
+
 ## Not Yet Started
 
-Customer/supplier aging (30/60/90-day buckets) and margin reports,
+The Flutter POS cart still only supports a single full-amount CASH tender —
+there is no customer picker wired into checkout yet to actually exercise a
+CREDIT sale end-to-end from the client (the backend has supported this since
+Phase 4). Offline-first SQLCipher storage (repeatedly mandated as P0 in the
+architecture spec) has not been started. Customer/supplier aging (30/60/90-day buckets) and margin reports,
 per-device cash session tracking (schema exists, not wired up), a real
 payment provider adapter (production gateway credentials are the external
 dependency — the interface and sandbox are done), idempotency/outbox

@@ -1,0 +1,192 @@
+//go:build integration
+
+package customer_test
+
+import (
+	"context"
+	"errors"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/shopspring/decimal"
+
+	"github.com/andipatti/feedmate/services/api/internal/dbctx"
+	"github.com/andipatti/feedmate/services/api/internal/domain/customer"
+)
+
+func mustEnv(t *testing.T, key string) string {
+	t.Helper()
+	v := os.Getenv(key)
+	if v == "" {
+		t.Skipf("%s not set; skipping integration test", key)
+	}
+	return v
+}
+
+func connectTest(t *testing.T) *dbctx.DB {
+	t.Helper()
+	dsn := mustEnv(t, "DATABASE_URL")
+	adminDSN := mustEnv(t, "DATABASE_ADMIN_URL")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	db, err := dbctx.Connect(ctx, dsn, adminDSN)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	return db
+}
+
+func seedTenant(t *testing.T, db *dbctx.DB) uuid.UUID {
+	t.Helper()
+	tenantID := uuid.New()
+	err := db.WithAdminTx(context.Background(), func(tx pgx.Tx) error {
+		_, err := tx.Exec(context.Background(), `INSERT INTO tenants (id, legal_name, address_line1, city, state_code) VALUES ($1,'Customer Test Tenant','1 St','Town','TN')`, tenantID)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("seed tenant: %v", err)
+	}
+	// Cleanup in dependency order rather than a bare tenant DELETE, which
+	// silently no-ops under FK constraints without ON DELETE CASCADE (see
+	// docs/IMPLEMENTATION_STATUS.md Phase 13's systemic-cleanup finding) —
+	// deleting child rows first here actually works instead of leaking.
+	t.Cleanup(func() {
+		_ = db.WithAdminTx(context.Background(), func(tx pgx.Tx) error {
+			ctx := context.Background()
+			for _, stmt := range []string{
+				`DELETE FROM customer_ledger_entries WHERE tenant_id = $1`,
+				`DELETE FROM customer_credit_profiles WHERE tenant_id = $1`,
+				`DELETE FROM customers WHERE tenant_id = $1`,
+				`DELETE FROM tenants WHERE id = $1`,
+			} {
+				if _, err := tx.Exec(ctx, stmt, tenantID); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	})
+	return tenantID
+}
+
+func TestCustomerCreateAndFetch(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	tenantID := seedTenant(t, db)
+	svc := customer.NewService(db)
+
+	creditLimit := decimal.RequireFromString("5000.00")
+	created, err := svc.Create(context.Background(), tenantID, customer.CreateInput{
+		CustomerCode: "FARM001", Name: "Test Farmer", LocalName: "சோதனை விவசாயி",
+		Phone: "9876543210", CustomerType: "FARMER", CreditLimit: &creditLimit,
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if created.Status != "ACTIVE" {
+		t.Fatalf("expected newly created customer to be ACTIVE, got %s", created.Status)
+	}
+
+	fetched, profile, balance, err := svc.GetByID(context.Background(), tenantID, created.ID)
+	if err != nil {
+		t.Fatalf("get by id: %v", err)
+	}
+	if fetched.Name != "Test Farmer" {
+		t.Fatalf("expected name 'Test Farmer', got %q", fetched.Name)
+	}
+	if !profile.CreditLimit.Equal(creditLimit) {
+		t.Fatalf("expected credit limit %s, got %s", creditLimit, profile.CreditLimit)
+	}
+	if !balance.IsZero() {
+		t.Fatalf("expected zero balance for a brand new customer, got %s", balance)
+	}
+}
+
+func TestCustomerCreate_DuplicateCodeRejected(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	tenantID := seedTenant(t, db)
+	svc := customer.NewService(db)
+
+	_, err := svc.Create(context.Background(), tenantID, customer.CreateInput{CustomerCode: "DUP001", Name: "First"})
+	if err != nil {
+		t.Fatalf("first create: %v", err)
+	}
+	_, err = svc.Create(context.Background(), tenantID, customer.CreateInput{CustomerCode: "DUP001", Name: "Second"})
+	if err == nil {
+		t.Fatal("expected duplicate customer_code to be rejected")
+	}
+}
+
+func TestCustomerList_SearchesByNameCodeAndPhone(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	tenantID := seedTenant(t, db)
+	svc := customer.NewService(db)
+
+	if _, err := svc.Create(context.Background(), tenantID, customer.CreateInput{CustomerCode: "SEARCH01", Name: "Findable Farmer", Phone: "9998887770"}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := svc.Create(context.Background(), tenantID, customer.CreateInput{CustomerCode: "OTHER01", Name: "Someone Else", Phone: "1112223330"}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	byName, err := svc.List(context.Background(), tenantID, "Findable", 10)
+	if err != nil {
+		t.Fatalf("list by name: %v", err)
+	}
+	if len(byName) != 1 || byName[0].Name != "Findable Farmer" {
+		t.Fatalf("expected exactly the matching customer by name, got %+v", byName)
+	}
+
+	byPhone, err := svc.List(context.Background(), tenantID, "9998887770", 10)
+	if err != nil {
+		t.Fatalf("list by phone: %v", err)
+	}
+	if len(byPhone) != 1 || byPhone[0].CustomerCode != "SEARCH01" {
+		t.Fatalf("expected exactly the matching customer by phone, got %+v", byPhone)
+	}
+
+	all, err := svc.List(context.Background(), tenantID, "", 10)
+	if err != nil {
+		t.Fatalf("list all: %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("expected 2 customers with an empty query, got %d", len(all))
+	}
+}
+
+func TestCustomerSetCreditLimit_RequiresExistingCustomerAndNonNegative(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	tenantID := seedTenant(t, db)
+	svc := customer.NewService(db)
+	userID := uuid.New()
+
+	created, err := svc.Create(context.Background(), tenantID, customer.CreateInput{CustomerCode: "CREDIT01", Name: "Credit Test"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	if err := svc.SetCreditLimit(context.Background(), tenantID, created.ID, userID, decimal.RequireFromString("10000.00")); err != nil {
+		t.Fatalf("set credit limit: %v", err)
+	}
+	_, profile, _, err := svc.GetByID(context.Background(), tenantID, created.ID)
+	if err != nil {
+		t.Fatalf("get by id: %v", err)
+	}
+	if !profile.CreditLimit.Equal(decimal.RequireFromString("10000.00")) {
+		t.Fatalf("expected updated credit limit 10000.00, got %s", profile.CreditLimit)
+	}
+
+	if err := svc.SetCreditLimit(context.Background(), tenantID, created.ID, userID, decimal.RequireFromString("-100.00")); !errors.Is(err, customer.ErrValidation) {
+		t.Fatalf("expected ErrValidation for negative credit limit, got: %v", err)
+	}
+
+	if err := svc.SetCreditLimit(context.Background(), tenantID, uuid.New(), userID, decimal.RequireFromString("100.00")); !errors.Is(err, customer.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for a nonexistent customer, got: %v", err)
+	}
+}

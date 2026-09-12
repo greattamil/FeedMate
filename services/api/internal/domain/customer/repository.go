@@ -12,21 +12,105 @@ import (
 var ErrNotFound = errors.New("customer not found")
 
 type Customer struct {
-	ID     uuid.UUID
-	Name   string
-	Status string
+	ID            uuid.UUID
+	CustomerCode  string
+	Name          string
+	LocalName     *string
+	Phone         *string
+	WhatsAppPhone *string
+	CustomerType  string
+	TierID        *uuid.UUID
+	Status        string
 }
 
 func GetByID(ctx context.Context, tx pgx.Tx, id uuid.UUID) (*Customer, error) {
-	row := tx.QueryRow(ctx, `SELECT id, name, status FROM customers WHERE id = $1`, id)
+	row := tx.QueryRow(ctx, `
+		SELECT id, customer_code, name, local_name, phone, whatsapp_phone, customer_type, tier_id, status
+		FROM customers WHERE id = $1
+	`, id)
+	return scanCustomer(row)
+}
+
+func scanCustomer(row pgx.Row) (*Customer, error) {
 	var c Customer
-	if err := row.Scan(&c.ID, &c.Name, &c.Status); err != nil {
+	if err := row.Scan(&c.ID, &c.CustomerCode, &c.Name, &c.LocalName, &c.Phone, &c.WhatsAppPhone, &c.CustomerType, &c.TierID, &c.Status); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, err
 	}
 	return &c, nil
+}
+
+// Create inserts a new customer. If creditLimit is non-nil, a matching
+// customer_credit_profiles row is created in the same statement group so a
+// credit-eligible customer (e.g. a registered farmer) never has a moment
+// where its credit limit is undefined — GetCreditProfile's zero-limit
+// fallback exists for customers that were never meant to have credit, not as
+// a substitute for actually configuring one.
+func Create(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, c *Customer, creditLimit *decimal.Decimal) error {
+	row := tx.QueryRow(ctx, `
+		INSERT INTO customers (tenant_id, customer_code, name, local_name, phone, whatsapp_phone, customer_type, tier_id, status)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'ACTIVE')
+		RETURNING id, status
+	`, tenantID, c.CustomerCode, c.Name, c.LocalName, c.Phone, c.WhatsAppPhone, c.CustomerType, c.TierID)
+	if err := row.Scan(&c.ID, &c.Status); err != nil {
+		return err
+	}
+	if creditLimit != nil {
+		_, err := tx.Exec(ctx, `
+			INSERT INTO customer_credit_profiles (customer_id, tenant_id, credit_limit)
+			VALUES ($1, $2, $3)
+		`, c.ID, tenantID, *creditLimit)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// List returns active customers, optionally filtered by a case-insensitive
+// substring match on name/customer_code/phone (for a customer picker's
+// search box). Ordered by name for a stable, predictable picker list.
+func List(ctx context.Context, tx pgx.Tx, query string, limit int) ([]Customer, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT id, customer_code, name, local_name, phone, whatsapp_phone, customer_type, tier_id, status
+		FROM customers
+		WHERE status = 'ACTIVE'
+		  AND ($1 = '' OR name ILIKE '%' || $1 || '%' OR customer_code ILIKE '%' || $1 || '%' OR phone ILIKE '%' || $1 || '%')
+		ORDER BY name
+		LIMIT $2
+	`, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []Customer
+	for rows.Next() {
+		var c Customer
+		if err := rows.Scan(&c.ID, &c.CustomerCode, &c.Name, &c.LocalName, &c.Phone, &c.WhatsAppPhone, &c.CustomerType, &c.TierID, &c.Status); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// SetCreditLimit creates or updates a customer's credit profile. Callers must
+// gate this behind the credit.configure permission — see PRD 10.1: credit
+// limits are master data governed by explicit authorization, never something
+// a cashier can silently change mid-sale.
+func SetCreditLimit(ctx context.Context, tx pgx.Tx, tenantID, customerID uuid.UUID, creditLimit decimal.Decimal, updatedByUserID uuid.UUID) error {
+	_, err := tx.Exec(ctx, `
+		INSERT INTO customer_credit_profiles (customer_id, tenant_id, credit_limit, updated_by_user_id, updated_at)
+		VALUES ($1, $2, $3, $4, now())
+		ON CONFLICT (customer_id) DO UPDATE SET credit_limit = EXCLUDED.credit_limit, updated_by_user_id = EXCLUDED.updated_by_user_id, updated_at = now()
+	`, customerID, tenantID, creditLimit, updatedByUserID)
+	return err
 }
 
 // CreditProfile mirrors customer_credit_profiles. A customer with no row here

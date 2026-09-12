@@ -15,6 +15,7 @@ import (
 	"github.com/andipatti/feedmate/services/api/internal/config"
 	"github.com/andipatti/feedmate/services/api/internal/dbctx"
 	"github.com/andipatti/feedmate/services/api/internal/domain/contra"
+	"github.com/andipatti/feedmate/services/api/internal/domain/eod"
 	"github.com/andipatti/feedmate/services/api/internal/domain/identity"
 	"github.com/andipatti/feedmate/services/api/internal/domain/payment"
 	"github.com/andipatti/feedmate/services/api/internal/domain/pos"
@@ -51,6 +52,7 @@ func main() {
 	procurementSvc := procurement.NewService(db)
 	returnsSvc := returns.NewService(db)
 	contraSvc := contra.NewService(db)
+	eodSvc := eod.NewService(db)
 
 	var provider paymentprovider.Provider
 	switch cfg.PaymentProvider {
@@ -70,6 +72,7 @@ func main() {
 	returnsHandlers := &httpapi.ReturnsHandlers{Returns: returnsSvc}
 	paymentHandlers := &httpapi.PaymentHandlers{Payment: paymentSvc}
 	contraHandlers := &httpapi.ContraHandlers{Contra: contraSvc}
+	eodHandlers := &httpapi.EODHandlers{EOD: eodSvc}
 
 	r := chi.NewRouter()
 	r.Use(appmw.RequestID)
@@ -107,8 +110,13 @@ func main() {
 
 			r.With(appmw.RequirePermission("contra.approve")).Post("/contra", contraHandlers.PostContra)
 
-			// Further authenticated routes (customers, inventory, EOD, etc.)
-			// are registered here as each domain module is implemented.
+			r.With(appmw.RequirePermission("cash.eod_close")).Post("/eod/open", eodHandlers.OpenSession)
+			r.With(appmw.RequirePermission("cash.eod_close")).Post("/eod/close", eodHandlers.CloseSession)
+			r.With(appmw.RequirePermission("eod.reopen")).Post("/eod/reopen", eodHandlers.ReopenSession)
+			r.With(appmw.RequirePermission("cash.eod_close")).Get("/eod", eodHandlers.GetSession)
+
+			// Further authenticated routes (customers, inventory, reports,
+			// etc.) are registered here as each domain module is implemented.
 		})
 	})
 

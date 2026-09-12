@@ -165,11 +165,25 @@ No new bugs were found in this phase; all 5 webhook integration tests (including
 
 No new bugs found; all 3 tests passed on the first run, reusing the same two-pass validate-then-write structure and the same quality-status quarantine pattern established in procurement and returns.
 
+## Phase 9 — Cash Sessions / End-of-Day Reconciliation
+
+| Area | Status | Evidence |
+|---|---|---|
+| EOD open/close/reopen lifecycle | **VERIFIED** | `internal/domain/eod`; 6 integration tests, all passing against a live DB |
+| Expected cash derived from the accounting journal, not a separate ledger | **VERIFIED** | `GetCashJournalTotals` sums the CASH account's debits (sales) and credits (refunds) straight from `journal_lines`/`journal_entries` for the business date — there is no second, independently-editable cash figure that could drift from the real postings (PRD 48) |
+| Cross-domain reconciliation: a real POS cash sale closes with zero variance | **VERIFIED** | Sold 2 bags for cash (₹2520), closed with exactly ₹3520 (₹1000 opening + ₹2520 sales) counted, variance = 0 |
+| Cash refunds correctly reduce expected cash | **VERIFIED** | Sold 2 bags, returned 1 for cash, expected cash correctly nets to sales minus the refund |
+| Variance requires an explicit reason; matching a reasoned close still succeeds | **VERIFIED** | A ₹60 short till is rejected with no reason, then succeeds once a reason is given, with the variance correctly signed (-60.00) |
+| One EOD session per business date (DB-enforced), double-open/double-close rejected | **VERIFIED** | Relies on `UNIQUE(tenant_id, business_date)` from migration 0001, backed by an explicit application check for a clean error before hitting the constraint |
+| Reopen is a distinct, reasoned, audited operation — never silently allowed | **VERIFIED** | Reopen without a reason rejected; reopen only valid from `CLOSED` status (rejected from `REOPENED` or `OPEN`); produces an `EOD_REOPENED` audit entry |
+
+Cash sessions here are modeled per-tenant-per-business-date rather than per-device/per-drawer — a deliberate scope simplification appropriate for a single-counter shop; multi-device cash session tracking (the `cash_sessions`/`cash_movements` tables already exist in the schema for this) is not yet wired up. No new bugs were found in this phase; all 6 tests passed on the first run.
+
 ## Not Yet Started
 
-Remaining business domain modules (cash sessions/EOD, reports/dashboards), a
-real payment provider adapter (production gateway credentials are the
-external dependency — the interface and sandbox are done),
+Reports/dashboards, per-device cash session tracking (schema exists, not
+wired up), a real payment provider adapter (production gateway credentials
+are the external dependency — the interface and sandbox are done),
 idempotency/outbox infrastructure for external side effects (printer/
 WhatsApp), Flutter app (offline-first, SQLCipher, POS UI), payment/GST/
 WhatsApp provider adapters, hardware adapters (scale/printer/scanner), seed/

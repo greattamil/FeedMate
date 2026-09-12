@@ -179,11 +179,25 @@ No new bugs found; all 3 tests passed on the first run, reusing the same two-pas
 
 Cash sessions here are modeled per-tenant-per-business-date rather than per-device/per-drawer — a deliberate scope simplification appropriate for a single-counter shop; multi-device cash session tracking (the `cash_sessions`/`cash_movements` tables already exist in the schema for this) is not yet wired up. No new bugs were found in this phase; all 6 tests passed on the first run.
 
+## Phase 10 — Reports & Dashboards
+
+| Area | Status | Evidence |
+|---|---|---|
+| Sales summary (gross/discount/tax/net, by tender method) | **VERIFIED** | Two real invoices (one cash, one credit) produced a summary matching the exact expected totals and per-tender breakdown |
+| Stock on hand (aggregated from `batches.available_qty`) | **VERIFIED** | Selling 5 of 50 bags correctly reduced the reported total to 45, read from the same column POS/GRN/returns all maintain |
+| Customer outstanding balances | **VERIFIED** | Zero-balance customers correctly excluded; a customer with an active credit sale correctly appears with the exact ledger-derived balance |
+| EOD history | **VERIFIED** | A closed EOD session correctly appears with its opening cash, status, and figures |
+
+Every report here reads directly from the same authoritative tables every other module writes to (`sales_invoices`, `batches`, `customer_ledger_entries`, `eod_sessions`) — there is no separate, independently-maintained aggregate table that could silently diverge (PRD 50). Deliberately **not** implemented in this pass: full 30/60/90-day customer aging (bucketing by original invoice age requires correctly attributing partial payments/returns back to specific invoices via an allocation-matching algorithm; shipping a naive version risked misattributing partial settlements, so this reports total outstanding only, not age buckets — a documented gap, not a silent one) and product-margin/profitability reports (need a defined costing policy per PRD A16 — FIFO vs weighted-average — which hasn't been configured yet).
+
+No new bugs found; all 4 tests passed on the first run.
+
 ## Not Yet Started
 
-Reports/dashboards, per-device cash session tracking (schema exists, not
-wired up), a real payment provider adapter (production gateway credentials
-are the external dependency — the interface and sandbox are done),
+Customer/supplier aging (30/60/90-day buckets) and margin reports,
+per-device cash session tracking (schema exists, not wired up), a real
+payment provider adapter (production gateway credentials are the external
+dependency — the interface and sandbox are done),
 idempotency/outbox infrastructure for external side effects (printer/
 WhatsApp), Flutter app (offline-first, SQLCipher, POS UI), payment/GST/
 WhatsApp provider adapters, hardware adapters (scale/printer/scanner), seed/

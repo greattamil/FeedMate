@@ -21,6 +21,7 @@ import (
 	"github.com/andipatti/feedmate/services/api/internal/domain/pos"
 	"github.com/andipatti/feedmate/services/api/internal/domain/procurement"
 	"github.com/andipatti/feedmate/services/api/internal/domain/product"
+	"github.com/andipatti/feedmate/services/api/internal/domain/reports"
 	"github.com/andipatti/feedmate/services/api/internal/domain/returns"
 	"github.com/andipatti/feedmate/services/api/internal/httpapi"
 	appmw "github.com/andipatti/feedmate/services/api/internal/middleware"
@@ -53,6 +54,7 @@ func main() {
 	returnsSvc := returns.NewService(db)
 	contraSvc := contra.NewService(db)
 	eodSvc := eod.NewService(db)
+	reportsSvc := reports.NewService(db)
 
 	var provider paymentprovider.Provider
 	switch cfg.PaymentProvider {
@@ -73,6 +75,7 @@ func main() {
 	paymentHandlers := &httpapi.PaymentHandlers{Payment: paymentSvc}
 	contraHandlers := &httpapi.ContraHandlers{Contra: contraSvc}
 	eodHandlers := &httpapi.EODHandlers{EOD: eodSvc}
+	reportsHandlers := &httpapi.ReportsHandlers{Reports: reportsSvc}
 
 	r := chi.NewRouter()
 	r.Use(appmw.RequestID)
@@ -115,8 +118,13 @@ func main() {
 			r.With(appmw.RequirePermission("eod.reopen")).Post("/eod/reopen", eodHandlers.ReopenSession)
 			r.With(appmw.RequirePermission("cash.eod_close")).Get("/eod", eodHandlers.GetSession)
 
-			// Further authenticated routes (customers, inventory, reports,
-			// etc.) are registered here as each domain module is implemented.
+			r.With(appmw.RequirePermission("report.view")).Get("/reports/sales-summary", reportsHandlers.SalesSummary)
+			r.With(appmw.RequirePermission("report.view")).Get("/reports/stock-on-hand", reportsHandlers.StockOnHand)
+			r.With(appmw.RequirePermission("report.view")).Get("/reports/customer-balances", reportsHandlers.CustomerBalances)
+			r.With(appmw.RequirePermission("report.view")).Get("/reports/eod-history", reportsHandlers.EODHistory)
+
+			// Further authenticated routes (customers, inventory, etc.) are
+			// registered here as each domain module is implemented.
 		})
 	})
 

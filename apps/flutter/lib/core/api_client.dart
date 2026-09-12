@@ -41,6 +41,17 @@ class ApiClient {
     return _decodeOrThrow(response);
   }
 
+  /// For endpoints that must work before any login has happened (e.g. device
+  /// registration via a pairing code — see PosApi/DeviceApi) — there is no
+  /// access token to attach yet.
+  Future<Map<String, dynamic>> postUnauthed(String path, Map<String, dynamic> body) async {
+    final response = await _send(
+      (_) => _http.post(_uri(path), headers: {'Content-Type': 'application/json'}, body: jsonEncode(body)),
+      '',
+    );
+    return _decodeOrThrow(response);
+  }
+
   Future<Map<String, dynamic>> refresh({
     required String tenantId,
     required String refreshToken,

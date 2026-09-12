@@ -221,7 +221,7 @@ PRD describes.
 
 ### Known gaps in this phase
 - **No offline storage.** SQLCipher-backed local persistence (products, prices, customers, credit snapshots, pending invoices, sync queue — PRD 14.1) is not implemented. The app is online-only: every screen requires a live connection to the backend.
-- **No device self-registration flow.** Devices must currently be created via the admin/SQL path exactly as backend integration tests do; there is no in-app "register this device" step a real shop could use standalone.
+- **Device self-registration now exists (see Phase 13)** via short-lived pairing codes; the admin/SQL path is no longer the only way to add a device.
 - **POS cart/checkout now exists (see Phase 12)** but only supports a single full-amount CASH tender; no split tenders or customer/Khata selection in the UI yet.
 - **No hardware integration** (barcode scanner as HID input, weighing scale, ESC/POS printer).
 
@@ -243,6 +243,35 @@ No new bugs were found in the backend quote logic (it reused already-tested code
 ### Known gaps in this phase
 - Checkout only supports a single CASH tender for the exact quoted amount. Split tenders (cash+UPI+credit) and a customer picker for Khata/credit sales are not wired into the UI, though the backend fully supports both.
 - No cart persistence — closing the app loses the cart (expected, since there is no offline storage yet).
+
+## Phase 13 — Self-Service Device Pairing
+
+Triggered by a real user hitting "device is not registered" on a fresh
+install — the app correctly generates its own random device UUID on first
+launch (as a real device would), but there was no way for that device to
+ever become known to the backend except an administrator manually inserting
+a row. This phase builds the sanctioned self-service path.
+
+| Area | Status | Evidence |
+|---|---|---|
+| Pairing-code generation (device.manage, tenant-scoped, 10-minute TTL) | **VERIFIED** | `internal/domain/devicepairing`; real HTTP call generated `C7S6C352` |
+| Code redemption creates the device under the correct tenant | **VERIFIED** | Real HTTP redemption returned the correct `tenant_id` and the device row was confirmed `ACTIVE` in the database |
+| A used code cannot be redeemed twice | **VERIFIED** | Real HTTP reuse attempt rejected; also covered by an integration test |
+| An expired code is rejected | **VERIFIED** | Integration test with a code force-expired via direct SQL |
+| An unknown code is rejected | **VERIFIED** | Integration test |
+| Concurrent redemption of the same code — only one can win | **VERIFIED** | Integration test races two goroutines against one code; row-locked via `FOR UPDATE`, exactly one succeeds |
+| Cross-tenant code lookup scoped correctly (the one place an unauthenticated caller legitimately needs cross-tenant resolution) | IMPLEMENTED | Same `WithAdminTx` pattern as login's device resolution — see `devicepairing.Service.RegisterDevice` |
+| Flutter: "Register this device" flow on the login screen | **VERIFIED** | Real device successfully re-registered and logged in on the physical test emulator |
+| Flutter: "Pair a new device" screen for the owner (code display, live countdown, copy-to-clipboard) | IMPLEMENTED | Gated on `device.manage`; not yet exercised by a second physical device, but the underlying endpoint is fully verified |
+| Login screen now displays its own device UUID (PRD §93 support diagnostic) | **VERIFIED** | Read directly off the running emulator via `adb shell uiautomator dump` |
+
+### Real bugs found and fixed this session
+11. **The product-create endpoint never exposed `tax_profile_id`**, discovered while seeding demo data for the user to test with: any product created through the API (as opposed to directly via SQL, which is how every other fixture in this project was seeded) could never actually be sold, since both `Quote` and `FinalizeInvoice` require a tax profile. Fixed by adding the field to the request DTO — the repository and service layers already supported it end to end.
+12. **Every internal server error was being silently discarded** — `WriteError`'s own doc comment claimed internal errors were "logged server-side only," but nothing ever actually logged them. This directly caused a debugging dead-end: a request appeared to fail with a generic 500, and only after adding real logging did it become clear the request had actually failed on a duplicate-SKU constraint from an *earlier, seemingly-failed* attempt that had in fact succeeded (a client-side UTF-8 response-decoding failure had been masking a real success as a failure). Fixed centrally in `WriteError` so every future `CodeInternal` response is logged with its real detail server-side while the client still only ever sees the safe generic message — no call site needs to remember to log.
+13. **A flaky integration test** (`TestDevicePairing_ExpiredCodeRejected`) used a fixed literal pairing code, which is safe in isolation but collides on any second run against a database with leftover state from a prior run.
+
+### A systemic finding, investigated to its root cause rather than left as a one-off
+Chasing bug #13 led to discovering that **every integration test's tenant cleanup has been silently failing all session**: `device_pairing_codes.tenant_id` (and every other tenant-owned table) references `tenants(id)` without `ON DELETE CASCADE`, so the `t.Cleanup(() => DELETE FROM tenants WHERE id = ...)` pattern used throughout every test file in this project raises a foreign-key violation on every single run — an error every one of those cleanup functions silently discards (`_ = db.WithAdminTx(...)`). The dev database has accumulated 354 orphaned test tenants as a result. This does **not** corrupt any test's correctness (each test generates a fresh random tenant UUID, so leftover rows never collide with a new run) — it only affects a table with a *global*, non-tenant-scoped unique constraint (`code`), which is exactly what bug #13 hit. Deliberately **not fixed** by adding `ON DELETE CASCADE` to the production schema: that would make it trivially easy to mass-delete a tenant's entire financial history with a single statement, which directly contradicts this project's own "never make financial data casually deletable" principle — the cascade would only ever fire from a test, but the schema can't tell in advance which caller it's protecting against. The correct fix is a dedicated, explicit test-teardown helper that deletes child rows in dependency order (or simply resetting the dev database via `docker compose down -v` periodically) — recorded here as a known gap rather than silently living with it.
 
 ## Not Yet Started
 

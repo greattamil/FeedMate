@@ -34,6 +34,7 @@ type createProductRequest struct {
 	DefaultPurchaseUOMID string   `json:"default_purchase_uom_id"`
 	BaseInventoryUOMID   string   `json:"base_inventory_uom_id"`
 	HSNCode              string   `json:"hsn_code,omitempty"`
+	TaxProfileID         string   `json:"tax_profile_id,omitempty"`
 	MRP                  string   `json:"mrp,omitempty"`
 	SellingPrice         string   `json:"selling_price,omitempty"`
 	BatchRequired        bool     `json:"batch_required"`
@@ -162,10 +163,18 @@ func (h *ProductHandlers) Create(w http.ResponseWriter, r *http.Request) {
 	if req.HSNCode != "" {
 		in.Product.HSNCode = &req.HSNCode
 	}
+	if req.TaxProfileID != "" {
+		taxProfileID, err := uuid.Parse(req.TaxProfileID)
+		if err != nil {
+			WriteError(w, reqID, CodeValidation, "tax_profile_id must be a valid UUID")
+			return
+		}
+		in.Product.TaxProfileID = &taxProfileID
+	}
 
 	created, err := h.Product.Create(r.Context(), claims.TenantID, in)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to create product")
+		WriteError(w, reqID, CodeInternal, "failed to create product: "+err.Error())
 		return
 	}
 	WriteJSON(w, http.StatusCreated, toProductResponse(created))

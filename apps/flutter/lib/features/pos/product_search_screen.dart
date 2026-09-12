@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../../core/api_client.dart';
 import '../../core/api_error.dart';
 import '../../core/auth_session.dart';
+import '../auth/generate_pairing_code_screen.dart';
 import '../auth/login_screen.dart';
 import 'cart_model.dart';
 import 'cart_screen.dart';
@@ -88,6 +89,17 @@ class _ProductSearchScreenState extends State<ProductSearchScreen> {
       appBar: AppBar(
         title: Text(session.displayName ?? 'Product Search'),
         actions: [
+          if (session.hasPermission('device.manage'))
+            IconButton(
+              key: const Key('pair_device_button'),
+              icon: const Icon(Icons.qr_code_2),
+              tooltip: 'Pair a new device',
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const GeneratePairingCodeScreen()),
+                );
+              },
+            ),
           IconButton(
             key: const Key('cart_button'),
             icon: Badge(

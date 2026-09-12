@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 )
 
@@ -69,6 +70,11 @@ func WriteError(w http.ResponseWriter, requestID string, code ErrorCode, message
 		status = http.StatusInternalServerError
 	}
 	if code == CodeInternal {
+		// The real cause never reaches the client (only a generic, safe
+		// message does) but must not be lost entirely — log it here, the one
+		// place every CodeInternal response passes through, rather than
+		// requiring every call site to remember to log before calling this.
+		slog.Error("internal server error", "request_id", requestID, "detail", message)
 		message = "An internal error occurred. Please retry or contact support with the request ID."
 	}
 	retryable := code == CodeInternal || code == CodePaymentUnknown

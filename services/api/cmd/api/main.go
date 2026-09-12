@@ -18,6 +18,7 @@ import (
 	"github.com/andipatti/feedmate/services/api/internal/domain/pos"
 	"github.com/andipatti/feedmate/services/api/internal/domain/procurement"
 	"github.com/andipatti/feedmate/services/api/internal/domain/product"
+	"github.com/andipatti/feedmate/services/api/internal/domain/returns"
 	"github.com/andipatti/feedmate/services/api/internal/httpapi"
 	appmw "github.com/andipatti/feedmate/services/api/internal/middleware"
 )
@@ -45,12 +46,14 @@ func main() {
 	productSvc := product.NewService(db)
 	posSvc := pos.NewService(db)
 	procurementSvc := procurement.NewService(db)
+	returnsSvc := returns.NewService(db)
 
 	authHandlers := &httpapi.AuthHandlers{Identity: identitySvc}
 	healthHandlers := &httpapi.HealthHandlers{DB: db}
 	productHandlers := &httpapi.ProductHandlers{Product: productSvc}
 	posHandlers := &httpapi.POSHandlers{POS: posSvc}
 	procurementHandlers := &httpapi.ProcurementHandlers{Procurement: procurementSvc}
+	returnsHandlers := &httpapi.ReturnsHandlers{Returns: returnsSvc}
 
 	r := chi.NewRouter()
 	r.Use(appmw.RequestID)
@@ -75,7 +78,9 @@ func main() {
 
 			r.With(appmw.RequirePermission("grn.post")).Post("/procurement/grns", procurementHandlers.PostGRN)
 
-			// Further authenticated routes (customers, inventory, procurement,
+			r.With(appmw.RequirePermission("return.create")).Post("/pos/returns", returnsHandlers.PostReturn)
+
+			// Further authenticated routes (customers, inventory, payments,
 			// etc.) are registered here as each domain module is implemented.
 		})
 	})

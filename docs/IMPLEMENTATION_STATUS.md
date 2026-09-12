@@ -121,10 +121,24 @@ so it received the heaviest testing of any module so far.
 ### Real bug found and fixed this session (Phase 5)
 8. **Inventory double-counted every batch receipt**: `inventory.CreateBatch` set `batches.available_qty` directly in its INSERT (to `received_qty`) *and* then called `PostStockMovement`, which — per its own documented contract of being "the only function that should ever change inventory" — also runs `UPDATE batches SET available_qty = available_qty + <received_qty>`. The result: every batch ever created through the normal GRN path silently started with **double** its real received quantity in `available_qty` (though `stock_movements`, the authoritative ledger, was correct throughout — only the projection was wrong). This had not been caught earlier because the POS test fixtures seeded batches with raw SQL `INSERT`s that bypassed `CreateBatch` entirely; it was only caught once GRN posting — which is the real, only intended way batches get created — was exercised end-to-end and the resulting quantity was checked against the DB rather than just checking that the call succeeded. Fixed by inserting `available_qty` as `0` and letting `PostStockMovement`'s own update be the single source of the increment, consistent with the comment already on that function. Covered by an integration test that asserts the exact received quantity, not just success/failure.
 
+## Phase 6 — Sales Returns & Refunds
+
+| Area | Status | Evidence |
+|---|---|---|
+| Return posting (atomic: quantity validation, restock or quarantine, ledger, journal) | **VERIFIED** | `internal/domain/returns/service.go`; 5 integration tests, all passing against a live DB |
+| Return quantity never exceeds remaining eligible (sold minus already returned) | **VERIFIED** | Partial return of 6/10 succeeds, a follow-up attempt to return 5 more (only 4 remain) is rejected, and returning exactly the remaining 4 succeeds |
+| Sellable returns restock the exact original batch(es), proportional to the original allocation | **VERIFIED** | Full and partial returns both land back in the same batch the sale was allocated from, preserving batch/expiry traceability |
+| Depleted batch reactivation on restock | **VERIFIED** | Selling an entire 5-unit batch marks it `DEPLETED`; returning 2 units reactivates it to `ACTIVE` with the correct quantity |
+| Non-sellable (damaged/expired/quarantine) returns never re-enter sellable stock | **VERIFIED** | A `DAMAGED` return leaves the original batch untouched and creates a separate, immediately `QUARANTINED` batch for traceability |
+| Refund via cash/UPI journal reversal, or via Khata credit note | **VERIFIED** | Confirmed a credit-note return fully clears the customer's outstanding receivable; confirmed the return journal balances exactly (debit=credit) for a cash refund |
+| Proportional tax reversal computed from the original invoice's actual tax lines, not re-derived | IMPLEMENTED | `returns.GetTaxLinesForLine` reads the point-in-time tax amounts the sale actually posted, so a later tax-profile change can never retroactively change a return's tax reversal |
+
+No new bugs were found in this phase — the two-pass "validate and compute everything, then write" structure adopted after the procurement double-counting bug (Phase 5) was reused here from the start, and all 5 tests passed on the first run.
+
 ## Not Yet Started
 
-Remaining business domain modules (sales returns/refunds, payment/UPI
-integration, contra/buy-back, cash sessions/EOD, reports/dashboards),
+Remaining business domain modules (payment/UPI integration, contra/buy-back,
+cash sessions/EOD, reports/dashboards),
 idempotency/outbox infrastructure for external side effects (printer/
 WhatsApp), Flutter app (offline-first, SQLCipher, POS UI), payment/GST/
 WhatsApp provider adapters, hardware adapters (scale/printer/scanner), seed/

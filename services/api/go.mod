@@ -6,7 +6,9 @@ require (
 	github.com/go-chi/chi/v5 v5.1.0
 	github.com/golang-jwt/jwt/v5 v5.2.1
 	github.com/google/uuid v1.6.0
+	github.com/jackc/pgx-shopspring-decimal v0.0.0-20220624020537-1d36b5a1853e
 	github.com/jackc/pgx/v5 v5.7.1
+	github.com/shopspring/decimal v1.4.0
 	golang.org/x/crypto v0.27.0
 )
 

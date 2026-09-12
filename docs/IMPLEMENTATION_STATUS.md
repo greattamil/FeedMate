@@ -68,10 +68,26 @@ Legend: `NOT_STARTED` / `IN_PROGRESS` / `IMPLEMENTED` / `TESTED` / `VERIFIED`
 3. **Admin bypass was silently non-functional**: `WithAdminTx` set the `app.admin_mode` session flag, but the connection pool it ran on connected as `app_user`, and the `admin_cross_tenant` RLS policies are scoped `TO app_admin` only — so the flag had no effect and the very first cross-tenant admin operation (resolving a login device's tenant) failed. Fixed by giving `dbctx.DB` two genuinely separate pools (`Pool` for `app_user`, `AdminPool` for `app_admin`) and routing `WithAdminTx` to the admin pool. Caught by actually attempting a login through the HTTP API, not by inspection.
 4. **Critical RLS correctness bug, found only by an automated integration test, not manual curl testing**: PostgreSQL custom GUCs (`app.tenant_id`) are placeholder variables — once *any* transaction on a pooled physical connection sets one locally, `current_setting(..., true)` reverts to an **empty string**, not `NULL`, after that transaction ends (confirmed empirically). Because pgxpool reuses connections across unrelated transactions, any connection that had ever served a tenant-scoped request would thereafter throw a hard `invalid input syntax for type uuid: ""` error on the next admin-mode query on that same connection that didn't set `app.tenant_id` — e.g. the device-resolution step of login. This is now fixed in `db/migrations/0014_rls_tenant_context_fix.up.sql` by wrapping every RLS policy's `current_setting(...)::uuid` cast in `NULLIF(..., '')` so "never set" and "reset to empty" both fail closed safely instead of erroring. The RLS isolation test suite (`tests/security/rls_isolation_test.sql`) was re-run and still passes after the fix, and the identity integration test — which had been failing with exactly this error — now passes in full. This is exactly the class of bug the master spec's testing requirements exist to catch, and it would not have been found without writing and running (not just writing) an automated test against a real, connection-pooled database.
 
+## Phase 3 — Product Master & Tamil/Phonetic Search
+
+| Area | Status | Evidence |
+|---|---|---|
+| Product create (with barcodes + aliases) | **VERIFIED** | `internal/domain/product`; exercised via HTTP against the live dev DB and via `service_integration_test.go` |
+| Decimal-safe money/quantity fields end-to-end | **VERIFIED** | shopspring/decimal registered as the pgx NUMERIC codec (`internal/dbctx/dbctx.go`); no float32/float64 anywhere in the product domain |
+| Tamil Unicode round-trip (Flutter→JSON→Go→PostgreSQL→JSON) | **VERIFIED** | Confirmed byte-exact and codepoint-exact round-trip of a real Tamil string through the full HTTP→DB→HTTP path — this is PRD acceptance test A8 |
+| Barcode / SKU / exact-name / alias / fuzzy search ranking (PRD A4) | **VERIFIED** | All five match types tested individually against the live DB and covered by `service_integration_test.go` |
+| Alias normalization (Unicode/whitespace/punctuation) | IMPLEMENTED | `product.NormalizeAliasText` |
+
+### Real bugs found and fixed this session (Phase 3)
+5. **`Create()` returned Go zero-values for server-defaulted columns**: the INSERT only had `RETURNING id`, so the in-memory `Product` struct's `Active` field stayed `false` (Go's zero value) even though the database correctly stored `true`. The HTTP response told the caller a newly created, active product was inactive. Fixed by returning and scanning `active` (and documented the general rule: scan back every server-defaulted column, not just the generated id). Caught by comparing the HTTP response against a direct DB query, then locked in with a test assertion.
+6. **Exact SKU/barcode search was completely broken**: the alias-oriented normalization (which strips punctuation to make colloquial Tamil terms match regardless of spacing) was being applied to the search query before matching against SKU and barcode too — so a query for `CF-50KG-002` was normalized to `cf50kg002`, which never matches the real SKU containing hyphens. Fixed by matching SKU/barcode against the raw (trimmed-only) query and reserving normalization for name/alias/fuzzy matching. This is exactly the kind of defect the master spec's "never silently guess among ambiguous matches" principle is meant to prevent — an operator relying on SKU search at POS would have found nothing. Caught by testing the search endpoint directly, not by code review, and now covered by a permanent regression test (`exact SKU match is found despite hyphens`).
+
+Also confirmed during this phase: an apparently garbled Tamil string in a terminal-printed curl response turned out to be a Windows console codepage display artifact, not a real bug — verified by reading the response bytes directly in a script and comparing codepoints, which matched exactly. Worth recording so a future session doesn't mistake this class of terminal artifact for a real encoding bug.
+
 ## Not Yet Started
 
-Business domain modules (products, inventory, procurement, POS/invoice
-finalization, Khata/accounting, payments, contra, EOD, reports),
+Remaining business domain modules (inventory/batches, procurement,
+POS/invoice finalization, Khata/accounting, payments, contra, EOD, reports),
 idempotency/outbox infrastructure, Flutter app (offline-first, SQLCipher,
 POS UI), payment/GST/WhatsApp provider adapters, hardware adapters
 (scale/printer/scanner), seed/config workflows, CI/CD, the rest of the test

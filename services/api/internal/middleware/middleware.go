@@ -16,12 +16,6 @@ import (
 	"github.com/andipatti/feedmate/services/api/internal/reqctx"
 )
 
-type ctxKey int
-
-const (
-	ctxKeyClaims ctxKey = iota
-)
-
 func RequestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := r.Header.Get("X-Request-ID")
@@ -73,15 +67,16 @@ func RequireAuth(signingKey string) func(http.Handler) http.Handler {
 				httpapi.WriteError(w, reqID, httpapi.CodeUnauthorized, "invalid or expired token")
 				return
 			}
-			ctx := context.WithValue(r.Context(), ctxKeyClaims, claims)
+			ctx := reqctx.WithClaims(r.Context(), claims)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }
 
+// ClaimsFromContext is re-exported for handler code that already imports this
+// package; it delegates to the shared reqctx package.
 func ClaimsFromContext(ctx context.Context) (*auth.AccessClaims, bool) {
-	claims, ok := ctx.Value(ctxKeyClaims).(*auth.AccessClaims)
-	return claims, ok
+	return reqctx.Claims(ctx)
 }
 
 // RequirePermission enforces that the authenticated user's token carries the

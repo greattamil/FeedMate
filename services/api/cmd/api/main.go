@@ -15,6 +15,7 @@ import (
 	"github.com/andipatti/feedmate/services/api/internal/config"
 	"github.com/andipatti/feedmate/services/api/internal/dbctx"
 	"github.com/andipatti/feedmate/services/api/internal/domain/identity"
+	"github.com/andipatti/feedmate/services/api/internal/domain/product"
 	"github.com/andipatti/feedmate/services/api/internal/httpapi"
 	appmw "github.com/andipatti/feedmate/services/api/internal/middleware"
 )
@@ -39,9 +40,11 @@ func main() {
 	defer db.Close()
 
 	identitySvc := identity.NewService(db, cfg.JWTSigningKey, cfg.AccessTokenTTL, cfg.RefreshTokenTTL, cfg.BcryptCost)
+	productSvc := product.NewService(db)
 
 	authHandlers := &httpapi.AuthHandlers{Identity: identitySvc}
 	healthHandlers := &httpapi.HealthHandlers{DB: db}
+	productHandlers := &httpapi.ProductHandlers{Product: productSvc}
 
 	r := chi.NewRouter()
 	r.Use(appmw.RequestID)
@@ -57,7 +60,12 @@ func main() {
 
 		r.Group(func(r chi.Router) {
 			r.Use(appmw.RequireAuth(cfg.JWTSigningKey))
-			// Authenticated routes (products, customers, POS, inventory, etc.)
+
+			r.Get("/products/search", productHandlers.Search)
+			r.Get("/products/{id}", productHandlers.Get)
+			r.With(appmw.RequirePermission("product.manage")).Post("/products", productHandlers.Create)
+
+			// Further authenticated routes (customers, POS, inventory, etc.)
 			// are registered here as each domain module is implemented.
 		})
 	})

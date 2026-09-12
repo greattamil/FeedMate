@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	decimalpgx "github.com/jackc/pgx-shopspring-decimal"
 )
 
 // DB holds two genuinely separate connection pools, matching the two
@@ -47,6 +48,13 @@ func newPool(ctx context.Context, url string) (*pgxpool.Pool, error) {
 	poolCfg, err := pgxpool.ParseConfig(url)
 	if err != nil {
 		return nil, fmt.Errorf("parse database url: %w", err)
+	}
+	// Register shopspring/decimal <-> PostgreSQL NUMERIC codec on every
+	// connection so money/quantity values round-trip as decimal.Decimal —
+	// never as float32/float64 — per the mandatory numeric precision rules.
+	poolCfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+		decimalpgx.Register(conn.TypeMap())
+		return nil
 	}
 	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {

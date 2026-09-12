@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -132,6 +134,51 @@ func (h *CustomerHandlers) Get(w http.ResponseWriter, r *http.Request) {
 	resp["outstanding_balance"] = balance.StringFixed(2)
 	resp["available_credit"] = profile.CreditLimit.Sub(balance).StringFixed(2)
 	WriteJSON(w, http.StatusOK, resp)
+}
+
+func (h *CustomerHandlers) Ledger(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	claims, ok := reqctx.Claims(r.Context())
+	if !ok {
+		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid customer id")
+		return
+	}
+	limit := 100
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			limit = n
+		}
+	}
+	entries, err := h.Customer.ListLedger(r.Context(), claims.TenantID, id, limit)
+	if err != nil {
+		if errors.Is(err, customer.ErrNotFound) {
+			WriteError(w, reqID, CodeNotFound, "customer not found")
+			return
+		}
+		WriteError(w, reqID, CodeInternal, "failed to fetch ledger")
+		return
+	}
+	out := make([]map[string]interface{}, 0, len(entries))
+	for _, e := range entries {
+		row := map[string]interface{}{
+			"id":            e.ID.String(),
+			"entry_date":    e.EntryDate.Format(time.RFC3339),
+			"document_type": e.DocumentType,
+			"document_id":   e.DocumentID.String(),
+			"debit":         e.Debit.StringFixed(2),
+			"credit":        e.Credit.StringFixed(2),
+		}
+		if e.Description != nil {
+			row["description"] = *e.Description
+		}
+		out = append(out, row)
+	}
+	WriteJSON(w, http.StatusOK, map[string]interface{}{"entries": out})
 }
 
 type setCreditLimitRequest struct {

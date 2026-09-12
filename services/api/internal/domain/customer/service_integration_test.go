@@ -190,3 +190,56 @@ func TestCustomerSetCreditLimit_RequiresExistingCustomerAndNonNegative(t *testin
 		t.Fatalf("expected ErrNotFound for a nonexistent customer, got: %v", err)
 	}
 }
+
+func TestCustomerListLedger_ReturnsEntriesNewestFirstAndRejectsUnknownCustomer(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	tenantID := seedTenant(t, db)
+	svc := customer.NewService(db)
+
+	created, err := svc.Create(context.Background(), tenantID, customer.CreateInput{CustomerCode: "LEDGER01", Name: "Ledger Test"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	invoiceID := uuid.New()
+	receiptID := uuid.New()
+	err = db.WithTenantTx(context.Background(), tenantID, func(tx pgx.Tx) error {
+		if _, err := customer.PostLedgerEntry(context.Background(), tx, tenantID, customer.LedgerEntry{
+			CustomerID: created.ID, DocumentType: "INVOICE", DocumentID: invoiceID,
+			Debit: decimal.RequireFromString("500.00"), Description: "Credit sale INV-0001",
+		}); err != nil {
+			return err
+		}
+		_, err := customer.PostLedgerEntry(context.Background(), tx, tenantID, customer.LedgerEntry{
+			CustomerID: created.ID, DocumentType: "RECEIPT", DocumentID: receiptID,
+			Credit: decimal.RequireFromString("200.00"), Description: "Cash received",
+		})
+		return err
+	})
+	if err != nil {
+		t.Fatalf("post ledger entries: %v", err)
+	}
+
+	entries, err := svc.ListLedger(context.Background(), tenantID, created.ID, 10)
+	if err != nil {
+		t.Fatalf("list ledger: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 ledger entries, got %d", len(entries))
+	}
+	// Newest-first: the receipt (posted second) must come before the invoice.
+	if entries[0].DocumentType != "RECEIPT" || entries[1].DocumentType != "INVOICE" {
+		t.Fatalf("expected [RECEIPT, INVOICE] order, got [%s, %s]", entries[0].DocumentType, entries[1].DocumentType)
+	}
+	if !entries[1].Debit.Equal(decimal.RequireFromString("500.00")) {
+		t.Fatalf("expected invoice entry debit 500.00, got %s", entries[1].Debit)
+	}
+	if !entries[0].Credit.Equal(decimal.RequireFromString("200.00")) {
+		t.Fatalf("expected receipt entry credit 200.00, got %s", entries[0].Credit)
+	}
+
+	if _, err := svc.ListLedger(context.Background(), tenantID, uuid.New(), 10); !errors.Is(err, customer.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for a nonexistent customer, got: %v", err)
+	}
+}

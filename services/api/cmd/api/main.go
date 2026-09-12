@@ -145,6 +145,7 @@ func main() {
 
 			r.Get("/customers", customerHandlers.List)
 			r.Get("/customers/{id}", customerHandlers.Get)
+			r.Get("/customers/{id}/ledger", customerHandlers.Ledger)
 			r.With(appmw.RequirePermission("credit.configure")).Post("/customers", customerHandlers.Create)
 			r.With(appmw.RequirePermission("credit.configure")).Put("/customers/{id}/credit-limit", customerHandlers.SetCreditLimit)
 

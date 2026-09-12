@@ -350,27 +350,67 @@ live balance).
 14. **Real sqflite I/O does not resolve inside `flutter_test`'s fake-async widget-pump zone.** Wiring the real SQLCipher-compatible `sqflite_common_ffi` database directly into a `testWidgets` test didn't fail — it hung indefinitely, confirmed by running it standalone and watching it exceed a 100s+ timeout with no error. Root cause: `tester.pump()`/`pumpAndSettle()` step a `FakeAsync` zone that only advances synthetic time and flushes microtasks; it never yields to the real OS event loop that genuine native/FFI I/O depends on. Fixed by splitting `LocalDatabase` into an abstract interface with two implementations: `SqlLocalDatabase` (the real one, tested for real with plain non-widget `test()`s in `local_db_test.dart`) and `FakeLocalDatabase` (a pure in-memory Dart implementation used by every `testWidgets` test instead).
 15. **sqflite's connection-caching-by-path silently leaked state across tests.** `sqflite_common_ffi`'s `databaseFactoryFfi` caches an opened `Database` by its path string; every test opening `inMemoryDatabasePath` (`":memory:"`) got back the *same* cached connection and its leftover data from earlier tests in the same run — two tests failed with counts off by exactly what an earlier test had left behind (e.g. an idempotency test's `tx-1` was already `SYNCED` from a prior test's use of the same id). Fixed with `OpenDatabaseOptions(singleInstance: false)` so each test gets a genuinely isolated in-memory database.
 
+## Phase 17 — Customer Ledger API & Flutter Khata Statement Screen
+
+The customer API (Phase 14) only exposed the aggregate outstanding balance —
+there was no way to see the itemized history behind it, so neither an owner
+nor a cashier could actually review a customer's Khata. This phase adds a
+real ledger-listing endpoint and the Flutter statement screen it was built
+for.
+
+| Area | Status | Evidence |
+|---|---|---|
+| `customer.ListLedger` (repository + service), `GET /api/v1/customers/{id}/ledger` | **VERIFIED** | New integration test posting two entries and asserting newest-first order; real HTTP call against the live server returned "Test Farmer"'s actual 6-entry history |
+| `KhataCustomerListScreen` + `KhataDetailScreen` (credit summary card, itemized ledger, over-limit warning) | **VERIFIED, live** | Installed on the Android emulator: browsed real customers, opened "Test Farmer" and saw the real outstanding balance (₹103,765.00 against a ₹5,000 limit), the "Over credit limit" warning, and all 6 real ledger entries in the correct order with correct debit/credit coloring |
+| 4 widget tests (`test/khata_test.dart`, mocked HTTP) | **VERIFIED** | Covers search→navigate, the summary card's values, the over-limit warning appearing/not appearing, and empty-ledger state |
+
+### A real bug found and fixed, not from the app but from writing this feature's own test
+16. **`customer_ledger_entries` had no reliable posting-order column.** Both `entry_date` and `created_at` default to `now()`, which Postgres freezes for the entire transaction — two entries posted in the same transaction (exactly what the new ledger integration test did, and a real occurrence whenever a single business operation posts more than one ledger row) get an *identical* timestamp, so `ORDER BY entry_date DESC` silently fell back to comparing `id`, a random UUID with no relationship to insertion order. The test caught this immediately (asserted order came back reversed). Fixed with migration `0016`: added a `bigserial seq` column, monotonically increasing regardless of transaction timing, and reordered by that instead.
+17. **A second, cascading bug the same migration exposed**: migration `0012`'s `ALTER DEFAULT PRIVILEGES` only covered future *tables*, not future *sequences* — so the new `seq` column's backing sequence was invisible to `app_user`/`app_admin`, and every `INSERT` into the table failed with "permission denied for sequence" the moment the test tried to post a ledger entry. Fixed both narrowly (an explicit `GRANT` on the new sequence) and at the root cause (`ALTER DEFAULT PRIVILEGES ... GRANT ... ON SEQUENCES`, so no future migration adding a serial/bigserial column hits this again). Applied to the dev database directly (the migration had already run once) and folded into `0016`'s script for any future fresh install.
+
 ## Not Yet Started
 
 Customer/supplier aging (30/60/90-day buckets) and margin reports,
 per-device cash session tracking (schema exists, not wired up), a real
 payment provider adapter (production gateway credentials are the external
-dependency — the interface and sandbox are done), idempotency/outbox
-infrastructure for external side effects (printer/WhatsApp), the rest of the
-Flutter app (Khata/customer screens, procurement/GRN screens,
-EOD/reports screens, a settings screen to review/retry FAILED outbox
-entries), WhatsApp provider adapter, hardware adapters (scale/
-printer/scanner), seed/config workflows, CI/CD, the rest of the test suites
-(E2E/offline/chaos/load), backup/DR tooling, and the remaining documentation
-set. These will be built in subsequent sessions, in the priority order set
-by the master specification (security → financial integrity → tenant
-isolation → inventory → payments → compliance → offline sync → API →
-backend → Flutter → hardware → UI → reporting → DevOps).
+dependency — the interface and sandbox are done), a way to *record* a
+receipt against a customer's Khata from the app itself (the ledger is
+readable now — Phase 17 — but a receipt-entry screen posting a real
+`RECEIPT` row doesn't exist yet, so paying down a balance still requires
+direct SQL/API), idempotency/outbox infrastructure for external side
+effects (printer/WhatsApp), the rest of the Flutter app (supplier ledger
+screen, procurement/GRN screens, EOD/reports screens, a settings screen to
+review/retry `FAILED` outbox entries), a WhatsApp provider adapter,
+hardware adapters (scale/printer/scanner), seed/config workflows, CI/CD,
+the rest of the test suites (E2E/offline/chaos/load/security), backup/DR
+tooling, and the remaining documentation set. These will be built in
+subsequent sessions, in the priority order set by the master specification
+(security → financial integrity → tenant isolation → inventory → payments
+→ compliance → offline sync → API → backend → Flutter → hardware → UI →
+reporting → DevOps).
 
 ## Production Readiness
 
-**NOT READY.** The database foundation and the auth/identity vertical slice
-of the Go backend exist and have been verified end-to-end (real HTTP calls
-and automated integration tests against a live PostgreSQL instance). No
-business domain logic (POS, inventory, payments, accounting), no client
-application, no third-party integrations, and no CI exist yet.
+**NOT READY**, but substantially further along than a first read of "Not Yet
+Started" suggests — that list is what's missing, not a summary of what
+exists. As of Phase 17: the Go backend has verified, tested business domain
+logic for auth/RBAC, product search, inventory/batches, accounting, POS
+sales (cash + credit + credit-limit override), procurement/GRN, returns,
+supplier payables, UPI payment intents + webhooks, contra/buy-back, EOD cash
+reconciliation, reports, device self-registration, and a customer master API
+with a full ledger/Khata statement endpoint — all covered by integration
+tests against live PostgreSQL and exercised via real HTTP calls. The Flutter
+client is a real running app (not a mock): login, Tamil/phonetic product
+search, cart/checkout with cash and credit tenders, a customer picker, a
+Khata statement screen, and encrypted offline storage with a working
+offline-sale-then-sync path — all verified live on an Android emulator,
+including with connectivity actually disabled.
+
+What's still genuinely missing, and why this isn't production-ready: no
+real payment gateway (sandbox only), no WhatsApp integration, no hardware
+adapters (scanner/scale/printer), no CI/CD pipeline, no aging/margin
+reports, no way to record a Khata receipt from the app itself, several
+Flutter screens still absent (procurement/GRN, EOD/reports, an outbox
+failed-sale review screen), no backup/DR tooling, and the test suite is
+integration + widget level only — no E2E, chaos, load, or security test
+suites exist yet.

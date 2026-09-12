@@ -3,6 +3,7 @@ package customer
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -159,6 +160,55 @@ type LedgerEntry struct {
 	Description  string
 	DeviceID     *uuid.UUID
 	CreatedByUserID *uuid.UUID
+}
+
+// LedgerEntryRecord is one posted row as returned to a Khata statement view —
+// LedgerEntry above is the write-side shape; this is the read-side shape,
+// including the server-generated id/entry_date that a caller building a new
+// entry doesn't have yet.
+type LedgerEntryRecord struct {
+	ID           uuid.UUID
+	EntryDate    time.Time
+	DocumentType string
+	DocumentID   uuid.UUID
+	Debit        decimal.Decimal
+	Credit       decimal.Decimal
+	Description  *string
+}
+
+// ListLedger returns a customer's ledger entries newest-first, for a Khata
+// statement view. Never aggregated or netted here — OutstandingBalance is
+// the authoritative running total; this is the itemized history behind it.
+func ListLedger(ctx context.Context, tx pgx.Tx, customerID uuid.UUID, limit int) ([]LedgerEntryRecord, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 100
+	}
+	// Ordered by seq, not entry_date: entry_date defaults to now(), which
+	// Postgres freezes for the whole transaction, so two entries posted in
+	// the same transaction would otherwise tie and fall back to comparing
+	// random UUIDs. seq is a bigserial — monotonically increasing regardless
+	// of transaction timing, so it reflects true posting order.
+	rows, err := tx.Query(ctx, `
+		SELECT id, entry_date, document_type, document_id, debit, credit, description
+		FROM customer_ledger_entries
+		WHERE customer_id = $1
+		ORDER BY seq DESC
+		LIMIT $2
+	`, customerID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []LedgerEntryRecord
+	for rows.Next() {
+		var r LedgerEntryRecord
+		if err := rows.Scan(&r.ID, &r.EntryDate, &r.DocumentType, &r.DocumentID, &r.Debit, &r.Credit, &r.Description); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
 
 // PostLedgerEntry appends one immutable ledger row. Debits increase the

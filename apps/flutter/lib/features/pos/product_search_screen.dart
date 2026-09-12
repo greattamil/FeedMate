@@ -9,6 +9,7 @@ import '../../core/local_db.dart';
 import '../../core/sync_service.dart';
 import '../auth/generate_pairing_code_screen.dart';
 import '../auth/login_screen.dart';
+import '../khata/khata_customer_list_screen.dart';
 import 'cart_model.dart';
 import 'cart_screen.dart';
 import 'product.dart';
@@ -125,6 +126,16 @@ class _ProductSearchScreenState extends State<ProductSearchScreen> {
               child: const Icon(Icons.sync),
             ),
             onPressed: _syncNow,
+          ),
+          IconButton(
+            key: const Key('khata_button'),
+            icon: const Icon(Icons.account_balance_wallet_outlined),
+            tooltip: 'Khata (customer credit ledger)',
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const KhataCustomerListScreen()),
+              );
+            },
           ),
           if (session.hasPermission('device.manage'))
             IconButton(

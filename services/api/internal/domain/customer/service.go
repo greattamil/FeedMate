@@ -100,6 +100,22 @@ func (s *Service) List(ctx context.Context, tenantID uuid.UUID, query string, li
 	return result, err
 }
 
+// ListLedger returns a customer's Khata statement (itemized ledger entries).
+// The customer's existence is checked first purely to give a clean
+// ErrNotFound rather than an empty list for a bad/foreign customer id.
+func (s *Service) ListLedger(ctx context.Context, tenantID, customerID uuid.UUID, limit int) ([]LedgerEntryRecord, error) {
+	var result []LedgerEntryRecord
+	err := s.db.WithTenantReadTx(ctx, tenantID, func(tx pgx.Tx) error {
+		if _, err := GetByID(ctx, tx, customerID); err != nil {
+			return err
+		}
+		var err error
+		result, err = ListLedger(ctx, tx, customerID, limit)
+		return err
+	})
+	return result, err
+}
+
 // SetCreditLimit is gated by the caller on credit.configure — this service
 // method performs no permission check itself, matching every other module's
 // convention of enforcing RBAC at the HTTP layer.

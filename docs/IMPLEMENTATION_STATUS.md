@@ -506,6 +506,26 @@ and again in Phase 20's methodology note, now a recognizable pattern to
 watch for whenever a `Decimal` is put into a text field or compared as a
 string rather than as a numeric value.
 
+## Phase 23 — Flutter Reports/Dashboard Screen and AppBar Overflow Menu
+
+The sales-summary/stock-on-hand/customer-balances/EOD-history report
+endpoints (built in Phase 10) had a tested backend but no Flutter view —
+the only way to see them was `curl`. This phase adds `ReportsScreen`, a
+4-tab dashboard, and refactors `ProductSearchScreen`'s AppBar (which had
+grown to 7 icons across Phases 15/17/21/22) into a single overflow menu so
+the toolbar reads like a real shipped app rather than an accumulation of
+one-off buttons.
+
+| Area | Status | Evidence |
+|---|---|---|
+| `ReportsApi` wrapping `GET /api/v1/reports/{sales-summary,stock-on-hand,customer-balances,eod-history}` | **VERIFIED** | Exercises the existing, already-tested backend — no backend changes this phase |
+| `ReportsScreen`: Sales (date-range picker, invoice count/gross/discount/tax/net, by-tender breakdown), Stock (SKU/batch count/nearest-expiry, expiry warning), Balances (red highlight over credit limit), EOD History (variance color-coding) | **VERIFIED, live** | Installed on the Android emulator and walked all 4 tabs against the live server: Sales showed 13 real invoices (₹113,250.00 gross, ₹5,662.50 tax, ₹118,912.50 net, CASH ₹14,647.50 / CREDIT ₹104,265.00 by tender); Stock showed both real products with correct batch counts and expiry dates; Balances showed "Test Farmer" at ₹103,000.00 in red against a ₹5,000.00 limit; EOD History showed the real REOPENED session with its actual computed variance (-₹14,147.50) — every figure matched the tenant's real accumulated transaction history from this session's prior live tests, not fixture data |
+| AppBar overflow menu (`PopupMenuButton<_MenuAction>`, key `more_menu_button`) replacing 5 separate conditional icon buttons (Khata always visible; Suppliers/Reports/EOD/Pair-device gated on `supplier.manage`/`report.view`/`cash.eod_close`/`device.manage`) | **VERIFIED, live** | Confirmed on-device: menu opens with all 5 items for the owner account and correctly gates by permission in a widget test with a restricted account; sync and cart icons kept as direct AppBar icons since they're used on every sale |
+| 4 widget tests (`test/reports_test.dart`) + 2 widget tests (`test/product_search_menu_test.dart`) | **VERIFIED** | Sales/Stock/Balances/EOD tabs each independently asserted (including balance red-highlighting via style inspection); menu permission-gating and per-item navigation (Reports/Suppliers/Khata) each independently asserted |
+
+No new backend bugs found — this phase was pure Flutter UI on top of an
+already-solid, already-tested reports API.
+
 ## Not Yet Started
 
 Customer/supplier aging (30/60/90-day buckets) and margin reports,
@@ -513,9 +533,8 @@ per-device cash session tracking (schema exists, not wired up), a real
 payment provider adapter (production gateway credentials are the external
 dependency — the interface and sandbox are done), idempotency/outbox
 infrastructure for external side effects (printer/WhatsApp), the rest of
-the Flutter app (procurement/GRN screens, a reports/dashboard screen —
-the sales-summary/stock-on-hand/customer-balances/EOD-history endpoints
-from Phase 10 have no Flutter view yet), a WhatsApp provider adapter,
+the Flutter app (a procurement/GRN screen is the last major missing
+screen), a WhatsApp provider adapter,
 hardware adapters (scale/printer/scanner), seed/config workflows, CI/CD
 running for real on GitHub's infrastructure (the workflow exists — Phase
 19 — but has never actually executed there; there is no `git remote`),
@@ -530,7 +549,7 @@ reporting → DevOps).
 
 **NOT READY**, but substantially further along than a first read of "Not Yet
 Started" suggests — that list is what's missing, not a summary of what
-exists. As of Phase 22: the Go backend has verified, tested business domain
+exists. As of Phase 23: the Go backend has verified, tested business domain
 logic for auth/RBAC (including session-restore carrying real permissions,
 not just a login flag), product search, inventory/batches, accounting, POS
 sales (cash + credit + credit-limit override), procurement/GRN, returns,
@@ -542,18 +561,17 @@ calls. The Flutter client is a real running app (not a mock): login,
 Tamil/phonetic product search, cart/checkout with cash and credit tenders,
 a customer picker, a Khata statement screen with receipt recording, a
 supplier payable screen with payment recording, an end-of-day cash
-reconciliation screen, encrypted offline storage with a working
-offline-sale-then-sync path, and an outbox review/retry screen — all
-verified live on an Android emulator, including with connectivity
-actually disabled and across a real app restart. A CI workflow exists
-covering both stacks, though it has not yet run on real GitHub
-infrastructure (no `git remote` is configured — see Phase 19's honesty
-note).
+reconciliation screen, a 4-tab reports/dashboard screen, encrypted offline
+storage with a working offline-sale-then-sync path, and an outbox
+review/retry screen — all verified live on an Android emulator, including
+with connectivity actually disabled and across a real app restart. A CI
+workflow exists covering both stacks, though it has not yet run on real
+GitHub infrastructure (no `git remote` is configured — see Phase 19's
+honesty note).
 
 What's still genuinely missing, and why this isn't production-ready: no
 real payment gateway (sandbox only), no WhatsApp integration, no hardware
-adapters (scanner/scale/printer), no aging/margin reports, several Flutter
-screens still absent (procurement/GRN, a reports/dashboard view), no
-backup/DR tooling, CI that has never actually executed, and the test
-suite is integration + widget level only — no E2E, chaos, load, or
-security test suites exist yet.
+adapters (scanner/scale/printer), no aging/margin reports, one Flutter
+screen still absent (procurement/GRN), no backup/DR tooling, CI that has
+never actually executed, and the test suite is integration + widget level
+only — no E2E, chaos, load, or security test suites exist yet.

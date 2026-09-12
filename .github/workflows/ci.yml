@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  backend:
+    name: Go backend (build, vet, integration tests)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: feedmate
+          POSTGRES_USER: feedmate_owner
+          POSTGRES_PASSWORD: dev_owner_password_change_me
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U feedmate_owner -d feedmate"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: services/api/go.mod
+          cache-dependency-path: services/api/go.sum
+
+      - name: Install golang-migrate CLI
+        run: go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.17.1
+
+      # The dev roles (app_user/app_admin) and their fixed dev passwords are
+      # created by migration 0012 itself, not by docker-compose or this
+      # workflow — see db/migrations/0012_rls_policies.up.sql. Every backend
+      # integration test in this repo already assumes exactly this
+      # DATABASE_URL/DATABASE_ADMIN_URL pair; CI must match local dev exactly
+      # so a test that's green here is green on every contributor's machine
+      # too (see docs/IMPLEMENTATION_STATUS.md for how these are used
+      # throughout every phase's verification).
+      - name: Apply database migrations
+        run: |
+          migrate -path db/migrations \
+            -database "postgres://feedmate_owner:dev_owner_password_change_me@localhost:5432/feedmate?sslmode=disable" \
+            up
+
+      - name: go build
+        working-directory: services/api
+        run: go build ./...
+
+      - name: go vet
+        working-directory: services/api
+        run: go vet ./...
+
+      - name: go test (integration, real Postgres)
+        working-directory: services/api
+        env:
+          DATABASE_URL: postgres://app_user:CHANGE_ME_IN_PRODUCTION@localhost:5432/feedmate?sslmode=disable
+          DATABASE_ADMIN_URL: postgres://app_admin:CHANGE_ME_IN_PRODUCTION@localhost:5432/feedmate?sslmode=disable
+        run: go test -tags=integration -count=1 ./...
+
+  flutter:
+    name: Flutter app (analyze, test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # sqflite_common_ffi (used by test/local_db_test.dart's real-engine
+      # coverage of SqlLocalDatabase — see docs/IMPLEMENTATION_STATUS.md
+      # Phase 16) needs a native sqlite3 library on the runner; the
+      # Android/iOS app itself bundles its own via sqflite_sqlcipher, so this
+      # is a test-only dependency.
+      - name: Install libsqlite3
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: flutter pub get
+        working-directory: apps/flutter
+        run: flutter pub get
+
+      - name: flutter analyze
+        working-directory: apps/flutter
+        run: flutter analyze
+
+      - name: flutter test
+        working-directory: apps/flutter
+        run: flutter test

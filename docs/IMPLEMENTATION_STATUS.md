@@ -385,6 +385,33 @@ on FAILED entries.
 
 No new bugs found — this phase closed a documented UI gap rather than surfacing a defect.
 
+## Phase 19 — CI Pipeline (GitHub Actions)
+
+The project has never had CI; every verification claim throughout this
+document rested on someone manually running the same commands. Adds
+`.github/workflows/ci.yml` with two jobs: `backend` (real Postgres 16
+service container, `golang-migrate` CLI applies every migration from
+scratch, then `go build`/`go vet`/`go test -tags=integration` — the exact
+same commands used throughout every phase's verification in this document)
+and `flutter` (`flutter analyze` + `flutter test`).
+
+**Honesty note on verification, since this repo has no `git remote`**: the
+workflow has never actually run on GitHub's infrastructure, and that claim
+would be false if made. What *was* verified, for real, locally: `go.mod`'s
+`go` directive resolves correctly for `setup-go`'s `go-version-file`; the
+exact `go install -tags 'postgres' .../migrate/v4/cmd/migrate@v4.17.1`
+command in the workflow was run in an isolated `GOBIN`, produced a working
+binary, and that binary correctly reported this dev database's applied
+migration version (16) against `postgres://feedmate_owner:...@localhost/feedmate`
+— the identical connection string shape the workflow uses; and the YAML
+itself parses with a valid two-job (`backend`, `flutter`) structure. Not
+verified: the `flutter` job's `libsqlite3-dev` + `subosito/flutter-action`
+combination on an actual `ubuntu-latest` runner (a well-established pattern
+for `sqflite_common_ffi`, but not exercised here), and the `postgres:`
+services-container health-check syntax under real GitHub Actions scheduling.
+Whoever first pushes this to GitHub should treat the first real run as the
+actual verification, not this description.
+
 ## Not Yet Started
 
 Customer/supplier aging (30/60/90-day buckets) and margin reports,
@@ -397,7 +424,9 @@ readable now — Phase 17 — but a receipt-entry screen posting a real
 direct SQL/API), idempotency/outbox infrastructure for external side
 effects (printer/WhatsApp), the rest of the Flutter app (supplier ledger
 screen, procurement/GRN screens, EOD/reports screens), a WhatsApp provider adapter,
-hardware adapters (scale/printer/scanner), seed/config workflows, CI/CD,
+hardware adapters (scale/printer/scanner), seed/config workflows, CI/CD
+running for real on GitHub's infrastructure (the workflow exists — Phase
+19 — but has never actually executed there; there is no `git remote`),
 the rest of the test suites (E2E/offline/chaos/load/security), backup/DR
 tooling, and the remaining documentation set. These will be built in
 subsequent sessions, in the priority order set by the master specification
@@ -409,7 +438,7 @@ reporting → DevOps).
 
 **NOT READY**, but substantially further along than a first read of "Not Yet
 Started" suggests — that list is what's missing, not a summary of what
-exists. As of Phase 18: the Go backend has verified, tested business domain
+exists. As of Phase 19: the Go backend has verified, tested business domain
 logic for auth/RBAC, product search, inventory/batches, accounting, POS
 sales (cash + credit + credit-limit override), procurement/GRN, returns,
 supplier payables, UPI payment intents + webhooks, contra/buy-back, EOD cash
@@ -421,12 +450,14 @@ search, cart/checkout with cash and credit tenders, a customer picker, a
 Khata statement screen, encrypted offline storage with a working
 offline-sale-then-sync path, and an outbox review/retry screen — all
 verified live on an Android emulator, including with connectivity actually
-disabled.
+disabled. A CI workflow exists covering both stacks, though it has not yet
+run on real GitHub infrastructure (no `git remote` is configured — see
+Phase 19's honesty note).
 
 What's still genuinely missing, and why this isn't production-ready: no
 real payment gateway (sandbox only), no WhatsApp integration, no hardware
-adapters (scanner/scale/printer), no CI/CD pipeline, no aging/margin
-reports, no way to record a Khata receipt from the app itself, several
-Flutter screens still absent (procurement/GRN, EOD/reports), no backup/DR
-tooling, and the test suite is integration + widget level only — no E2E,
-chaos, load, or security test suites exist yet.
+adapters (scanner/scale/printer), no aging/margin reports, no way to record
+a Khata receipt from the app itself, several Flutter screens still absent
+(procurement/GRN, EOD/reports), no backup/DR tooling, CI that has never
+actually executed, and the test suite is integration + widget level only —
+no E2E, chaos, load, or security test suites exist yet.

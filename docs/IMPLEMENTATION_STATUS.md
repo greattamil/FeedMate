@@ -457,6 +457,29 @@ being swallowed by the very error-handling path it's supposed to be
 testing) is exactly the kind of thing worth remembering when a future test
 fails in a confusing way in this codebase.
 
+## Phase 21 — Supplier Master, Payable Ledger API & Flutter Screens
+
+The supplier side of the ledger existed only as an internal helper
+(`supplier.PostLedgerEntry`/`OutstandingPayable`, used by procurement's GRN
+posting) with no HTTP API and no Flutter screen at all — the exact gap
+Phase 14/17 had already closed on the customer side. This phase builds the
+full mirror: supplier master CRUD, a payable statement endpoint, manual
+supplier payments, and the Flutter screens for both.
+
+| Area | Status | Evidence |
+|---|---|---|
+| Migration `0018`: `supplier_ledger_entries.seq` (same ordering fix as `0016`, applied proactively this time) | **VERIFIED** | Applied via the `migrate` compose profile; confirmed the new sequence's grants were inherited automatically from `0016`'s `ALTER DEFAULT PRIVILEGES` with no explicit `GRANT` needed — checked directly with `\dp` |
+| `supplier.Service` (Create/List/GetByID/ListLedger), `GET/POST /api/v1/suppliers`, `GET /api/v1/suppliers/{id}/ledger` | **VERIFIED** | 4 new integration tests; real `curl` calls created and searched a real supplier |
+| `payment.RecordSupplierPayment` (mirrors `RecordManualReceipt`: debits the supplier ledger, Dr Accounts Payable / Cr Cash-Bank-Other, idempotent), `POST /api/v1/payments/supplier-payments` | **VERIFIED, live** | 3 new integration tests; a real `curl` payment reduced a real supplier's payable by exactly the amount paid, confirmed against the live database, and an identical retry correctly reported `duplicate: true` without double-paying |
+| Flutter: `SupplierListScreen` + `SupplierDetailScreen` (payable summary, itemized ledger, "Record Payment" FAB/dialog) | **VERIFIED, live** | Installed on the Android emulator: browsed a real supplier, and recorded a real ₹1500.00 cash payment that dropped the payable from ₹9,000.00 to ₹7,500.00, confirmed live |
+| 3 widget tests (`test/supplier_test.dart`, mocked HTTP) | **VERIFIED** | Covers search→navigate→statement, a successful payment refreshing from a fresh server fetch, and client-side rejection of a zero amount |
+
+### A cleanup made while extending shared code
+`payment.ManualPayment` (the row-level type behind both `RecordManualReceipt` and this phase's `RecordSupplierPayment`) had a `CustomerID` field that was never actually written to the database — the `payments` table has no `customer_id` column; the real customer linkage happens entirely through the ledger entry, not this struct. Removed the dead field while generalizing the type for both receipts and payments, rather than perpetuating a field that looked load-bearing but wasn't.
+
+### A real bug found live, unrelated to this phase's own feature, but blocking it
+While verifying the new supplier icon's permission gate (`supplier.manage`) after a cold app restart, the icon — and the owner's display name — had silently disappeared, despite the same account being used throughout the session. Root cause: `AuthSession.restoreSession()` only ever restored `tenantId` from persisted storage and flipped straight to `loggedIn`; it never restored `displayName` or `permissions`, which only ever got populated by a fresh password login. Any real device that stays logged in across an app restart (the normal case for a POS terminal) would silently lose every permission-gated feature — not just the one just added, but existing ones too (e.g. the device-pairing icon) — while still showing as authenticated. Fixed on both ends: `restoreSession()` now exchanges the stored refresh token for a fresh access token via the existing `/api/v1/auth/refresh` endpoint (mirroring what `ApiClient` already does mid-session on a 401) rather than trusting the stale persisted token blindly; and the backend's `identity.Service.Refresh` was found to never populate `DisplayName` in the first place (it only ever fetched permissions, not the user record) — fixed with a new `GetUserByID` lookup, with the handler updated to serialize it. Verified live: after a real app restart, the owner's name and every permission-gated icon reappeared correctly, confirmed with a new integration test asserting `Refresh` carries both, and 3 new Flutter unit tests covering the valid-refresh, expired-refresh, and no-stored-session paths.
+
 ## Not Yet Started
 
 Customer/supplier aging (30/60/90-day buckets) and margin reports,
@@ -464,9 +487,7 @@ per-device cash session tracking (schema exists, not wired up), a real
 payment provider adapter (production gateway credentials are the external
 dependency — the interface and sandbox are done), idempotency/outbox
 infrastructure for external side effects (printer/WhatsApp), the rest of
-the Flutter app (a supplier-side equivalent of the Khata screen —
-suppliers have their own payable ledger from Phase 6/procurement but no
-Flutter view of it, procurement/GRN screens, EOD/reports screens), a
+the Flutter app (procurement/GRN screens, EOD/reports screens), a
 WhatsApp provider adapter,
 hardware adapters (scale/printer/scanner), seed/config workflows, CI/CD
 running for real on GitHub's infrastructure (the workflow exists — Phase
@@ -482,27 +503,28 @@ reporting → DevOps).
 
 **NOT READY**, but substantially further along than a first read of "Not Yet
 Started" suggests — that list is what's missing, not a summary of what
-exists. As of Phase 20: the Go backend has verified, tested business domain
-logic for auth/RBAC, product search, inventory/batches, accounting, POS
+exists. As of Phase 21: the Go backend has verified, tested business domain
+logic for auth/RBAC (including session-restore carrying real permissions,
+not just a login flag), product search, inventory/batches, accounting, POS
 sales (cash + credit + credit-limit override), procurement/GRN, returns,
-supplier payables, UPI payment intents + webhooks, manual cash/bank Khata
-receipts, contra/buy-back, EOD cash reconciliation, reports, device
-self-registration, and a customer master API with a full ledger/Khata
-statement endpoint — all covered by integration tests against live
-PostgreSQL and exercised via real HTTP calls. The Flutter client is a real
-running app (not a mock): login, Tamil/phonetic product search,
-cart/checkout with cash and credit tenders, a customer picker, a Khata
-statement screen with receipt recording, encrypted offline storage with a
-working offline-sale-then-sync path, and an outbox review/retry screen —
-all verified live on an Android emulator, including with connectivity
-actually disabled. A CI workflow exists covering both stacks, though it
-has not yet run on real GitHub infrastructure (no `git remote` is
-configured — see Phase 19's honesty note).
+supplier master + payable ledger + manual payments, UPI payment intents +
+webhooks, manual cash/bank Khata receipts, contra/buy-back, EOD cash
+reconciliation, reports, and device self-registration — all covered by
+integration tests against live PostgreSQL and exercised via real HTTP
+calls. The Flutter client is a real running app (not a mock): login,
+Tamil/phonetic product search, cart/checkout with cash and credit tenders,
+a customer picker, a Khata statement screen with receipt recording, a
+supplier payable screen with payment recording, encrypted offline storage
+with a working offline-sale-then-sync path, and an outbox review/retry
+screen — all verified live on an Android emulator, including with
+connectivity actually disabled and across a real app restart. A CI
+workflow exists covering both stacks, though it has not yet run on real
+GitHub infrastructure (no `git remote` is configured — see Phase 19's
+honesty note).
 
 What's still genuinely missing, and why this isn't production-ready: no
 real payment gateway (sandbox only), no WhatsApp integration, no hardware
 adapters (scanner/scale/printer), no aging/margin reports, several Flutter
-screens still absent (a supplier-side Khata equivalent, procurement/GRN,
-EOD/reports), no backup/DR tooling, CI that has never actually executed,
-and the test suite is integration + widget level only — no E2E, chaos,
-load, or security test suites exist yet.
+screens still absent (procurement/GRN, EOD/reports), no backup/DR tooling,
+CI that has never actually executed, and the test suite is integration +
+widget level only — no E2E, chaos, load, or security test suites exist yet.

@@ -108,6 +108,7 @@ func (h *AuthHandlers) Refresh(w http.ResponseWriter, r *http.Request) {
 		TokenType:    "Bearer",
 		UserID:       result.UserID.String(),
 		TenantID:     result.TenantID.String(),
+		DisplayName:  result.DisplayName,
 		Permissions:  result.Permissions,
 	})
 }

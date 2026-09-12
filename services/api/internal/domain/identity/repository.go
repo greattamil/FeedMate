@@ -64,6 +64,26 @@ func FindUserByUsername(ctx context.Context, tx pgx.Tx, username string) (*User,
 	return &u, nil
 }
 
+// GetUserByID looks up a user by id — used by Refresh, which only has the
+// user id encoded in the (now-revoked) refresh session, not the username
+// Login authenticated with.
+func GetUserByID(ctx context.Context, tx pgx.Tx, userID uuid.UUID) (*User, error) {
+	row := tx.QueryRow(ctx, `
+		SELECT id, tenant_id, username, password_hash, display_name, status,
+		       failed_login_count, locked_until
+		FROM users WHERE id = $1
+	`, userID)
+	var u User
+	if err := row.Scan(&u.ID, &u.TenantID, &u.Username, &u.PasswordHash, &u.DisplayName,
+		&u.Status, &u.FailedLoginCount, &u.LockedUntil); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &u, nil
+}
+
 func RecordLoginSuccess(ctx context.Context, tx pgx.Tx, userID uuid.UUID) error {
 	_, err := tx.Exec(ctx, `
 		UPDATE users SET last_login_at = now(), failed_login_count = 0, locked_until = NULL

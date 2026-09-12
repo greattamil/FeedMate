@@ -21,13 +21,37 @@ class AuthSession extends ChangeNotifier {
   List<String> permissions = [];
   String? lastError;
 
+  /// Restores a session after an app restart. Deliberately always exchanges
+  /// the stored refresh token for a fresh access token — rather than just
+  /// trusting the persisted access token and flipping straight to
+  /// loggedIn — because a persisted access token carries no display name or
+  /// permissions with it. Without this, every permission-gated screen
+  /// (device pairing, the supplier ledger) would silently vanish after any
+  /// app restart even though the user's role never changed, since
+  /// `permissions` would stay at its empty default forever.
   Future<void> restoreSession() async {
-    final token = await storage.getAccessToken();
     final tenant = await storage.getTenantId();
-    if (token != null && tenant != null) {
+    final refreshToken = await storage.getRefreshToken();
+    if (tenant == null || refreshToken == null) {
+      status = AuthStatus.loggedOut;
+      notifyListeners();
+      return;
+    }
+    try {
+      final result = await apiClient.refresh(tenantId: tenant, refreshToken: refreshToken);
+      await storage.saveTokens(
+        accessToken: result['access_token'] as String,
+        refreshToken: result['refresh_token'] as String,
+        tenantId: tenant,
+      );
       tenantId = tenant;
+      displayName = result['display_name'] as String?;
+      permissions = (result['permissions'] as List<dynamic>? ?? []).cast<String>();
       status = AuthStatus.loggedIn;
-    } else {
+    } on ApiError {
+      // The stored refresh token is invalid or expired — the user must log
+      // in again with their password; there is no way to silently recover.
+      await storage.clearTokens();
       status = AuthStatus.loggedOut;
     }
     notifyListeners();

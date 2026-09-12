@@ -161,6 +161,16 @@ func (s *Service) Refresh(ctx context.Context, tenantID uuid.UUID, refreshToken 
 			return err
 		}
 
+		// A refreshed session must carry the same display name/permissions a
+		// fresh login would — otherwise a client that only ever calls
+		// Refresh (e.g. to restore a session after an app restart, never
+		// re-prompting for a password) silently loses both, even though the
+		// user's role hasn't changed.
+		user, err := GetUserByID(ctx, tx, userID)
+		if err != nil {
+			return err
+		}
+
 		newRefreshToken, err := auth.GenerateOpaqueToken()
 		if err != nil {
 			return err
@@ -182,6 +192,7 @@ func (s *Service) Refresh(ctx context.Context, tenantID uuid.UUID, refreshToken 
 			ExpiresIn:    int64(s.accessTTL.Seconds()),
 			UserID:       userID,
 			TenantID:     tenantID,
+			DisplayName:  user.DisplayName,
 			Permissions:  permissions,
 		}
 		return nil

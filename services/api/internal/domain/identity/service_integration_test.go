@@ -154,6 +154,17 @@ func TestLoginRefreshLogout(t *testing.T) {
 		if result.RefreshToken == refreshToken {
 			t.Fatal("expected refresh token to be rotated")
 		}
+		// A client that restores a session purely via refresh (e.g. after an
+		// app restart, without re-prompting for a password) must still see
+		// the user's display name and permissions — otherwise every
+		// permission-gated UI feature silently disappears despite the
+		// user's role being unchanged.
+		if result.DisplayName != "Test User" {
+			t.Fatalf("expected refresh to carry the display name, got %q", result.DisplayName)
+		}
+		if len(result.Permissions) == 0 {
+			t.Fatal("expected refresh to carry the user's permissions")
+		}
 		rotatedToken = result.RefreshToken
 	})
 

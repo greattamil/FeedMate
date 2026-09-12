@@ -10,12 +10,15 @@ import '../auth/generate_pairing_code_screen.dart';
 import '../auth/login_screen.dart';
 import '../eod/eod_screen.dart';
 import '../khata/khata_customer_list_screen.dart';
+import '../reports/reports_screen.dart';
 import '../supplier/supplier_list_screen.dart';
 import '../sync/outbox_screen.dart';
 import 'cart_model.dart';
 import 'cart_screen.dart';
 import 'product.dart';
 import 'product_repository.dart';
+
+enum _MenuAction { khata, suppliers, reports, eod, pairDevice }
 
 /// Product search, backed by the real Go backend's ranked search endpoint
 /// (barcode > SKU > exact name > alias > fuzzy — see PRD A4). Tapping a
@@ -124,49 +127,85 @@ class _ProductSearchScreenState extends State<ProductSearchScreen> {
             ),
             onPressed: _openOutbox,
           ),
-          IconButton(
-            key: const Key('khata_button'),
-            icon: const Icon(Icons.account_balance_wallet_outlined),
-            tooltip: 'Khata (customer credit ledger)',
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const KhataCustomerListScreen()),
-              );
+          PopupMenuButton<_MenuAction>(
+            key: const Key('more_menu_button'),
+            tooltip: 'More',
+            onSelected: (action) {
+              switch (action) {
+                case _MenuAction.khata:
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const KhataCustomerListScreen()),
+                  );
+                  break;
+                case _MenuAction.suppliers:
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const SupplierListScreen()),
+                  );
+                  break;
+                case _MenuAction.eod:
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const EodScreen()),
+                  );
+                  break;
+                case _MenuAction.reports:
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const ReportsScreen()),
+                  );
+                  break;
+                case _MenuAction.pairDevice:
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const GeneratePairingCodeScreen()),
+                  );
+                  break;
+              }
             },
+            itemBuilder: (context) => [
+              const PopupMenuItem(
+                key: Key('menu_item_khata'),
+                value: _MenuAction.khata,
+                child: ListTile(
+                  leading: Icon(Icons.account_balance_wallet_outlined),
+                  title: Text('Khata'),
+                ),
+              ),
+              if (session.hasPermission('supplier.manage'))
+                const PopupMenuItem(
+                  key: Key('menu_item_suppliers'),
+                  value: _MenuAction.suppliers,
+                  child: ListTile(
+                    leading: Icon(Icons.local_shipping_outlined),
+                    title: Text('Suppliers'),
+                  ),
+                ),
+              if (session.hasPermission('report.view'))
+                const PopupMenuItem(
+                  key: Key('menu_item_reports'),
+                  value: _MenuAction.reports,
+                  child: ListTile(
+                    leading: Icon(Icons.bar_chart_outlined),
+                    title: Text('Reports'),
+                  ),
+                ),
+              if (session.hasPermission('cash.eod_close'))
+                const PopupMenuItem(
+                  key: Key('menu_item_eod'),
+                  value: _MenuAction.eod,
+                  child: ListTile(
+                    leading: Icon(Icons.point_of_sale_outlined),
+                    title: Text('End of Day'),
+                  ),
+                ),
+              if (session.hasPermission('device.manage'))
+                const PopupMenuItem(
+                  key: Key('menu_item_pair_device'),
+                  value: _MenuAction.pairDevice,
+                  child: ListTile(
+                    leading: Icon(Icons.qr_code_2),
+                    title: Text('Pair a new device'),
+                  ),
+                ),
+            ],
           ),
-          if (session.hasPermission('supplier.manage'))
-            IconButton(
-              key: const Key('supplier_button'),
-              icon: const Icon(Icons.local_shipping_outlined),
-              tooltip: 'Suppliers (payable ledger)',
-              onPressed: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const SupplierListScreen()),
-                );
-              },
-            ),
-          if (session.hasPermission('cash.eod_close'))
-            IconButton(
-              key: const Key('eod_button'),
-              icon: const Icon(Icons.point_of_sale_outlined),
-              tooltip: 'End of Day',
-              onPressed: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const EodScreen()),
-                );
-              },
-            ),
-          if (session.hasPermission('device.manage'))
-            IconButton(
-              key: const Key('pair_device_button'),
-              icon: const Icon(Icons.qr_code_2),
-              tooltip: 'Pair a new device',
-              onPressed: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const GeneratePairingCodeScreen()),
-                );
-              },
-            ),
           IconButton(
             key: const Key('cart_button'),
             icon: Badge(

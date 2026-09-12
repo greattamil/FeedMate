@@ -15,12 +15,14 @@ import (
 	"github.com/andipatti/feedmate/services/api/internal/config"
 	"github.com/andipatti/feedmate/services/api/internal/dbctx"
 	"github.com/andipatti/feedmate/services/api/internal/domain/identity"
+	"github.com/andipatti/feedmate/services/api/internal/domain/payment"
 	"github.com/andipatti/feedmate/services/api/internal/domain/pos"
 	"github.com/andipatti/feedmate/services/api/internal/domain/procurement"
 	"github.com/andipatti/feedmate/services/api/internal/domain/product"
 	"github.com/andipatti/feedmate/services/api/internal/domain/returns"
 	"github.com/andipatti/feedmate/services/api/internal/httpapi"
 	appmw "github.com/andipatti/feedmate/services/api/internal/middleware"
+	"github.com/andipatti/feedmate/services/api/internal/paymentprovider"
 )
 
 func main() {
@@ -48,12 +50,23 @@ func main() {
 	procurementSvc := procurement.NewService(db)
 	returnsSvc := returns.NewService(db)
 
+	var provider paymentprovider.Provider
+	switch cfg.PaymentProvider {
+	case "sandbox":
+		provider = paymentprovider.NewSandboxProvider(cfg.SandboxWebhookSecret)
+	default:
+		slog.Error("unknown PAYMENT_PROVIDER", "value", cfg.PaymentProvider)
+		os.Exit(1)
+	}
+	paymentSvc := payment.NewService(db, provider)
+
 	authHandlers := &httpapi.AuthHandlers{Identity: identitySvc}
 	healthHandlers := &httpapi.HealthHandlers{DB: db}
 	productHandlers := &httpapi.ProductHandlers{Product: productSvc}
 	posHandlers := &httpapi.POSHandlers{POS: posSvc}
 	procurementHandlers := &httpapi.ProcurementHandlers{Procurement: procurementSvc}
 	returnsHandlers := &httpapi.ReturnsHandlers{Returns: returnsSvc}
+	paymentHandlers := &httpapi.PaymentHandlers{Payment: paymentSvc}
 
 	r := chi.NewRouter()
 	r.Use(appmw.RequestID)
@@ -66,6 +79,12 @@ func main() {
 		r.Post("/auth/login", authHandlers.Login)
 		r.Post("/auth/refresh", authHandlers.Refresh)
 		r.Post("/auth/logout", authHandlers.Logout)
+
+		// Payment webhooks are called by the external provider, which cannot
+		// present one of our bearer tokens — authentication here is the
+		// provider's cryptographic signature (verified inside the handler),
+		// never RequireAuth.
+		r.Post("/payments/webhooks/sandbox", paymentHandlers.SandboxWebhook)
 
 		r.Group(func(r chi.Router) {
 			r.Use(appmw.RequireAuth(cfg.JWTSigningKey))
@@ -80,7 +99,10 @@ func main() {
 
 			r.With(appmw.RequirePermission("return.create")).Post("/pos/returns", returnsHandlers.PostReturn)
 
-			// Further authenticated routes (customers, inventory, payments,
+			r.With(appmw.RequirePermission("pos.sell")).Post("/payments/receipt-intents", paymentHandlers.CreateReceiptIntent)
+			r.With(appmw.RequirePermission("pos.sell")).Get("/payments/intents/{id}", paymentHandlers.GetIntentStatus)
+
+			// Further authenticated routes (customers, inventory, contra, EOD,
 			// etc.) are registered here as each domain module is implemented.
 		})
 	})

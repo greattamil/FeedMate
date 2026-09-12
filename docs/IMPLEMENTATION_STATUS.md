@@ -135,10 +135,30 @@ so it received the heaviest testing of any module so far.
 
 No new bugs were found in this phase — the two-pass "validate and compute everything, then write" structure adopted after the procurement double-counting bug (Phase 5) was reused here from the start, and all 5 tests passed on the first run.
 
+## Phase 7 — Payment/UPI Integration (Provider Abstraction + Webhook Processing)
+
+| Area | Status | Evidence |
+|---|---|---|
+| Provider abstraction (`paymentprovider.Provider` interface) | IMPLEMENTED | `internal/paymentprovider/provider.go` — a real gateway (Razorpay/Cashfree/PhonePe/etc.) needs only one more implementation of this interface; production credentials are the external dependency, not the code |
+| Sandbox provider (HMAC-SHA256 signed webhooks, matching real-gateway conventions) | **VERIFIED** | `internal/paymentprovider/sandbox.go`; exercised for real, not stubbed |
+| Receipt-intent creation for Khata collection via UPI | **VERIFIED** | Real HTTP call created an intent and returned a QR payload |
+| Webhook signature verification | **VERIFIED** | Real HTTP call with a forged signature rejected with `401 UNAUTHORIZED`; correct signature accepted |
+| Webhook idempotency (redelivered event → zero additional financial effect) | **VERIFIED** | Same event ID sent twice: balance changes exactly once |
+| Payment amount validated against the intent before any posting | **VERIFIED** | A webhook reporting an amount different from the intent is rejected before touching the ledger |
+| Unknown order reference rejected | **VERIFIED** | A webhook for a non-existent intent is rejected, not silently ignored or crashed on |
+| Customer ledger credit + balanced journal on confirmed payment | **VERIFIED** | Real HTTP webhook delivery correctly reduced a customer's Khata balance by exactly the paid amount, confirmed against the DB, not just the API response |
+| Cross-tenant order-reference resolution scoped correctly | IMPLEMENTED | The one legitimate pre-resolution lookup (a provider webhook has no concept of our tenants) runs under `WithAdminTx`, exactly like the login device-resolution pattern from Phase 2; every subsequent write happens under the resolved tenant's own RLS context |
+
+Payment/UPI integration is intentionally scoped to **Khata receipt collection** (PRD 10.2) rather than retrofitted into the synchronous POS tender flow — POS `CASH`/`UPI`/`CREDIT` tenders are still validated synchronously at invoice finalization (matching a soundbox/already-confirmed-at-counter model per PRD 11.2). Wiring a fully asynchronous "create pending invoice → wait for webhook → finalize" POS flow is a larger, separate design change and is not yet built.
+
+No new bugs were found in this phase; all 5 webhook integration tests (including the adversarial forged-signature, duplicate-delivery, and amount-mismatch cases) passed on the first run, and the same flow was independently re-verified over real HTTP end to end.
+
 ## Not Yet Started
 
-Remaining business domain modules (payment/UPI integration, contra/buy-back,
-cash sessions/EOD, reports/dashboards),
+Remaining business domain modules (contra/buy-back, cash sessions/EOD,
+reports/dashboards), a real payment provider adapter (production gateway
+credentials are the external dependency — the interface and sandbox are
+done),
 idempotency/outbox infrastructure for external side effects (printer/
 WhatsApp), Flutter app (offline-first, SQLCipher, POS UI), payment/GST/
 WhatsApp provider adapters, hardware adapters (scale/printer/scanner), seed/

@@ -25,6 +25,14 @@ type Config struct {
 	BcryptCost           int
 	AdminAPIEnabled      bool
 	IdempotencyRetention time.Duration
+
+	// PaymentProvider selects which paymentprovider.Provider implementation
+	// is wired up. Only "sandbox" is implemented today — production gateway
+	// credentials (Razorpay/Cashfree/PhonePe/etc.) are not available in this
+	// environment; see internal/paymentprovider for the interface a real
+	// provider must implement to be swapped in.
+	PaymentProvider       string
+	SandboxWebhookSecret  string
 }
 
 func Load() (Config, error) {
@@ -40,6 +48,8 @@ func Load() (Config, error) {
 		BcryptCost:           getInt("BCRYPT_COST", 12),
 		AdminAPIEnabled:      getBool("ADMIN_API_ENABLED", false),
 		IdempotencyRetention: getDuration("IDEMPOTENCY_RETENTION", 7*24*time.Hour),
+		PaymentProvider:      getEnv("PAYMENT_PROVIDER", "sandbox"),
+		SandboxWebhookSecret: os.Getenv("SANDBOX_WEBHOOK_SECRET"),
 	}
 
 	if cfg.DatabaseURL == "" {
@@ -53,6 +63,12 @@ func Load() (Config, error) {
 			return cfg, fmt.Errorf("JWT_SIGNING_KEY is required in production")
 		}
 		cfg.JWTSigningKey = "dev_only_change_me"
+	}
+	if cfg.SandboxWebhookSecret == "" {
+		if cfg.AppEnv == "production" {
+			return cfg, fmt.Errorf("SANDBOX_WEBHOOK_SECRET is required (or configure a real PAYMENT_PROVIDER before production)")
+		}
+		cfg.SandboxWebhookSecret = "dev_only_change_me"
 	}
 	return cfg, nil
 }

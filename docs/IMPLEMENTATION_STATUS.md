@@ -1,6 +1,6 @@
 # Andipatti Animal Feed System — Implementation Status
 
-Last updated: 2026-09-12
+Last updated: 2026-09-12 (session 2)
 
 This is a large, multi-module production system (offline-first Flutter POS,
 Go backend, PostgreSQL with RLS, payments, GST/compliance, hardware, sync,
@@ -46,21 +46,45 @@ Legend: `NOT_STARTED` / `IN_PROGRESS` / `IMPLEMENTED` / `TESTED` / `VERIFIED`
   specifically. Caught by actually attempting tenant creation as `app_admin`
   and observing the RLS denial.
 
+## Phase 2 — Go Backend Foundation (Auth, Tenant Context, RBAC)
+
+| Area | Status | Evidence |
+|---|---|---|
+| Go module scaffold (`services/api`) | IMPLEMENTED | chi router, pgx/pgxpool, JWT, bcrypt, shopspring/decimal wired in |
+| Dual-role DB connection model (app_user pool + separate app_admin pool) | **VERIFIED** | `internal/dbctx/dbctx.go`; see bug #3 below — this was fixed after testing exposed that a single-role pool cannot use the admin bypass at all |
+| Password hashing (bcrypt) + refresh-token hashing | IMPLEMENTED | `internal/auth/password.go`, `internal/auth/jwt.go` |
+| JWT access tokens carrying trusted tenant/user/device/permissions | IMPLEMENTED | `internal/auth/jwt.go` |
+| Login (device→tenant resolution, credential check, lockout, session issuance) | **VERIFIED** | `internal/domain/identity/service.go`; exercised via real HTTP calls against the live dev DB and via automated Go integration test `service_integration_test.go` |
+| Refresh token rotation (old token invalidated on use) | **VERIFIED** | Integration test confirms reuse of a rotated token is rejected |
+| Logout / session revocation | **VERIFIED** | Integration test confirms refresh fails after logout |
+| Standardized API error envelope (code/message/request_id/retryable) | IMPLEMENTED | `internal/httpapi/errors.go`, matches PRD A21 |
+| Request ID propagation, panic recovery, bearer-auth middleware, permission-check middleware | IMPLEMENTED | `internal/middleware/middleware.go` |
+| Health endpoints (`/health/live`, `/health/ready`) | **VERIFIED** | Hit via curl against a running server; `/health/ready` genuinely pings the DB pool |
+| Automated integration test suite for identity/auth | **VERIFIED** | `internal/domain/identity/service_integration_test.go`, runnable via `scripts/test-integration.sh` |
+
+### Real bugs found and fixed this session (not hypothetical)
+1. **Import cycle** between `middleware` and `httpapi` packages (each needed the request ID from the other) — resolved by extracting a small shared `internal/reqctx` package. Caught by `go build`.
+2. **Composite FK gaps** in three more tables discovered while re-verifying migrations were still fully self-consistent (see Phase 1 section).
+3. **Admin bypass was silently non-functional**: `WithAdminTx` set the `app.admin_mode` session flag, but the connection pool it ran on connected as `app_user`, and the `admin_cross_tenant` RLS policies are scoped `TO app_admin` only — so the flag had no effect and the very first cross-tenant admin operation (resolving a login device's tenant) failed. Fixed by giving `dbctx.DB` two genuinely separate pools (`Pool` for `app_user`, `AdminPool` for `app_admin`) and routing `WithAdminTx` to the admin pool. Caught by actually attempting a login through the HTTP API, not by inspection.
+4. **Critical RLS correctness bug, found only by an automated integration test, not manual curl testing**: PostgreSQL custom GUCs (`app.tenant_id`) are placeholder variables — once *any* transaction on a pooled physical connection sets one locally, `current_setting(..., true)` reverts to an **empty string**, not `NULL`, after that transaction ends (confirmed empirically). Because pgxpool reuses connections across unrelated transactions, any connection that had ever served a tenant-scoped request would thereafter throw a hard `invalid input syntax for type uuid: ""` error on the next admin-mode query on that same connection that didn't set `app.tenant_id` — e.g. the device-resolution step of login. This is now fixed in `db/migrations/0014_rls_tenant_context_fix.up.sql` by wrapping every RLS policy's `current_setting(...)::uuid` cast in `NULLIF(..., '')` so "never set" and "reset to empty" both fail closed safely instead of erroring. The RLS isolation test suite (`tests/security/rls_isolation_test.sql`) was re-run and still passes after the fix, and the identity integration test — which had been failing with exactly this error — now passes in full. This is exactly the class of bug the master spec's testing requirements exist to catch, and it would not have been found without writing and running (not just writing) an automated test against a real, connection-pooled database.
+
 ## Not Yet Started
 
-Everything else required by the 19 specifications: Go backend (API,
-business logic, idempotency, outbox), Flutter app (offline-first,
-SQLCipher, POS UI), payment/GST/WhatsApp provider adapters, hardware
-adapters (scale/printer/scanner), reporting, seed/config workflows, CI/CD,
-full test suites (unit/integration/E2E/offline/chaos), backup/DR tooling,
-and the remaining documentation set. These will be built in subsequent
-sessions, in the priority order set by the master specification (security →
-financial integrity → tenant isolation → inventory → payments → compliance
-→ offline sync → API → backend → Flutter → hardware → UI → reporting →
-DevOps).
+Business domain modules (products, inventory, procurement, POS/invoice
+finalization, Khata/accounting, payments, contra, EOD, reports),
+idempotency/outbox infrastructure, Flutter app (offline-first, SQLCipher,
+POS UI), payment/GST/WhatsApp provider adapters, hardware adapters
+(scale/printer/scanner), seed/config workflows, CI/CD, the rest of the test
+suites (E2E/offline/chaos/load), backup/DR tooling, and the remaining
+documentation set. These will be built in subsequent sessions, in the
+priority order set by the master specification (security → financial
+integrity → tenant isolation → inventory → payments → compliance → offline
+sync → API → backend → Flutter → hardware → UI → reporting → DevOps).
 
 ## Production Readiness
 
-**NOT READY.** Only the database foundation exists and has been verified.
-No API, no business logic, no client application, no integrations, and no
-CI exist yet.
+**NOT READY.** The database foundation and the auth/identity vertical slice
+of the Go backend exist and have been verified end-to-end (real HTTP calls
+and automated integration tests against a live PostgreSQL instance). No
+business domain logic (POS, inventory, payments, accounting), no client
+application, no third-party integrations, and no CI exist yet.

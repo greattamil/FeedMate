@@ -62,7 +62,8 @@ services:
         condition: service_healthy
     environment:
       APP_ENV: development
-      DATABASE_URL: postgres://app_user:${APP_USER_PASSWORD:-dev_app_password_change_me}@postgres:5432/feedmate?sslmode=disable
+      DATABASE_URL: postgres://app_user:${APP_USER_PASSWORD:-CHANGE_ME_IN_PRODUCTION}@postgres:5432/feedmate?sslmode=disable
+      DATABASE_ADMIN_URL: postgres://app_admin:${APP_ADMIN_PASSWORD:-CHANGE_ME_IN_PRODUCTION}@postgres:5432/feedmate?sslmode=disable
       REDIS_URL: redis://redis:6379/0
       JWT_SIGNING_KEY: ${JWT_SIGNING_KEY:-dev_only_change_me}
       LOG_LEVEL: debug
@@ -82,7 +83,8 @@ services:
         condition: service_healthy
     environment:
       APP_ENV: development
-      DATABASE_URL: postgres://app_user:${APP_USER_PASSWORD:-dev_app_password_change_me}@postgres:5432/feedmate?sslmode=disable
+      DATABASE_URL: postgres://app_user:${APP_USER_PASSWORD:-CHANGE_ME_IN_PRODUCTION}@postgres:5432/feedmate?sslmode=disable
+      DATABASE_ADMIN_URL: postgres://app_admin:${APP_ADMIN_PASSWORD:-CHANGE_ME_IN_PRODUCTION}@postgres:5432/feedmate?sslmode=disable
       REDIS_URL: redis://redis:6379/0
       LOG_LEVEL: debug
 

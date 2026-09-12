@@ -1,0 +1,92 @@
+// Package config loads runtime configuration from the environment.
+// No secret ever has a hard-coded production value here — only safe local defaults
+// that are unmistakably unsuitable for production (e.g. "dev_only_change_me").
+package config
+
+import (
+	"fmt"
+	"os"
+	"strconv"
+	"time"
+)
+
+type Config struct {
+	AppEnv   string
+	HTTPAddr string
+
+	DatabaseURL      string
+	DatabaseAdminURL string
+
+	RedisURL string
+
+	JWTSigningKey        string
+	AccessTokenTTL       time.Duration
+	RefreshTokenTTL      time.Duration
+	BcryptCost           int
+	AdminAPIEnabled      bool
+	IdempotencyRetention time.Duration
+}
+
+func Load() (Config, error) {
+	cfg := Config{
+		AppEnv:               getEnv("APP_ENV", "development"),
+		HTTPAddr:             getEnv("HTTP_ADDR", ":8080"),
+		DatabaseURL:          os.Getenv("DATABASE_URL"),
+		DatabaseAdminURL:     os.Getenv("DATABASE_ADMIN_URL"),
+		RedisURL:             os.Getenv("REDIS_URL"),
+		JWTSigningKey:        os.Getenv("JWT_SIGNING_KEY"),
+		AccessTokenTTL:       getDuration("ACCESS_TOKEN_TTL", 15*time.Minute),
+		RefreshTokenTTL:      getDuration("REFRESH_TOKEN_TTL", 30*24*time.Hour),
+		BcryptCost:           getInt("BCRYPT_COST", 12),
+		AdminAPIEnabled:      getBool("ADMIN_API_ENABLED", false),
+		IdempotencyRetention: getDuration("IDEMPOTENCY_RETENTION", 7*24*time.Hour),
+	}
+
+	if cfg.DatabaseURL == "" {
+		return cfg, fmt.Errorf("DATABASE_URL is required")
+	}
+	if cfg.DatabaseAdminURL == "" {
+		return cfg, fmt.Errorf("DATABASE_ADMIN_URL is required (must connect as the app_admin role)")
+	}
+	if cfg.JWTSigningKey == "" {
+		if cfg.AppEnv == "production" {
+			return cfg, fmt.Errorf("JWT_SIGNING_KEY is required in production")
+		}
+		cfg.JWTSigningKey = "dev_only_change_me"
+	}
+	return cfg, nil
+}
+
+func getEnv(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+
+func getInt(key string, def int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return def
+}
+
+func getBool(key string, def bool) bool {
+	if v := os.Getenv(key); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b
+		}
+	}
+	return def
+}
+
+func getDuration(key string, def time.Duration) time.Duration {
+	if v := os.Getenv(key); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
+		}
+	}
+	return def
+}

@@ -1,0 +1,742 @@
+Andipatti Animal Feed System
+Document 09 — Complete Hardware Integration Specification v1.0
+Implementation-ready specification • Flutter Edge Device • Go Backend • Docker • Offline-first • POS-integrated
+Document sequence: 09 of 20 | No sprint planning
+This document defines the hardware boundary for barcode scanners, digital weighing scales, ESC/POS printers, cash drawers, customer/payment displays and related POS peripherals. Hardware is an edge concern: Bluetooth/USB/RS-232 device access stays on the Flutter device, while authoritative business state remains in the Go/PostgreSQL platform.
+1. Document Control
+2. Objectives
+Provide a vendor-neutral hardware abstraction layer.
+Support USB, Bluetooth/BLE and RS-232 serial peripherals where appropriate.
+Support barcode scanners as keyboard-HID and serial devices.
+Support digital weighing scales with stable-weight validation.
+Support ESC/POS thermal printers and common connection modes.
+Support cash-drawer triggering through printer RJ-12/RJ-11 kick interface where available.
+Support optional customer-facing display and payment/QR display.
+Persist pairing/configuration per device and tenant.
+Provide diagnostics, health state, reconnection and controlled fallback.
+Keep hardware I/O outside authoritative accounting/inventory transactions.
+Make all device actions observable and auditable without logging secrets.
+3. Non-Goals
+Do not run Bluetooth/USB hardware drivers inside backend Docker containers.
+Do not make a printer, scale or scanner a prerequisite for server-side invoice finalization unless a specific business rule explicitly requires the scale for a weighted item.
+Do not store raw payment credentials in hardware adapters.
+Do not infer weight, payment success or print success from UI state alone.
+Do not silently switch hardware devices without an explicit pairing/configuration policy.
+4. Hardware Architecture
+Flutter POS
+  ├── Hardware Manager
+  │    ├── Scanner Adapter
+  │    ├── Scale Adapter
+  │    ├── Printer Adapter
+  │    ├── Cash Drawer Adapter
+  │    ├── Customer Display Adapter
+  │    └── Payment Display/QR Adapter
+  │
+  ├── Device Registry / Pairing State
+  ├── Local Diagnostics
+  └── SQLCipher Local State
+          |
+          | HTTPS / WSS
+          v
+      Go API / Workers
+          |
+      PostgreSQL / Redis(optional) / R2
+
+The Flutter hardware layer exposes stable domain interfaces. Vendor/protocol-specific code is isolated behind adapters so the POS engine is not coupled to a particular manufacturer.
+5. Hardware Device Registry
+Hardware configuration changes require authorization.
+Device pairing must be tenant-scoped.
+Revoked POS devices must not perform authoritative financial operations.
+Sensitive Bluetooth/USB permissions remain OS-controlled.
+6. Hardware Capability Matrix
+7. Common Connection State Machine
+Automatic reconnect must use bounded exponential backoff.
+Reconnect attempts must not freeze the POS UI.
+Only one active adapter instance may own a physical device per terminal.
+Connection events are observable and locally visible to authorized operators.
+8. Barcode Scanner Integration
+8.1 Supported modes
+USB HID keyboard-wedge.
+Bluetooth HID.
+Serial/COM scanner where supported.
+Vendor SDK only behind a scanner adapter when generic protocols are insufficient.
+8.2 Scan processing
+Receive scanner input.
+Detect configured terminator/prefix/suffix.
+Normalize whitespace and control characters.
+Validate barcode length/format according to product configuration.
+Resolve exact barcode locally or through API.
+Present product selection to POS.
+Apply configured duplicate-scan behavior.
+Record device and timestamp for diagnostics.
+8.3 Duplicate scans
+Rapid identical scans may intentionally increase quantity for countable products.
+Weighted/loose products must follow product-specific scan behavior and must not multiply a scale reading unexpectedly.
+Configurable debounce interval prevents accidental repeated input.
+Manual correction remains available.
+8.4 Unknown barcode
+Display explicit unknown-barcode status.
+Allow search by Tamil/English/alias/product code.
+Never auto-create a product from scanner input.
+Authorized users may open product-master workflow.
+9. Digital Weighing Scale
+9.1 Supported transports
+RS-232 serial.
+USB-to-serial adapters presenting a serial interface.
+Bluetooth serial profile where supported by the device.
+BLE only when a documented vendor protocol exists.
+9.2 Configuration
+Defaults must be configured per hardware model/protocol. Never assume a universal serial configuration.
+9.3 Scale reading pipeline
+RAW BYTES
+ -> FRAME DETECTION
+ -> CHECKSUM/VALIDATION (if protocol supports)
+ -> PARSE SIGN + VALUE + UNIT + STATUS
+ -> UNIT CONVERSION
+ -> RANGE VALIDATION
+ -> STABILITY FILTER
+ -> STABLE WEIGHT EVENT
+ -> POS WEIGHT SERVICE
+ -> CART LINE
+ -> FINALIZATION REVALIDATION
+9.4 Stable-weight rules
+A stable reading requires the configured duration and variance criteria.
+Scale status flags such as overload, motion, negative or error must be rejected.
+Zero/negative readings cannot finalize a normal positive-weight sale.
+Automatic acceptance must use a stable event, not an arbitrary latest frame.
+Manual weight entry is permission-controlled and audited.
+At finalization, the backend validates the quantity against product/UOM rules; it does not trust a client-side stability flag as a financial authority.
+10. Scale Safety & Tare
+Gross, tare and net concepts must remain distinct where the weighing workflow uses them.
+Where procurement/GRN uses sack tare, the GRN engine validates tare separately from POS.
+POS weighted sales generally consume net sale quantity.
+Scale overload must immediately stop automatic capture.
+An operator must not be able to enter a negative net weight.
+Any manual tare adjustment is explicitly recorded and permission-controlled.
+11. Scale Protocol Adapter Contract
+interface ScaleAdapter {
+  connect(config) -> Result
+  disconnect() -> Result
+  readLive() -> Stream<ScaleReading>
+  requestStableReading() -> Result<StableWeight>
+  zero() -> Result
+  tare() -> Result
+  diagnostics() -> Result<ScaleDiagnostics>
+}
+
+The exact Dart interface may differ, but the semantic contract must remain equivalent. Backend services never directly depend on the physical protocol.
+12. Thermal Printer / ESC-POS
+12.1 Supported transports
+USB serial/USB printer interface.
+Bluetooth serial where supported.
+RS-232/serial.
+Network/TCP printing where the printer supports it.
+12.2 Printer responsibilities
+Render finalized receipt content into an ESC/POS command stream.
+Handle paper width and character capability.
+Print Tamil through supported font/bitmap/image rendering where native code-page support is unavailable.
+Support barcode/QR printing when printer supports it.
+Support cash-drawer kick where configured.
+Return print status/errors where the transport provides them.
+12.3 Print pipeline
+Retrieve finalized invoice receipt snapshot.
+Resolve printer profile.
+Render layout.
+Encode Tamil/Unicode using configured strategy.
+Generate ESC/POS command stream.
+Open transport.
+Write with bounded timeout.
+Flush/close.
+Record print attempt.
+Expose success/failure to UI.
+Printing occurs after financial commit. A print exception must never roll back the invoice.
+13. Tamil Printing
+Preferred method: printer-supported Unicode/font rendering.
+Fallback: render Tamil receipt text as raster image/bitmap if printer cannot render required Unicode.
+Printer profile stores supported character strategy.
+Golden receipt tests must verify Tamil output on each supported printer profile.
+Do not silently replace Tamil with unrelated glyphs.
+If Tamil cannot be printed reliably, offer WhatsApp/PDF/digital receipt fallback according to configured capabilities.
+14. Receipt Layout Requirements
+15. Reprint & Print Retry
+Reprint is always based on finalized invoice data.
+Reprint permission is role-controlled.
+Each reprint creates an audit event.
+Retry is safe because printing is an external side effect.
+Print attempt IDs prevent duplicate operational records but do not prevent legitimate reprints.
+Printer recovery should allow retry without reopening or editing the invoice.
+16. Cash Drawer
+Preferred trigger: ESC/POS cash-drawer kick from printer.
+Drawer opening occurs only for configured cash operations.
+Opening event records user, terminal, timestamp and reason where applicable.
+Drawer-open failure does not alter invoice/payment state.
+Physical cash reconciliation remains part of cash session/EOD.
+Do not expose drawer control to unauthorized roles.
+ESC/POS concept:
+ESC p m t1 t2
+(Exact bytes depend on printer and configured kick parameters.)
+17. Customer Display
+Show cart lines, quantities, price, discount and total.
+Show tax only as configured.
+Show payment amount/QR when payment workflow requires it.
+Do not display sensitive Khata exposure, internal cost, margin or owner-only data.
+Display connection loss without blocking the POS workflow.
+18. Payment/QR Display
+QR content originates from the payment provider/payment intent, not from manually typed arbitrary data.
+Display may be a second monitor, network display, serial display or Flutter screen.
+Payment display is informational; provider verification remains authoritative.
+Do not mark payment successful from QR display interaction.
+19. Hardware Pairing & Provisioning
+Admin identifies terminal.
+Discover or enter hardware.
+Select hardware type and protocol profile.
+Pair/connect through supported OS mechanism.
+Run diagnostics test.
+Save configuration.
+Record device identity.
+Run test scan/weight/print.
+Mark device ACTIVE.
+Provisioning must validate tenant and terminal ownership.
+Device configuration changes are audited.
+Secrets/credentials, if any, use secure storage or environment/secret-management mechanisms.
+20. Diagnostics Mode
+Diagnostic mode must never create inventory, accounting, payment or invoice transactions.
+21. Hardware Health Model
+Health data should be retained according to operational observability/retention policy and should not grow without bounds.
+22. Failure Isolation Rules
+Hardware adapter exceptions are caught at the edge boundary.
+A printer exception never rolls back an invoice.
+A scanner failure never blocks manual search.
+A scale failure only blocks automatic weighted capture; authorized manual entry may be allowed.
+Customer-display failure never blocks billing.
+Payment-display failure never changes payment state.
+Hardware reconnect runs asynchronously.
+Hardware event streams must be cancelled on screen/device lifecycle changes to avoid leaks.
+23. Offline Hardware Operation
+Scanner works against local SQLCipher product index.
+Scale can capture weights offline.
+Printer can print local finalized/provisional receipts according to offline receipt policy.
+Hardware events can be stored with local transaction envelope IDs.
+On reconnect, hardware telemetry does not override authoritative financial data.
+Offline provisional receipt must be clearly distinguishable if local policy requires it.
+24. Hardware + POS Transaction Boundary
+Hardware event
+   -> local POS state
+   -> user confirmation
+   -> POS quote
+   -> payment workflow
+   -> server finalization
+   -> committed invoice
+   -> post-commit print/share
+
+Never:
+hardware event -> direct DB financial write
+printer success -> invoice finalization
+QR display -> payment success
+scale "stable" flag -> unconditional stock decrement
+25. Backend Hardware APIs
+Exact routes/schema are governed by Document 02. Direct physical I/O remains on Flutter.
+26. Database Mapping
+If the implementation needs a richer hardware inventory table, it must remain tenant-scoped and be added through a controlled schema revision rather than hidden application state.
+27. Flutter Architecture Mapping
+lib/
+  features/hardware/
+    domain/
+      hardware_device.dart
+      hardware_capability.dart
+      scale_reading.dart
+      printer_job.dart
+    application/
+      hardware_manager.dart
+      device_pairing_service.dart
+      diagnostics_service.dart
+    infrastructure/
+      scanner/
+        hid_scanner_adapter.dart
+        bluetooth_scanner_adapter.dart
+        serial_scanner_adapter.dart
+      scale/
+        rs232_scale_adapter.dart
+        bluetooth_scale_adapter.dart
+        protocol_profiles/
+      printer/
+        escpos_renderer.dart
+        usb_printer_adapter.dart
+        bluetooth_printer_adapter.dart
+        serial_printer_adapter.dart
+      drawer/
+      display/
+    presentation/
+      hardware_settings/
+      diagnostics/
+
+28. Go Backend Mapping
+DeviceService: device registration, status, revocation and authorization.
+AuditService: pairing/configuration/diagnostic audit.
+ReceiptService: immutable receipt data model.
+Notification/MessageService: WhatsApp fallback.
+PaymentService: payment intent/status authority.
+SyncService: offline envelope reconciliation.
+Ops/HealthService: backend-visible device/terminal health where applicable.
+The backend should not implement vendor serial/Bluetooth drivers. It consumes logical device state, transaction metadata and trusted API calls from the Flutter edge.
+29. Security
+Only authenticated, authorized users can configure hardware.
+Device IDs are authenticated and tenant-bound.
+Revoked devices are rejected server-side.
+USB/Bluetooth permissions follow OS security model.
+Hardware debug logs must not expose secrets.
+Payment QR payloads are treated as payment data and are not logged in full unless explicitly required and protected.
+Receipt data follows privacy policy; avoid unnecessary PII in diagnostics.
+Admin-only diagnostics may expose raw protocol data where operationally necessary, with controlled retention.
+Firmware update capability, if later added, must use signed/verified firmware and a separate security specification.
+30. Hardware Role Matrix
+31. Error Catalogue
+32. Reconnection & Retry Policy
+Use exponential backoff with jitter, e.g. 1s, 2s, 4s, 8s, capped at a configured maximum.
+Reset retry counter after stable successful connection.
+Do not retry malformed protocol commands indefinitely.
+Do not retry printer jobs automatically if doing so could produce duplicate physical prints unless the transport provides an acknowledgement model; expose manual retry instead.
+Scale continuous read streams may reconnect automatically.
+Payment operations must use payment-service idempotency, not hardware retry semantics.
+33. Printer Duplicate-Print Safety
+Printing is inherently difficult to make exactly-once because a connection can fail after the printer physically receives bytes. Therefore:
+Each print attempt has a local print_job_id.
+On uncertain completion, UI shows UNKNOWN/REQUIRES_RETRY rather than assuming failure.
+Automatic retry is disabled for uncertain receipt jobs unless the printer/transport provides reliable job acknowledgement.
+Manual retry is allowed and is an audited reprint if the invoice was already finalized.
+Financial state never depends on print acknowledgement.
+34. Scale Duplicate/Replay Safety
+Every accepted stable weight has a local capture ID.
+POS associates the capture ID with cart line/version.
+Re-reading a scale creates a new capture ID.
+An old capture cannot silently replace a newer confirmed weight.
+At finalization, the quantity sent to the backend is validated against the current cart line and product/UOM rules.
+35. Customer Display Consistency
+Display is derived from current POS presentation state.
+Display update failures do not mutate the authoritative cart.
+During payment, the displayed amount must come from the same calculated quote shown to the cashier.
+After finalization, display may show completion/thank-you state but must not reveal internal audit information.
+36. Hardware Configuration Versioning
+Every configuration has a version.
+Changing baud rate, protocol profile, paper width, encoding mode, stability rules or device assignment increments configuration version.
+Local Flutter cache stores the active version.
+Server configuration wins for authoritative provisioning.
+Config changes are auditable.
+Rollback to a prior known-good configuration is supported for authorized operators.
+37. Localization & Accessibility
+Hardware setup screens support Tamil and English.
+Use clear icons plus text for connection state.
+Do not rely on color alone to communicate errors.
+Scale weight must use large, readable typography.
+Printer/scale failure messages should state the next action.
+Touch targets must be suitable for shop-floor use.
+38. Performance Targets
+Actual targets depend on hardware, OS and transport. Measurements must be collected on supported production devices.
+39. Observability
+Metrics by tenant/terminal/hardware type, avoiding excessive high-cardinality raw serial numbers.
+Connection success/failure count.
+Reconnect count.
+Scale stable/unstable/error count.
+Printer success/failure/uncertain count.
+Scanner unknown-barcode count.
+Hardware operation latency.
+Firmware/model inventory where available.
+Diagnostic failures.
+Correlate hardware events to request ID, transaction ID or print_job_id where applicable.
+40. Testing Strategy
+40.1 Unit tests
+Scanner terminator/prefix/suffix parsing.
+Barcode normalization.
+Scale frame parsing.
+Checksum validation.
+Unit conversion.
+Stability filter.
+Overload/negative/error handling.
+ESC/POS command generation.
+Tamil rendering path.
+Cash drawer command generation.
+Reconnect backoff.
+Printer duplicate-print safety.
+40.2 Integration tests
+USB/Bluetooth/serial adapter integration using mocks or hardware test rigs.
+POS + scale + invoice calculation.
+POS + printer after successful finalization.
+Printer failure after finalization.
+Device revocation.
+Offline hardware capture and sync.
+Payment display with verified payment state.
+40.3 Physical hardware test matrix
+40.4 Golden tests
+English receipt.
+Tamil receipt.
+Mixed Tamil/English product names.
+GST split tax receipt.
+Discount receipt.
+Khata receipt.
+UPI receipt.
+Return/credit note representation.
+41. Chaos & Failure Tests
+Kill Flutter process during scale read.
+Disconnect USB during printer write.
+Disable Bluetooth while connected.
+Restart printer during print.
+Unplug scale during stable-reading wait.
+Generate malformed serial frames.
+Cause checksum errors.
+Force network loss during finalized invoice flow.
+Restart backend after device API request.
+Revoke device while offline, then reconnect.
+Simulate duplicate printer retry.
+Simulate payment QR/display failure.
+42. Operational Runbooks
+43. API / DB / Application Traceability
+44. Docker/DevOps Requirements
+Backend API, worker and infrastructure run as containers as defined by the platform architecture.
+Hardware access remains on Flutter/native OS layer; Docker must not be used as a workaround for mobile peripheral permissions.
+Development can provide simulated hardware services/mocks inside Docker for CI.
+Hardware protocol fixtures are version-controlled test assets.
+CI must run adapter unit tests without requiring physical devices.
+Optional hardware-in-the-loop test environment runs separately with controlled physical rigs.
+45. Simulated Hardware Services
+For local development and CI, provide deterministic simulators for scanner, scale and printer.
+hardware-simulator/
+  scanner/
+    emit_scan
+  scale/
+    stable_weight
+    unstable_weight
+    overload
+    disconnect
+  printer/
+    accept_job
+    fail_job
+    uncertain_job
+  display/
+    render
+
+Simulator responses must reproduce success, timeout, malformed input, disconnect and error states.
+Simulators must never connect to production payment or financial databases.
+Test fixtures should include Tamil product names and realistic decimal weights.
+46. Data Retention & Privacy
+Retain device configuration and audit according to operational retention policy.
+Do not retain raw scanner input longer than needed unless diagnostic policy requires it.
+Raw scale frames should normally be diagnostic-only and short-retention.
+Receipt copies follow invoice/document retention policy.
+Hardware logs must be scrubbed of tokens, payment secrets and unnecessary PII.
+47. Firmware & Updates — Future Extension
+Firmware updates are outside the v1.0 POS hardware control path.
+If introduced, firmware must be signed, version-checked and rollback-capable.
+Only authorized administrators may initiate updates.
+Power-loss recovery must be designed before enabling production firmware updates.
+Firmware version is informational in v1.0 unless a device compatibility rule explicitly requires it.
+48. Acceptance Criteria
+Scanner reliably captures supported barcodes and never creates products automatically.
+Scale captures stable weights with configured protocol and unit conversion.
+Unstable/overload/negative readings cannot be accepted as valid automatic sale weights.
+Authorized manual weights are audited.
+Printer produces correct English and Tamil receipts for all supported profiles.
+Printer failure never rolls back a finalized invoice.
+Uncertain printer outcomes do not create duplicate invoices.
+WhatsApp fallback can be offered after printer failure where configured.
+Cash drawer can be triggered only by authorized operations.
+Customer display failure does not block billing.
+Payment/QR display never determines payment success.
+Hardware pairing is tenant/device scoped and audited.
+Revoked devices cannot perform authoritative operations.
+Offline hardware events survive app restart where required.
+All hardware adapters have deterministic mocks.
+Physical test matrix passes for each supported hardware profile.
+Docker-based CI passes all simulator/adapter tests.
+All critical hardware failures have actionable operator diagnostics.
+49. Implementation Checklist
+Define supported scanner models/protocols.
+Define supported scale models/protocol profiles.
+Define supported printer models/paper widths.
+Implement HardwareManager lifecycle.
+Implement device registry/pairing state.
+Implement scanner adapters.
+Implement scale adapters and stability filter.
+Implement printer adapters and ESC/POS renderer.
+Implement Tamil receipt rendering.
+Implement cash drawer adapter.
+Implement customer display adapter.
+Implement payment/QR display abstraction.
+Implement diagnostics UI.
+Implement reconnect policies.
+Implement hardware permissions handling.
+Implement local hardware configuration storage.
+Implement audit events.
+Implement hardware simulators.
+Implement physical hardware test matrix.
+Integrate with POS Document 08.
+Integrate with offline Document 05.
+Validate Docker/CI simulator environment.
+Prepare operational runbooks.
+50. Non-Negotiable Hardware Rules
+Never allow physical hardware success to be the authority for a financial transaction.
+Never allow printer failure to roll back a finalized invoice.
+Never trust a scale stability flag without backend/POS quantity validation.
+Never accept negative, overload or invalid weight as a normal sale quantity.
+Never auto-create products from scanner input.
+Never use hardware adapters directly from accounting/inventory code.
+Never perform Bluetooth/USB/RS-232 physical I/O from backend Docker containers.
+Never retry an uncertain printer job automatically in a way that can silently duplicate a receipt.
+Never expose payment secrets in hardware logs.
+Never let customer display/payment display determine payment settlement.
+Never allow revoked devices to perform authoritative operations.
+Never bypass audit for manual weight, reprint, drawer operation or hardware configuration.
+Never hardcode a single serial protocol configuration for all scales.
+Never assume all printers support Unicode/Tamil natively; use a tested fallback rendering strategy.
+51. End-to-End Hardware Scenarios
+51.1 Barcode cash sale
+Scanner reads barcode.
+POS resolves product.
+Cashier confirms quantity.
+POS calculates quote.
+Cash accepted.
+Server finalizes invoice.
+Post-commit printer prints.
+Drawer kick occurs if configured.
+51.2 Loose feed by scale
+Cashier selects loose product.
+Scale streams readings.
+Stable reading accepted.
+POS associates capture ID.
+Quote calculated.
+Payment completed.
+Server finalizes stock/accounting.
+Receipt prints.
+51.3 Scale disconnected
+Disconnect detected.
+POS preserves cart.
+Cashier reconnects or uses authorized manual weight.
+Manual entry reason recorded.
+Finalization performs normal server validation.
+51.4 Printer fails after sale
+Invoice commits.
+Printer write fails.
+Invoice remains FINALIZED.
+Cashier retries or shares via WhatsApp.
+Audit records print/share outcome.
+51.5 Uncertain print
+Printer transport times out after bytes may have been delivered.
+POS marks print outcome UNKNOWN.
+No new invoice is created.
+Operator checks physical printer.
+Operator uses controlled reprint if required.
+51.6 Offline sale
+Scanner/scale work locally.
+Sale is stored in SQLCipher envelope.
+Local receipt follows offline policy.
+Network returns.
+Envelope uploads idempotently.
+Server reconciles inventory/credit/price policy.
+Authoritative result is returned.
+52. Example Hardware Configuration
+{
+  "terminal": "POS-01",
+  "scanner": {
+    "type": "USB_HID",
+    "suffix": "\n",
+    "debounce_ms": 250
+  },
+  "scale": {
+    "type": "RS232",
+    "profile": "VENDOR_PROFILE_A",
+    "unit": "kg",
+    "stability_duration_ms": 800,
+    "allowed_variance": 0.020
+  },
+  "printer": {
+    "type": "USB_ESCPOS",
+    "paper_width_mm": 80,
+    "tamil_render_mode": "BITMAP",
+    "auto_retry_uncertain": false
+  },
+  "drawer": {
+    "mode": "PRINTER_KICK",
+    "enabled": true
+  }
+}
+This is illustrative configuration only. Actual protocol parameters are selected per supported device model.
+53. Definition of Done
+All supported hardware has an adapter contract.
+Each adapter has unit tests and simulator fixtures.
+Scale stability and error handling are verified.
+ESC/POS receipt output is verified in physical tests.
+Tamil receipt output is verified.
+Printer failure isolation is verified.
+Unknown/duplicate scanner behavior is verified.
+Hardware configuration is tenant/device scoped and audited.
+Revocation works server-side.
+Offline behavior is tested across restart/reconnect.
+POS Document 08 integration passes all hardware scenarios.
+Operational diagnostics and runbooks are available.
+CI runs hardware simulation tests inside Docker.
+No P0 hardware/data-integrity defect remains.
+54. Dependency & Change Control
+This document depends on Documents 01–08 and is normative for hardware boundaries used by Documents 10–20. Changes to hardware protocols, device capabilities, receipt rendering, scale precision or payment-display behavior must record compatibility impact, affected terminals/models, migration/configuration changes and test evidence.
+End of Document 09 — Complete Hardware Integration Specification v1.0.
+Item | Specification
+Document ID | AAF-HW-009
+Version | 1.0
+Status | Implementation Baseline
+Primary consumers | Flutter, Backend, QA, Operations, Hardware/IT
+Authoritative dependencies | Documents 01–08
+Hardware principle | Hardware failures must never corrupt finalized financial/inventory state.
+Deployment | Backend/support services containerized with Docker; physical peripherals attach to POS devices.
+Field | Requirement
+device_id | Globally unique application device identity.
+tenant_id | Mandatory tenant ownership.
+pos_terminal_id | Logical POS terminal association.
+hardware_type | SCANNER / SCALE / PRINTER / CASH_DRAWER / DISPLAY / PAYMENT_DISPLAY.
+connection_type | USB / BLUETOOTH / BLE / RS232 / NETWORK / HID.
+vendor | Manufacturer, if known.
+model | Model identifier, if known.
+serial_number | Captured where available.
+firmware_version | Captured where available.
+configuration | Versioned non-secret configuration.
+status | PAIRED / CONNECTED / DISCONNECTED / ERROR / DISABLED / REVOKED.
+last_seen_at | Last successful communication.
+paired_at | Pairing timestamp.
+revoked_at | Revocation timestamp when applicable.
+Hardware | Required? | Primary connection | Failure fallback
+Barcode scanner | Recommended | USB HID / Bluetooth / Serial | Manual/search input
+Digital scale | Required for weighted workflows | RS-232 / USB serial / Bluetooth | Authorized manual weight
+Thermal printer | Recommended | USB / Bluetooth / Serial / Network | Reprint/WhatsApp/manual receipt
+Cash drawer | Optional | Printer kick / USB | Manual drawer operation with audit
+Customer display | Optional | USB/Serial/Network | POS screen
+Payment/QR display | Optional | USB/Network/Bluetooth | Flutter screen QR
+State | Meaning
+DISCOVERING | Searching for configured/available device.
+PAIRING | OS/application pairing in progress.
+CONNECTING | Transport connection being established.
+CONNECTED | Ready for commands/data.
+DEGRADED | Connected but protocol/read/write errors observed.
+DISCONNECTED | No active transport.
+RECONNECTING | Automatic bounded retry.
+ERROR | Persistent device/protocol/configuration error.
+DISABLED | Temporarily disabled by operator/admin.
+REVOKED | Application identity revoked; cannot be used.
+Parameter | Purpose
+baud_rate | Serial speed.
+data_bits | Usually 7/8 according to scale protocol.
+parity | NONE/ODD/EVEN.
+stop_bits | 1/2.
+read_mode | CONTINUOUS / REQUEST_RESPONSE.
+unit | kg/g or configured unit.
+stability_duration_ms | Minimum stable period.
+allowed_variance | Maximum permitted variation.
+zero_tolerance | Acceptable near-zero range.
+max_weight | Safety/business limit.
+protocol_profile | Vendor/protocol decoder identifier.
+Section | Required content
+Header | Shop name, address/contact and configured identifiers.
+Invoice | Invoice number, date/time, financial year/series as applicable.
+Customer | Customer name/phone or Walk-In according to privacy policy.
+Lines | Product, UOM, quantity/weight, rate, discount, amount.
+Tax | Tax breakup when applicable.
+Tender | Cash/UPI/bank/Khata/split details and relevant reference.
+Totals | Subtotal, discount, tax, rounding, grand total, change/balance.
+Footer | Configured message, return policy and digital receipt option where enabled.
+Diagnostic test | Expected result
+Scanner test | Decoded scan displayed; no sale created.
+Scale test | Raw and normalized reading displayed; no stock impact.
+Printer test | Test receipt printed; no invoice created.
+Drawer test | Drawer kick executed if supported; audited.
+Customer display test | Test content rendered.
+Payment display test | Test QR/display content rendered without payment state change.
+Connectivity test | Transport latency/error shown.
+Protocol test | Parser/checksum validation shown where available.
+Metric | Examples
+Connectivity | connected/disconnected duration
+Latency | read/write/print latency
+Errors | protocol, transport, paper, checksum, overload
+Availability | successful operations / attempted operations
+Reconnects | count and last reconnect
+Firmware | version where discoverable
+Paper | low/out if printer reports it
+Scale state | stable/motion/overload/error
+Scanner | last scan timestamp
+Endpoint | Purpose
+GET /api/v1/devices | List authorized POS devices/hardware.
+POST /api/v1/devices | Register/configure logical device where permitted.
+POST /api/v1/devices/{id}/pair | Pair/provision workflow metadata.
+POST /api/v1/devices/{id}/revoke | Revoke device.
+GET /api/v1/devices/{id}/health | Health/diagnostics summary.
+POST /api/v1/receipts/{invoice_id}/print | Create controlled print request if remote print orchestration is used.
+GET /api/v1/sales/invoices/{id}/receipt | Retrieve receipt representation.
+WSS /api/v1/ws | Optional payment/status and operational event channel.
+Concern | Entities from Document 01
+Logical POS/device | devices; device_sessions
+Audit | audit_logs
+Receipt/notification | notification_jobs; message_deliveries
+Invoice source | sales_invoices; sales_invoice_lines; invoice_tax_lines
+Payment | payment_intents; payments; payment_webhook_events
+Outbox | integration_events
+Offline hardware event | sync_transactions / local SQLCipher tables
+Operation | Cashier | Senior Cashier | Manager/Owner | Admin/IT
+Use scanner | ✓ | ✓ | ✓ | ✓
+Use scale | ✓ | ✓ | ✓ | ✓
+Manual weight | Configured | ✓ | ✓ | ✓
+Print/retry | ✓ | ✓ | ✓ | ✓
+Reprint | ✓/audit | ✓ | ✓ | ✓
+Drawer open | Configured | ✓ | ✓ | ✓
+Pair device | — | — | ✓ | ✓
+Change protocol config | — | — | Limited | ✓
+Run diagnostics | Basic | ✓ | ✓ | ✓
+Revoke device | — | — | ✓ | ✓
+Code | Meaning
+HW_NOT_FOUND | Configured hardware unavailable.
+HW_NOT_PAIRED | Pairing required.
+HW_PERMISSION_DENIED | OS permission denied.
+HW_CONNECTION_FAILED | Transport connection failed.
+HW_TIMEOUT | Operation timed out.
+HW_PROTOCOL_ERROR | Protocol/parser error.
+HW_CHECKSUM_ERROR | Invalid protocol checksum.
+HW_UNSUPPORTED | Capability/protocol unsupported.
+SCALE_UNSTABLE | Reading not stable.
+SCALE_OVERLOAD | Scale overload.
+SCALE_NEGATIVE | Negative weight/status.
+SCALE_OUT_OF_RANGE | Reading outside configured range.
+PRINTER_OUT_OF_PAPER | Printer reports paper issue.
+PRINTER_COVER_OPEN | Printer cover/status error.
+PRINTER_ENCODING_ERROR | Receipt encoding/rendering failure.
+PRINTER_WRITE_FAILED | Transport write failed.
+DRAWER_OPEN_FAILED | Drawer trigger failed.
+DISPLAY_WRITE_FAILED | Display transport/render failure.
+HW_REVOKED | Device revoked.
+HW_CONFIG_INVALID | Invalid device configuration.
+Operation | Target
+Scanner decode to POS event | p95 < 150 ms after complete scan input
+Stable scale event after stability threshold | < configured stability window + 250 ms processing
+Printer rendering | < 500 ms typical before transport
+Printer command start | < 500 ms after print request
+Hardware screen state update | < 200 ms typical
+Reconnect initiation | < 1 s after detected disconnect
+Diagnostic test | < 5 s typical excluding operator action
+Hardware | Tests
+Scanner | rapid scans, unknown code, malformed input, disconnect/reconnect
+Scale | zero, tare, stable, motion, overload, negative, max range, disconnect
+Printer | Tamil, GST receipt, QR, barcode, paper-out, cover-open, disconnect, uncertain write
+Drawer | open, failure, unauthorized user
+Display | normal update, long text, disconnect/reconnect
+Payment display | QR rendering, expiry, reconnect, no false paid state
+Incident | Operator action
+Scale disconnected | Check power/cable/Bluetooth; run diagnostics; use authorized manual weight if policy allows.
+Printer not printing | Check paper/cover/power/connection; retry print; use WhatsApp fallback.
+Unknown barcode | Search product by Tamil/English/alias; escalate master-data issue.
+Repeated protocol errors | Stop device, verify profile/baud/protocol, run diagnostics.
+Device revoked | Admin/IT re-provisions or replaces device; no financial bypass.
+Customer display failed | Continue POS; use cashier display.
+Drawer failed | Continue cash sale; record/verify physical drawer operation during EOD.
+Uncertain print | Do not create another invoice; inspect printer and use audited reprint.
+Requirement | Primary source
+Hardware identity/RBAC | Document 01 + 03
+Device API | Document 02 + 03
+Flutter adapter | Document 04
+Offline capture | Document 05
+Stock/weight impact | Document 06
+Payment/Khata/accounting impact | Document 07
+POS finalization boundary | Document 08
+Physical I/O | Document 09

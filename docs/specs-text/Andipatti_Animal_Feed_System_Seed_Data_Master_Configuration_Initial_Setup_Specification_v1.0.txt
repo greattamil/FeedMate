@@ -1,0 +1,931 @@
+Andipatti Animal Feed System
+Document 18 — Complete Seed Data, Master Configuration & Initial Setup Specification v1.0
+Implementation-ready specification for provisioning a new tenant/shop, establishing authoritative master data, configuring products, UOMs, tax, pricing, suppliers, customers, roles, devices, document series, accounting controls, hardware and operational defaults. No sprint planning.
+1. Purpose, Scope, Objectives & Non-Goals
+1.1 Purpose
+Define a deterministic, auditable and safe first-time setup process so a new animal-feed shop can begin operations without unsafe hardcoded assumptions or incomplete master data.
+1.2 Scope
+Tenant/shop creation and onboarding
+Users, roles and permissions
+Financial year and document series
+Products, categories, brands, barcodes and aliases
+UOMs and product-specific conversions
+Tax profiles and HSN/GST configuration
+Customer tiers, price lists and credit policy
+Customers, suppliers and opening balances
+Locations, bins and stock configuration
+Payment providers and tender configuration
+Hardware/device registration
+Notification/WhatsApp templates
+Inventory opening stock and batches
+Accounting/chart-of-accounts defaults
+Retention, backup and operational settings
+Seed execution, validation, import, rollback and audit
+1.3 Non-Goals
+Legal advice or permanently hardcoded tax rates/thresholds
+Production secrets embedded in seed files
+Automatic invention of real supplier/customer records
+Sprint planning
+2. Master Data Principles
+Reference/master data is controlled and versioned.
+Transactional records snapshot relevant master values at finalization.
+Effective dating is mandatory for pricing and tax configurations that can change.
+Seed data must be idempotent and safe to rerun.
+Tenant-owned records carry tenant_id and are protected by PostgreSQL RLS.
+Global reference data must never leak tenant-specific commercial data.
+Every sensitive setup change is audited.
+Unknown values remain configurable rather than being guessed.
+3. Setup Modes
+4. Tenant Onboarding
+Create tenant record and immutable tenant identifier.
+Capture shop/legal name, address, contact information and timezone.
+Capture GSTIN/FSSAI identifiers where applicable.
+Validate identifiers before enabling compliance features.
+Configure default language/localization.
+Configure financial year.
+Configure currency and rounding policy.
+Configure default inventory location.
+Configure business timezone; all timestamps use UTC internally with tenant-local presentation.
+Record setup actor, timestamp, source and configuration version.
+5. Tenant Settings Baseline
+6. Roles & Permission Seed
+Permissions must be atomic and role mappings must be tenant-scoped. Seeded roles can be customized, but finalized financial/inventory actions must always remain protected by authorization rules.
+7. First Owner Account
+Create owner identity.
+Verify authentication factor.
+Require strong password/PIN policy.
+Bind approved first device where applicable.
+Record recovery mechanism without storing plaintext recovery secrets.
+Force credential rotation where bootstrap credentials were used.
+Create audit event for bootstrap completion.
+8. Financial Year Seed
+Create current financial year using tenant locale and approved accounting policy.
+Mark exactly one active financial year.
+Prevent overlapping active financial years.
+Allow historical closed years for migration/recovery.
+Financial-year changes require authorization.
+Document series must reference the financial year.
+9. Document Series
+Do not hardcode a universal starting number for production. The initial number is configurable after validating existing/migrated records.
+10. UOM Seed Model
+A product may support multiple UOMs. Conversion factors are product-specific where package weight or formulation requires it. Never assume every bag equals the same weight.
+11. Product/UOM Conversion Rules
+Store conversion factor as NUMERIC(12,6).
+Define base stock UOM.
+Define sale UOMs.
+Define purchase UOMs.
+Define whether conversion is fixed or requires measured weight.
+Effective-date conversion changes when historical consistency matters.
+Do not retroactively alter conversion rules used by finalized transactions.
+Require authorization for conversion changes affecting stock.
+12. Product Category Seed
+Animal Feed
+Cattle Feed
+Calf Feed
+Poultry Feed
+Goat/Sheep Feed
+Maize / Grain
+Bran / By-products
+Mineral Mixture
+Calcium Supplement
+Feed Additives
+Veterinary/Allied Consumables
+Packaging / Bags
+Other Configurable
+Categories are examples for initial setup and must remain editable. Do not treat this list as a legal classification.
+13. Product Master
+SKU/product code
+Product name
+Tamil display name
+Category
+Brand
+HSN/tax classification
+Base UOM
+Purchase UOM
+Sale UOMs
+Barcode(s)
+Aliases
+Minimum/reorder level
+Maximum target stock
+Batch tracking flag
+Expiry tracking flag
+Loose-sale flag
+Scale-required flag
+Active/inactive state
+Effective date
+Cost/margin settings
+14. Tamil Product Search Seed
+Seed Tamil Unicode aliases.
+Seed transliterated aliases.
+Allow farmer colloquial names.
+Allow regional abbreviations and shorthand.
+Normalize Unicode and whitespace.
+Index exact aliases before fuzzy search.
+Never let fuzzy matching silently choose a financial item when ambiguity remains.
+Alias changes are audited.
+15. Barcode Seed
+Support manufacturer barcode where present.
+Support internal shop barcode.
+Prevent duplicate active barcode assignment within tenant.
+Allow multiple barcodes per product/UOM where justified.
+Record barcode type and status.
+Do not create fake manufacturer identifiers that could conflict with real codes.
+16. Tax Profile Configuration
+Tax profile ID
+HSN
+Taxability
+CGST/SGST/IGST rates where applicable
+Tax-inclusive/exclusive mode
+Effective from/to
+Place-of-supply applicability
+Exemption/zero-rated indicators where applicable
+Rounding policy
+Compliance flags
+Example business configurations such as feed at 0% and a supplement at 18% may be configured only after current classification is verified. Never hardcode tax rates in application code or seed scripts.
+17. Pricing Tiers
+The percentages above are seed defaults derived from the approved business baseline, not immutable legal rules. Each price list requires effective dates and product-level override capability.
+18. Price List Rules
+Maintain price_list header and item records.
+Prevent overlapping active price versions for the same product/tier/UOM unless priority is explicitly defined.
+Snapshot unit price and pricing-tier identity into finalized invoice lines.
+Price changes do not rewrite historical invoices.
+Require authorization for margin-destructive pricing.
+Support minimum-margin controls.
+Support customer-specific pricing where approved.
+19. Customer Master Seed
+Walk-in customer pseudo-profile for immediate retail sales.
+Registered farmer profile.
+Wholesale dealer profile.
+Aavin sub-contractor profile.
+Customer type.
+Phone/contact.
+Address.
+GSTIN when applicable.
+Credit profile.
+Price tier.
+Khata enabled/disabled.
+Credit limit.
+Collection-cycle configuration.
+Active status.
+Do not seed real customer personal data in a generic deployment package. Use import templates for real records.
+20. Customer Credit Defaults
+21. Supplier Master
+Supplier code
+Legal/trading name
+Contact details
+GSTIN where applicable
+Address
+Payment terms
+Credit/settlement terms
+Default purchase UOM rules
+Active status
+Bank/payment reference metadata where permitted
+Supplier opening payable balances must be imported through an approved opening-balance process, not by inventing purchase invoices.
+22. Inventory Locations
+Create primary store/warehouse.
+Optionally create front shop, godown, damaged, quarantine and returns locations.
+Assign stock policies.
+Prevent ambiguous default locations.
+Record location type and active status.
+Use location IDs in stock movements.
+23. Batch Configuration
+24. Reorder Configuration
+Minimum stock level.
+Target/max stock.
+Reorder quantity or calculation policy.
+Supplier preference.
+Lead time.
+Minimum purchase quantity.
+Package multiple.
+Seasonality override where required.
+Do not auto-create purchase orders without configured approval policy.
+25. Procurement Defaults
+PO approval requirement.
+GRN required before stock posting.
+Tare validation enabled.
+Batch capture required according to product.
+Expiry capture required according to product.
+Over-receipt tolerance configurable.
+Under-receipt handling configurable.
+Supplier invoice reference capture.
+AP posting after validated GRN/invoice policy.
+26. Tare Configuration
+The system must capture gross weight, package/bag count, actual tare and net weight. A configurable safety threshold is required.
+The 5% value is a suggested initial control, not a universal physical standard. Net weight must never be negative.
+27. Opening Inventory
+Create approved opening-stock import.
+Validate SKU/UOM/location/batch.
+Capture quantity and cost.
+Capture batch/expiry where required.
+Capture opening valuation method.
+Validate no duplicate opening record.
+Post opening movement and corresponding accounting entry.
+Reconcile physical count with opening ledger.
+Lock or audit the opening batch after approval.
+28. Opening Balances
+Customer receivables.
+Supplier payables.
+Cash opening balance.
+Bank/UPI opening reconciliation balance.
+Inventory opening valuation.
+Other approved ledger balances.
+Opening balances require source evidence, effective date, authorization and reconciliation. They must not be entered as arbitrary journal plugs.
+29. Chart of Accounts Seed
+Account codes are configurable. Every financial posting must map to an approved account and preserve journal balance.
+30. Payment Tender Configuration
+Cash
+UPI
+Bank transfer
+Khata/credit
+Split tender
+Other approved non-cash methods
+Provider credentials are never included in seed data. Only provider IDs, non-secret configuration metadata and enablement flags may be seeded.
+31. UPI/Payment Provider Setup
+Provider record.
+Environment: sandbox/production.
+Merchant identifier metadata.
+Webhook endpoint configuration.
+Signature verification configuration.
+Timeout/retry policy.
+Idempotency policy.
+Settlement/reconciliation configuration.
+Credential references to secret manager.
+32. WhatsApp Configuration
+Template identifier.
+Language.
+Purpose.
+Parameter schema.
+Enabled state.
+Provider credential reference.
+Opt-in/consent policy.
+Retry policy.
+Delivery audit.
+Seed packages must not contain customer phone lists or production credentials.
+33. Notification Templates
+34. Aavin/Collection Cycle Configuration
+Cycle dates are configurable.
+Reminder lead days are configurable.
+Grace period is configurable.
+Pause/holiday dates are supported.
+Duplicate reminders are prevented.
+Cycle configuration changes are audited.
+Do not hardcode 9th/24th as an invariant.
+35. Cash Session Defaults
+Opening cash requires authorized entry.
+Cash movements require reason/type.
+Cash sales increase expected cash.
+Cash payouts decrease expected cash.
+Non-cash payments do not increase physical cash.
+EOD requires physical count and variance explanation.
+Variance authorization threshold is configurable.
+36. EOD Configuration
+EOD session per cash register/day.
+Opening balance.
+Expected cash formula.
+Physical count.
+Variance.
+Approval workflow.
+Lock/finalization state.
+Reopen requires authorized controlled action.
+Post-EOD edits are audited.
+37. Hardware Seed
+Hardware seed contains configuration metadata only; pairing secrets/credentials are provisioned securely.
+38. Scale Defaults
+Connection type: USB/RS-232/Bluetooth/BLE.
+Protocol profile selected by device.
+Stable-weight threshold configurable.
+Stability duration configurable.
+Negative/overload/error states recognized.
+Tare operation permission controlled.
+Manual weight entry requires reason/permission where policy demands.
+Scale readings are never treated as trusted financial data without validation.
+39. Printer Defaults
+ESC/POS profile.
+Paper width.
+Character encoding.
+Tamil rendering strategy.
+Bitmap fallback.
+Cut/drawer commands.
+Retry policy.
+Duplicate-print protection.
+Printer failure must never roll back a finalized invoice.
+40. Device Registry
+Device ID.
+Tenant ID.
+Device type.
+Owner/user assignment.
+App version.
+OS metadata.
+Registration time.
+Last seen.
+Status.
+Revocation state.
+Configuration version.
+41. Offline Configuration
+Seed only data required for authorized offline operation.
+Encrypt local SQLCipher database.
+Secure local key storage.
+Include versioned master-data snapshot.
+Set maximum offline transaction age/volume according to policy.
+Never embed server secrets.
+Queue financial writes with idempotency and transaction envelopes.
+42. Sync Configuration
+Initial sync cursor.
+Tenant ID.
+Device ID.
+Supported API version.
+Master-data version.
+Conflict policy.
+Retry/backoff.
+Connectivity state.
+Full-resync trigger.
+Device revocation behavior.
+43. Tax & Pricing Effective Dating
+Every rate/price configuration has effective_from.
+Optional effective_to.
+No overlapping effective configurations unless explicitly prioritized.
+Historical transactions retain snapshots.
+Future-dated configuration can be prepared.
+Configuration changes require audit and authorization.
+44. Import Templates
+45. Import Safety
+Upload file to quarantine.
+Validate structure and encoding.
+Validate all references.
+Detect duplicates.
+Preview changes.
+Show errors before posting.
+Require authorization.
+Execute in transaction/batched controlled process.
+Produce import report.
+Record source file checksum and audit evidence.
+46. Idempotent Seed Execution
+Every seed record uses a stable natural key or deterministic seed key.
+Rerunning seed does not duplicate data.
+Seed version is stored.
+Changed seed definitions produce explicit migration rather than destructive replacement.
+Tenant-specific overrides survive later platform seed updates.
+Production seed execution requires authorization.
+47. Seed Package Structure
+Recommended repository structure:
+seed/
+  reference/
+    uoms/
+    categories/
+    tax_profiles/
+    permissions/
+  tenant/
+    tenant_template/
+    pricing/
+    notification_templates/
+  demo/
+  migrations/
+  validation/
+  manifests/
+Use machine-readable JSON/YAML/CSV only where the chosen loader validates schema, types, checksums and version metadata. Secrets are never stored in seed packages.
+48. Seed Manifest
+seed_version
+application_min_version
+schema_min_version
+created_at
+source
+checksum
+entities_included
+dependency_order
+environment
+tenant_scope
+approval_reference
+49. Dependency Order
+Reference UOMs and categories
+Permissions
+Roles
+Tenant
+Financial year
+Document series
+Tax profiles
+Products/brands
+Product UOMs/barcodes/aliases
+Pricing
+Customers/suppliers
+Locations
+Accounting configuration
+Payment providers
+Notification templates
+Hardware metadata
+Opening balances/stock
+Operational validation
+50. Environment Separation
+51. Production Secret Policy
+Passwords are never seeded.
+PINs are never stored in plaintext seed files.
+Payment secrets use secret manager references.
+GST/e-invoice/e-way credentials use secret manager references.
+WhatsApp tokens use secret manager references.
+R2 credentials use secret manager references.
+Database credentials use secret manager references.
+52. Master-Data Governance
+Owner/manager authorization for critical changes.
+Effective dating.
+Change reason.
+Audit actor.
+Before/after values for permitted fields.
+Approval where financial impact exists.
+Inactive rather than destructive deletion for referenced masters.
+Periodic review of unused/duplicate masters.
+53. Duplicate Detection
+Product SKU uniqueness per tenant.
+Active barcode uniqueness per tenant.
+Supplier identity duplicate checks.
+Customer duplicate checks using configurable identifiers.
+Alias collision detection.
+UOM conversion conflict detection.
+Price overlap detection.
+Document-series overlap detection.
+54. Validation Rules
+55. Demo Seed Dataset
+Use clearly synthetic customers such as Demo Farmer 001.
+Use synthetic suppliers and products.
+Use non-production payment providers.
+Use test GST identifiers only.
+Use sandbox compliance configuration.
+Mark all demo tenants explicitly.
+Prevent demo data from appearing in production tenant searches.
+56. Recommended Initial Product Examples
+These are illustrative master records, not claims about actual products sold by the shop.
+57. Opening Stock Example
+For a 50 kg bag product, opening stock may be entered as 20 sealed bags plus 12.500 kg loose stock if that is physically verified. The system must preserve the actual quantity and UOM rather than infer a conversion from a generic bag assumption.
+58. GRN Seed Validation Example
+If 50 bags arrive, capture gross weight, bag count, actual tare and net weight. Compare actual tare against configured tolerance. If the variance exceeds the configured threshold, require correction or authorized override. Store the reason and evidence.
+59. Accounting Seed Validation
+Every default account has unique code/name.
+Assets/liabilities/income/expense/equity classification is valid.
+Tax accounts are mapped.
+Inventory/COGS mapping is defined.
+Receivable/payable mapping is defined.
+Cash/UPI clearing mappings are defined.
+Default journal templates balance.
+60. Report Configuration Seed
+Dashboard KPI definitions.
+Role visibility.
+Default date range.
+Currency/weight formatting.
+Export permissions.
+Scheduled report defaults.
+Exception/alert thresholds.
+Report version.
+61. Compliance Configuration
+GST registration status.
+Tax jurisdiction/state.
+Place-of-supply configuration.
+E-invoice feature flag.
+E-way feature flag.
+Provider/environment metadata.
+Document evidence retention policy reference.
+Export format/version.
+Never encode legal thresholds as permanent constants.
+62. Backup/Archive Initial Configuration
+Backup enabled before production.
+Backup destination metadata.
+Encryption/key reference.
+Retention policy reference.
+Restore-test schedule.
+Archive policy version.
+Archive object naming convention.
+Legal-hold capability.
+Deletion/destruction approval policy.
+63. Security Seed
+RLS enabled.
+Default roles least-privileged.
+Audit logging enabled.
+Session policy configured.
+Device registration enabled.
+Webhook signature validation required.
+Rate limits configured.
+Secret references configured.
+Production debug endpoints disabled.
+64. Docker/DevOps Initial Configuration
+Environment-specific compose/deployment configuration.
+Image registry reference.
+Immutable image policy.
+Health checks.
+Database migration policy.
+Worker/scheduler configuration.
+Backup worker configuration.
+Monitoring endpoints.
+Log redaction.
+Resource limits.
+65. Initial Setup Wizard
+Accept tenant/legal profile.
+Validate required identifiers.
+Configure language/timezone/currency.
+Create owner.
+Create roles/users.
+Configure financial year.
+Configure document series.
+Configure locations.
+Load product/UOM/tax masters.
+Configure pricing.
+Configure customers/suppliers.
+Configure payments.
+Pair/register hardware.
+Load opening stock/balances if migrating.
+Run validation.
+Run backup.
+Confirm production readiness.
+66. Setup Readiness Gates
+67. Migration Setup
+Map source fields to canonical schema.
+Preserve source identifiers.
+Normalize UOM/product aliases.
+Validate historical tax data.
+Import masters before transactions.
+Import opening balances with evidence.
+Reconcile totals.
+Freeze source system during cutover when required.
+Record migration checksum and version.
+68. Cutover Controls
+Complete source-system backup.
+Freeze master-data changes.
+Freeze transaction entry.
+Export approved data.
+Validate import.
+Reconcile customer/supplier/inventory/financial totals.
+Authorize cutover.
+Enable production writes.
+Monitor first operational transactions.
+Retain migration evidence.
+69. Rollback Rules
+Before production posting, failed setup may be rolled back within the setup transaction.
+After financial transactions exist, do not destructive-reset the tenant.
+Use controlled correction/reversal/migration procedures.
+Never delete production history to correct a master-data mistake.
+Database restore is a recovery mechanism, not a routine data-edit tool.
+70. Audit Requirements
+Tenant creation.
+Owner creation.
+Role/permission changes.
+Tax changes.
+Price changes.
+Product/UOM changes.
+Credit-limit changes.
+Opening balances.
+Opening inventory.
+Document-series changes.
+Payment-provider changes.
+Hardware pairing/revocation.
+Import execution.
+Seed version changes.
+71. API/Operational Endpoints
+POST /api/v1/setup/validate
+POST /api/v1/setup/initialize
+GET /api/v1/setup/status
+POST /api/v1/master-data/imports
+GET /api/v1/master-data/imports/{id}
+POST /api/v1/products
+POST /api/v1/pricing/price-lists
+POST /api/v1/inventory/opening-stock
+POST /api/v1/accounting/opening-balances
+POST /api/v1/devices/register
+GET /api/v1/configuration/version
+Actual route authorization and schemas must follow Document 02. Setup APIs must be idempotent, tenant-scoped and protected by elevated permissions.
+72. Database Mapping
+tenants / tenant_settings
+financial_years / document_series
+roles / permissions / user_roles
+categories / brands / products
+product_barcodes / product_aliases
+uoms / uom_conversions / product_uoms
+tax_profiles / price_lists / price_list_items
+customers / customer_credit_profiles
+suppliers
+inventory_locations / batches / stock_movements / stock_balances
+payment_intents / payment providers
+message_templates / notification_jobs
+devices
+chart-of-accounts / opening journals
+audit_logs / attachments / configuration versions
+73. Flutter Mapping
+Setup wizard.
+Master-data download.
+Offline configuration cache.
+Product/Tamil alias search.
+Price-tier display.
+Customer/Khata setup.
+Hardware pairing.
+Sync configuration.
+Role-based screens.
+Configuration version display.
+Admin validation and error handling.
+74. Go Backend Mapping
+Seed loader and validator.
+Tenant provisioning service.
+Master-data services.
+Effective-date validation.
+Import pipeline.
+Opening-balance service.
+Opening-stock service.
+Configuration version service.
+Audit service.
+Secret-manager integration.
+Setup readiness service.
+75. Automated Validation Suite
+Seed idempotency test.
+RLS isolation test.
+Role/permission test.
+Duplicate master test.
+Effective-date overlap test.
+Tax configuration validation.
+Price calculation validation.
+UOM conversion validation.
+Opening inventory reconciliation.
+Opening accounting reconciliation.
+Document-series uniqueness.
+Device registration/revocation.
+Backup-before-production gate.
+76. Security Tests
+Tenant A cannot read Tenant B masters.
+Tenant A cannot import into Tenant B.
+Unauthorized user cannot change tax/pricing.
+Production secrets absent from seed artifacts.
+Bootstrap credentials cannot remain active.
+Import files cannot escape quarantine.
+Malicious CSV/formula payloads are neutralized in exports.
+Setup endpoints are rate-limited and audited.
+77. Data Quality Dashboard
+Missing SKU.
+Duplicate barcode.
+Missing UOM.
+Missing tax profile.
+Overlapping prices.
+Expired/inactive product sold flag.
+Missing batch policy.
+Missing supplier/customer mapping.
+Invalid opening balance.
+Unbalanced accounting.
+Unverified hardware.
+Unverified backup.
+78. Initial Setup Reports
+Setup completion report.
+Master-data quality report.
+Product/pricing matrix.
+Tax configuration report.
+Opening stock reconciliation.
+Opening balance reconciliation.
+Device inventory.
+Permission matrix.
+Backup readiness.
+Production readiness certificate/evidence.
+79. Operational Change Management
+Reference seed updates are versioned.
+Tenant overrides are preserved.
+Tax changes use effective dates.
+Pricing changes use effective dates.
+UOM changes require stock impact analysis.
+Role changes are audited.
+Configuration changes have actor/time/reason.
+Destructive master deletion is prohibited when referenced.
+80. Backup of Seed & Configuration
+Version seed packages in protected source control.
+Back up tenant configuration through PostgreSQL backups.
+Record seed version in tenant metadata.
+Back up import manifests and checksums.
+Never rely on a local developer copy as the only source.
+81. Production Launch Checklist
+Tenant/legal profile verified.
+GST/FSSAI identifiers verified where applicable.
+Owner account secured.
+Roles reviewed.
+FY and document series validated.
+Products/UOM/tax/pricing validated.
+Customers/suppliers validated.
+Opening balances reconciled.
+Opening stock reconciled.
+Payments tested.
+Hardware tested.
+Offline/sync tested.
+Backup verified.
+Restore procedure available.
+Monitoring enabled.
+Audit enabled.
+Production readiness approved.
+82. Non-Negotiable Seed & Configuration Rules
+Never store production secrets in seed data.
+Never hardcode legal tax rates or thresholds.
+Never duplicate active barcodes.
+Never change historical transaction snapshots by changing master data.
+Never allow cross-tenant seed/import operations.
+Never post opening balances without evidence and reconciliation.
+Never post opening stock without quantity/cost/location validation.
+Never enable production before a verified backup exists.
+Never use demo data in a production tenant.
+Never silently overwrite tenant configuration with later seed runs.
+83. End-to-End Setup Scenarios
+83.1 Fresh Shop
+Provision tenant → owner → roles → FY → series → locations → products/UOM/tax → pricing → payment → hardware → backup → readiness validation → production.
+83.2 Existing Shop Migration
+Backup source → map masters → import/validate → opening stock/balances → reconcile → cutover → monitor.
+83.3 Product Price Change
+Create future/effective price → authorize → activate → preserve historical invoice snapshots.
+83.4 Tax Change
+Create approved effective-dated tax profile → validate → activate at effective time → preserve historical tax snapshots.
+83.5 Device Replacement
+Revoke old device → register replacement → download authorized configuration → sync → hardware test → audit.
+83.6 Disaster Rebuild
+Restore authoritative database/configuration → do not reseed transactions → restore Docker infrastructure → validate masters/RLS → reconcile → resume.
+83.7 Seed Rerun
+Execute same seed version twice → no duplicate records → stable identifiers/checksums → audit only records actual changes.
+83.8 Opening Stock Error
+Detect discrepancy → freeze affected posting → investigate source evidence → controlled adjustment/reversal → audit; do not delete history.
+84. Definition of Done — Seed, Master Configuration & Initial Setup
+Tenant can be initialized deterministically.
+Seed package is versioned and idempotent.
+All tenant-owned data is RLS-protected.
+Roles/permissions are least-privileged.
+Financial year/document series are valid.
+Products/UOM/tax/pricing are validated.
+Tamil aliases and barcode uniqueness are enforced.
+Customers/suppliers and credit policies are configurable.
+Opening inventory and accounting balances reconcile.
+Payment/WhatsApp/compliance credentials use secret references.
+Hardware can be registered securely.
+Offline configuration is encrypted.
+Backup exists before production.
+Setup audit evidence is complete.
+Automated validation tests pass.
+85. Mapping to Previous Documents
+86. Final Architecture Summary
+Document 18 establishes a controlled configuration foundation: reference data is versioned, tenant data is isolated, financial and tax settings are effective-dated, products and UOMs are explicit, pricing is configurable, opening balances are evidence-backed, hardware and providers are securely provisioned, and production readiness requires validation plus verified backup. The seed system is designed to be rerunnable without duplication and safe for fresh, test, migration and recovery environments.
+87. Important Production Note
+Business defaults such as 2% farmer discount, 5% wholesale discount, example collection dates, tare thresholds, tax classifications and product categories are configuration examples. Before production, the shop owner/operator must approve actual values and current tax/compliance requirements must be verified. The application must keep such values configurable and effective-dated rather than embedding them as immutable code constants.
+Mode | Purpose | Write policy
+Fresh tenant | Brand-new shop | Full setup wizard
+Demo | Training/evaluation | Synthetic data only
+Migration | Existing shop | Validated import + reconciliation
+Recovery | Rebuild after disaster | Restore authoritative state; do not reseed transactions
+Test | Automated QA | Deterministic isolated fixture
+Setting | Initial policy
+Timezone | Asia/Kolkata unless explicitly configured
+Currency | INR
+Primary language | Tamil
+Secondary language | English
+Weight precision | 3 decimal places
+Currency precision | 2 decimal places
+UOM factor precision | 6 decimal places
+Tax precision | 4 decimal places
+Negative stock | Disabled by default
+FEFO | Enabled where expiry exists
+FIFO | Default fallback
+Offline mode | Enabled according to policy
+Audit logging | Mandatory
+RLS | Mandatory
+Backup | Mandatory before production
+Archive | Policy-driven
+Role | Baseline capability
+Owner | Full tenant administration, financial overrides, configuration
+Manager | Operational management, approved overrides
+Cashier | POS, payments, customer transactions within limits
+Accounts | Khata, receipts, reconciliation, reports
+Storekeeper | GRN, stock, batches, counts
+Procurement | Suppliers, PO, GRN initiation
+Auditor/Viewer | Read-only approved reports/audit
+Device Operator | Hardware diagnostics/pairing within permission
+System Operator | Technical operations; no business-data privilege by default
+Document | Required controls
+Sales invoice | Unique per tenant/FY; no reuse
+Credit note | Unique series
+Debit note | Unique series
+Purchase order | Unique series
+GRN | Unique series
+Sales return | Unique series
+Payment receipt | Unique series
+Contra/buy-back | Unique series
+EOD session | Unique operational identifier
+Compliance request | Provider/reference-aware identifier
+UOM | Category | Typical use
+kg | weight | Loose feed
+g | weight | Small quantity
+tonne | weight | Bulk procurement
+bag | packaging | Sealed feed bags
+piece | count | Supplements/accessories
+litre | volume | Liquid products if applicable
+ml | volume | Small liquid quantities if applicable
+Tier | Default business rule
+Walk-In MRP | Configured product price
+Registered Farmer | 2% discount example; configurable
+Wholesale Dealer | 5% discount example; configurable
+Aavin Sub-Contractor | Configurable contract price
+Setting | Baseline
+Khata | Disabled until explicitly enabled or approved
+Credit limit | 0 until configured
+Owner PIN override | Enabled for authorized owner role
+Grace period | Configurable
+Cycle dates | Configurable; e.g. 9th/24th only if business approves
+Reminder lead days | Configurable
+Pause dates | Supported
+Duplicate prevention | Mandatory
+Setting | Baseline
+Batch tracking | Enabled for products requiring it
+Expiry tracking | Enabled where applicable
+Allocation | FEFO first where expiry is reliable
+Fallback | FIFO
+Expired sale | Blocked
+Held/rejected batch | Blocked
+Near-expiry alert | Configurable; example 15 days
+Recall traceability | Enabled
+Parameter | Example default
+Tare percentage warning/limit | 5% of gross; configurable
+Bag count | Captured
+Expected tare | Configured by packaging/product
+Actual tare | Measured/entered
+Override | Owner/manager authorization
+Reason | Mandatory on exceptional variance
+Account group | Examples
+Assets | Cash, Bank/UPI clearing, Inventory, Customer receivables
+Liabilities | Supplier payables, Tax payable
+Income | Sales
+Cost | Cost of goods sold, purchase-related costs
+Expense | Operating expenses
+Equity | Opening capital/retained balance
+Adjustment | Approved variance accounts
+Template | Purpose
+Invoice receipt | Customer receipt
+Payment confirmation | Payment acknowledgment
+Khata reminder | Outstanding credit
+Aavin-cycle reminder | Configured collection-cycle reminder
+Low stock | Reorder alert
+Expiry | Batch alert
+EOD variance | Owner/manager alert
+Sync failure | Operator alert
+Compliance failure | Authorized operations alert
+Hardware | Configuration
+Barcode scanner | Connection/profile/input mode
+Digital scale | Protocol, port/device ID, baud/profile, stability rules
+ESC/POS printer | Connection, paper width, language/bitmap fallback
+Cash drawer | Trigger configuration
+Customer display | Connection and display mode
+Payment display/QR | Provider/display configuration
+Import | Required validation
+Products | SKU, name, UOM, tax, status
+Barcodes | Product/UOM, unique barcode
+Aliases | Product, normalized alias, language
+Customers | Unique identity/contact policy
+Suppliers | Supplier identity
+Prices | Tier/product/UOM/effective date
+Opening stock | Product, batch, location, qty, cost
+Opening balances | Account/customer/supplier, amount, evidence
+Environment | Seed policy
+Development | Synthetic and reusable
+CI/Test | Deterministic fixtures
+Staging | Masked/synthetic unless approved
+Production | Minimal reference seed + approved tenant data
+DR | Restore authoritative state; no blind reseed
+Area | Mandatory validation
+Tenant | Valid configuration and unique identifier
+Product | Active UOM/tax/category references
+Pricing | Effective date and valid decimal values
+Stock | Non-negative quantity and valid location
+Batch | Expiry/date consistency
+Customer | Credit settings consistent
+Supplier | Payment terms valid
+Tax | Current approved configuration
+Document series | No overlap/reuse
+Hardware | Supported profile
+Payment | Provider metadata valid
+Opening balance | Evidence and balancing
+Example | UOM model
+50 kg cattle feed bag | bag + kg
+25 kg feed bag | bag + kg
+Loose maize | kg + tonne
+Bran | kg + bag where packaged
+Mineral mixture | kg + piece/package
+Calcium supplement | kg/piece as configured
+Gate | Must pass
+Identity | Owner authenticated
+Tenant | Required profile complete
+Finance | FY/series valid
+Product | Required masters valid
+Tax | Approved configuration
+Inventory | Location/UOM policy valid
+Payments | Provider configuration verified
+Hardware | Required devices tested
+Security | RLS/audit/secrets validated
+Backup | Successful verified backup
+Recovery | Restore procedure available
+Document | Dependency
+01 Database & ERD | Canonical master/configuration tables
+02 API Specification | Setup/import/master-data APIs
+03 Go Backend | Provisioning, validation, seed services
+04 Flutter | Setup wizard/offline master cache
+05 Offline Sync | Configuration synchronization
+06 Inventory & Batch | Opening stock, batch and UOM rules
+07 Accounting & Khata | Opening balances, credit policy
+08 POS & Billing | Pricing, tax, customer and document series
+09 Hardware | Device/scale/printer configuration
+10 Payment/UPI | Tender/provider metadata
+11 GST/Compliance | Tax/compliance configuration
+12 Security | RLS, roles, secrets, audit
+13 Docker/DevOps | Environment/seed deployment
+14 Testing/QA | Seed and readiness test suite
+15 UI/UX | Setup/master screens
+16 Reports/Dashboard | Readiness and data-quality reporting
+17 Backup/DR/Archival | Configuration backup/recovery

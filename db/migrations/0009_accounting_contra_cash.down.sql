@@ -1,0 +1,10 @@
+DROP TABLE IF EXISTS eod_sessions;
+DROP TABLE IF EXISTS cash_movements;
+DROP TABLE IF EXISTS cash_sessions;
+DROP TABLE IF EXISTS contra_lines;
+DROP TABLE IF EXISTS contra_transactions;
+DROP TRIGGER IF EXISTS trg_journal_balance ON journal_lines;
+DROP FUNCTION IF EXISTS fn_check_journal_balance();
+DROP TABLE IF EXISTS journal_lines;
+DROP TABLE IF EXISTS journal_entries;
+DROP TABLE IF EXISTS chart_of_accounts;

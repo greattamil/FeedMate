@@ -1,0 +1,896 @@
+Andipatti Animal Feed System
+Document 08 — Complete POS & Billing Engine Specification v1.0
+Implementation-ready functional, domain, API, database, offline, hardware, payment, accounting, security, testing and acceptance specification.
+Baseline: PostgreSQL authoritative • Go backend • Flutter offline-first • SQLCipher local DB • Docker deployment • Multi-tenant • GST/configuration-driven
+Document sequence: 08 of 20 | No sprint planning
+1. Document Control & Purpose
+2. Purpose, Scope & Objectives
+The POS engine is the controlled point at which a product selection becomes a legally and financially meaningful sale. It must calculate the correct price, tax, weight, batch allocation, discount, payment, customer credit impact, inventory movement, accounting entries and receipt while remaining safe during offline operation, device failure, concurrent sales and delayed external payments.
+Support retail, farmer, wholesale and Aavin sub-contractor transactions.
+Support sealed bags and loose/fractional feed.
+Support barcode, Tamil Unicode, transliteration, colloquial and phonetic product discovery.
+Integrate digital weighing scales without allowing unstable readings to silently become sale quantities.
+Allocate sale quantities against eligible batches using configured FIFO/FEFO policy.
+Support cash, UPI, bank, Khata and split tender.
+Create immutable finalized invoice snapshots for price, tax and product/UOM context.
+Provide printer and WhatsApp receipt fallbacks without coupling them to financial finalization.
+Support offline POS with SQLCipher and deterministic reconciliation.
+Provide traceability from invoice → line → batch → stock movement → payment → journal → audit.
+3. Non-Goals
+POS is not the authoritative inventory ledger; the inventory engine remains the inventory authority.
+POS does not independently invent GST rates, HSN/SAC or legal thresholds.
+POS does not mark UPI as paid based solely on Flutter/client state.
+Finalized invoices are not edited in place.
+Post-finalization corrections are handled through returns, credit notes or authorized reversals.
+Long-running external integrations must not hold the core invoice database transaction open.
+4. Architecture & Principles
+Flutter owns presentation, local cart state, device integration and offline transaction capture.
+Go owns business rules, validation, authorization, transaction orchestration and external integration boundaries.
+PostgreSQL is authoritative for finalized financial/inventory state.
+RLS and application authorization both enforce tenant isolation.
+All money uses fixed-precision decimal/Numeric; never binary floating-point for financial calculations.
+All finalized financial writes are atomic and idempotent.
+External side effects use outbox/event processing where appropriate.
+Printer, WhatsApp, soundbox and WebSocket failures never roll back a valid finalized invoice.
+Financial and inventory conflicts are explicitly reconciled; last-write-wins is prohibited.
+Finalized invoice values are snapshots; future master-data changes do not rewrite historical invoices.
+5. POS Sale Lifecycle
+Open/select POS session and device.
+Create or resume draft cart.
+Identify customer or use Walk-In customer.
+Search/select product and UOM.
+Capture quantity or scale weight.
+Resolve effective price and tax profile.
+Apply configured customer tier and authorized discounts.
+Validate stock and reserve where the architecture requires reservation.
+Calculate line totals, tax and invoice totals.
+Select payment method(s).
+Create payment intent for asynchronous payment methods where required.
+Confirm all payment requirements are satisfied or transaction is explicitly allowed as Khata/pending according to policy.
+Finalize the invoice in one server transaction.
+Post stock movement, accounting/Khata, payment allocations and outbox event.
+Generate receipt representation.
+Print asynchronously/locally; offer WhatsApp fallback if printer fails.
+Mark cart completed and retain immutable audit trail.
+6. Cart & Document States
+A finalized invoice is immutable. Corrections must create traceable compensating documents.
+7. Product Search & Discovery
+7.1 Search inputs
+Exact barcode and alternate barcodes.
+Product name in Tamil Unicode.
+English name.
+Tamil transliteration/phonetic spelling.
+Colloquial farmer terms and regional abbreviations.
+Configured aliases and historical approved aliases.
+Normalized search removing harmless punctuation/spacing variations.
+Fuzzy search only when exact/prefix results are insufficient.
+7.2 Search ranking
+Exact barcode.
+Exact canonical product code.
+Exact canonical name.
+Exact approved alias.
+Prefix canonical/alias.
+Tokenized Tamil/English match.
+Configured transliteration/phonetic match.
+Fuzzy match.
+Fuzzy results must be visibly distinguished and must not silently select a product. The cashier must confirm the result when ambiguity exists.
+7.3 Unknown barcode
+Show an explicit unknown-barcode state.
+Allow authorized search by name/code.
+Never auto-create a product from a scan.
+Offer product registration only to permitted roles and outside the finalized sale flow.
+8. Customer Selection & Pricing Tiers
+These defaults are starting configuration values, not immutable code. Effective-dated price lists determine the price at sale time.
+Customer tier changes require authorization and audit.
+Customer-specific negotiated prices may override tier price only when configured.
+Price selection records price_list_id, price_list_item_id/version/effective period, base price, discount rule and final unit price.
+Finalized invoice stores the resolved price/discount snapshot.
+9. Price Resolution
+Validate product is saleable and not archived/blocked.
+Resolve requested UOM and product-UOM relationship.
+Find active effective-dated price list for tenant/customer/tier/channel.
+Apply product/customer/UOM-specific price rule.
+Apply configured tier discount if applicable.
+Apply authorized manual discount if allowed.
+Validate minimum margin if the tenant enables margin protection.
+Round only at defined calculation boundaries.
+Persist the resolved price snapshot at finalization.
+A stale local price must not silently overwrite a newer server price. Offline policy determines whether a sale may proceed using the last approved local price and whether reconciliation requires exception review.
+10. UOM, Quantity & Loose Feed
+Sealed bag sales use the configured product/UOM quantity.
+Loose sales use kg or configured loose UOM.
+Bag-to-loose conversion is permitted only when product-UOM conversion exists.
+Conversion must not create stock from nothing; every decrement must correspond to available inventory.
+Display can show sealed bags plus loose kg where useful, but the authoritative ledger records normalized quantities and UOM context.
+11. Digital Scale Integration
+11.1 Reading lifecycle
+Connect to paired scale.
+Receive raw reading.
+Parse protocol and unit.
+Validate numeric range.
+Convert to configured sale UOM.
+Apply stabilization rule.
+Display live weight.
+Require stable reading before automatic commit.
+Record capture source, device ID, timestamp and raw/normalized value.
+11.2 Stabilization
+Tenant/device configuration defines minimum stability duration and allowed variance.
+An unstable reading is displayed as unstable and cannot be accepted automatically.
+Manual entry is available only when policy permits and must be audited.
+Scale disconnect during draft sale does not destroy the cart.
+Scale reading must be revalidated at finalization.
+11.3 Manual weight
+Require permission such as POS_WEIGHT_MANUAL.
+Require reason.
+Record operator, device and timestamp.
+Do not bypass product-UOM precision or stock validation.
+12. Batch Allocation: FIFO/FEFO
+Only eligible batches are allocatable.
+Expired, held, rejected, recalled or blocked batches are excluded.
+Default policy is FEFO when expiry exists and FIFO as the secondary ordering rule; tenant/product configuration may define policy.
+Allocation must be deterministic.
+Invoice lines store batch allocation records.
+Stock movements reference the selected batch.
+Where batch is not meaningful for a product, allocation may use a non-batch inventory policy.
+Eligible batches:
+available_qty > 0
+AND status = ACTIVE
+AND quality_status = ACCEPTED
+AND NOT expired
+AND NOT held/recalled
+
+Order:
+FEFO expiry_date ASC NULLS LAST
+then received_at ASC
+then batch_id ASC
+The inventory engine remains responsible for authoritative allocation and locking. POS requests allocation; it must not independently decrement stock.
+13. Stock Availability & Concurrency
+At cart time, show availability as an advisory value unless a reservation is explicitly created.
+At finalization, inventory is revalidated under transaction/locking rules.
+Concurrent sales cannot cause negative stock unless an explicit tenant policy allows controlled negative stock.
+Stale offline stock can result in reconciliation failure/exception.
+Allocation failures return machine-readable business errors.
+Stock reservation, if enabled, has expiration and release behavior.
+Recommended locking sequence: invoice/payment validation → product/UOM checks → inventory allocation/row locks in deterministic product/batch order → stock movements → accounting/ledger → invoice finalization.
+14. Cart Calculation Engine
+The calculation engine must be deterministic and independently unit-testable.
+For each line:
+gross = quantity × resolved_unit_price
+line_discount = configured/manual discount
+taxable_value = gross - line_discount + taxable_adjustments
+tax = tax_engine(taxable_value, tax_profile, place_of_supply)
+line_total = taxable_value + tax
+
+Invoice:
+subtotal = sum(line gross)
+discount_total = sum(line discounts) + invoice-level discount
+taxable_total = sum(line taxable values)
+tax_total = sum(line taxes)
+rounding_adjustment = configured rounding policy
+grand_total = taxable_total + tax_total + rounding_adjustment
+Never use float arithmetic.
+Use one canonical rounding strategy defined by finance configuration.
+Store calculation inputs and outputs required for audit.
+Do not repeatedly round intermediate values unless the configured accounting rule requires it.
+Finalized invoice totals must reconcile to line/tax/payment totals.
+15. Discounts & Authorization
+Every manual discount records actor, reason, original value, final value and authorization.
+Discount cannot produce negative line price.
+Discount cannot exceed configured maximum unless owner override is recorded.
+Tax calculation uses the post-discount taxable base according to configured tax treatment.
+16. GST & Tax Engine
+Tax rates and tax profiles are configuration-driven.
+Support tax-inclusive and tax-exclusive pricing.
+Support CGST + SGST for applicable intra-state transactions and IGST for applicable inter-state transactions.
+Store HSN/tax code on product/tax configuration where required.
+Determine place-of-supply/tax treatment from tenant/customer transaction configuration.
+Tax-exempt/zero-rated treatment must be explicit and auditable.
+Do not hardcode a universal 0% or 18% rule; examples are configuration data.
+Finalized invoice stores tax profile/version/rate/split and calculated amounts.
+Tax master changes affect new transactions only unless an explicit re-rating process is authorized.
+Tax rounding must be deterministic at line or invoice level according to the configured accounting policy, and the policy must be consistent with the accounting engine and GST export.
+17. Invoice Numbering
+Document series is tenant + financial year + document type scoped.
+Server-authoritative finalized invoice number must be unique.
+Offline devices may use provisional/local IDs and later receive authoritative numbering.
+Do not use client-generated final invoice numbers as the sole authority.
+Sequence allocation must be concurrency-safe.
+Number collisions are never resolved by overwriting an existing invoice.
+Voided/unused numbers follow the tenant's controlled document-series policy and audit requirements.
+Finalized invoice stores financial_year_id and document_series_id.
+18. Multi-Tender & Payments
+The sum of accepted payment allocations must exactly reconcile with the invoice amount within the configured minor-unit/rounding rule.
+18.1 Payment intent
+Create intent with unique idempotency key.
+Persist expected amount and invoice/cart reference.
+Generate dynamic QR when supported.
+Wait for verified webhook or trusted status API.
+Apply signature verification and idempotency.
+Update intent state.
+Allocate payment only after authoritative paid state.
+Handle timeout/expiry without treating it as paid.
+18.2 WebSocket and polling
+WebSocket provides low-latency UI updates only.
+Webhook/status API remains authoritative.
+If WebSocket fails, POS polls status with bounded backoff.
+Client never sets paid=true as an authority.
+Duplicate webhooks are harmless through event idempotency.
+Late success after UI timeout must reconcile to the same intent, not create a duplicate payment.
+19. Payment State Machine
+A sale must not be finalized as a cash/UPI-paid invoice merely because the client UI reports success. The finalization service verifies the payment state.
+20. Khata / Credit Sale
+Resolve customer credit profile.
+Calculate current outstanding exposure including pending/posted relevant entries.
+Calculate available credit = limit − exposure, using the accounting engine's authoritative method.
+Validate requested Khata allocation.
+Reject if over limit unless the role has override permission.
+Check overdue/grace policy where configured.
+Owner/admin PIN override is a controlled authorization event, not a bypass.
+Finalize invoice and receivable/Khata ledger atomically.
+Expose new outstanding balance in the result.
+Credit limit and customer status can change between cart and finalization; final validation occurs server-side.
+Override records actor, approver, reason, timestamp and device.
+Collection grace/Aavin cycle rules are configuration-driven and do not change invoice mathematics.
+21. Atomic Invoice Finalization
+Finalization is the central POS transaction boundary.
+Authenticate device/user and authorize operation.
+Validate tenant, financial year and document series.
+Validate cart state and idempotency key.
+Revalidate product/UOM/tax/price snapshots and saleability according to online/offline policy.
+Revalidate customer/credit state.
+Verify payment states or create authorized receivable.
+Allocate/lock inventory through the inventory engine.
+Calculate final totals using canonical decimal rules.
+Insert sales invoice header.
+Insert invoice lines.
+Insert invoice tax lines.
+Insert batch allocation rows.
+Insert stock movements through inventory service.
+Insert payment allocations/receivable entries.
+Post accounting journal entries.
+Create audit entries.
+Write outbox/integration events.
+Commit once.
+Only after commit trigger print/share/notifications asynchronously or locally.
+No partial invoice is considered finalized. If any mandatory component fails, the database transaction rolls back.
+22. Idempotency
+Every finalize request carries an Idempotency-Key.
+Key is scoped to tenant + operation/device as defined by API policy.
+Same key + same request fingerprint returns the original result.
+Same key + different payload returns an idempotency conflict.
+Webhook event IDs are unique and idempotent.
+Retry after timeout must not create a second invoice, stock movement or payment allocation.
+Offline replay uses the local transaction envelope ID as a stable idempotency identity.
+23. Offline POS
+23.1 Supported offline capabilities
+Browse cached products and aliases.
+Create cart and calculate using cached approved price/tax snapshots.
+Capture barcode and scale readings.
+Record cash sales subject to offline policy.
+Record permitted Khata sales subject to cached credit policy plus server reconciliation.
+Create provisional invoice/local transaction envelope.
+Queue synchronization when connectivity returns.
+Print locally if the device has a paired printer.
+23.2 Restricted offline operations
+UPI should not be treated as settled solely offline.
+Fresh server credit-limit validation is unavailable offline.
+High-risk discounts may be disabled.
+Compliance actions requiring current external verification may be disabled.
+Stock allocation is provisional and must reconcile against server inventory.
+23.3 Recovery
+Persist cart and transaction envelope atomically in SQLCipher.
+On app restart, identify OPEN/QUEUED/UPLOADING/UNKNOWN envelopes.
+Resume upload or reconcile status.
+Never create a new invoice merely because the previous request timed out.
+Resolve conflicts explicitly.
+24. Receipt Rendering & Printing
+Receipt data is generated from finalized invoice snapshot, not current product master.
+Support ESC/POS thermal printing.
+Support Tamil text where printer/font capability allows.
+Provide a fallback representation for printers that cannot render Tamil, such as configured transliteration/alternate text.
+Reprint requires permission and creates audit event.
+Print failure never rolls back financial finalization.
+Receipt should include invoice number/date, shop identity, GST information where applicable, customer, line details, quantity/UOM, rate, discount, tax breakup, total, tender summary, balance/change and configured footer.
+24.1 WhatsApp fallback
+After printer failure, offer one-tap receipt sharing.
+WhatsApp delivery is asynchronous.
+Failure to send WhatsApp does not alter invoice/payment state.
+Consent, phone validation and template governance apply.
+Delivery attempts are logged separately.
+25. Returns, Refunds & Credit Notes
+Locate original finalized invoice.
+Validate returnable quantity and item eligibility.
+Use original invoice/batch traceability where required.
+Determine return condition and restock/damage disposition.
+Create sales return and return lines.
+Create inventory return movement if restockable.
+Create refund or customer credit allocation according to chosen settlement.
+Create credit note/financial reversal records where applicable.
+Reverse relevant tax/accounting impacts through controlled journal/reversal logic.
+Audit all relationships back to the original invoice.
+Return quantity cannot exceed remaining returnable quantity.
+Refund cannot exceed refundable amount.
+Batch traceability is retained even if stock is returned to a different location.
+Returns do not mutate the original invoice lines.
+26. Cancellations, Voids & Reversals
+Draft/held carts may be cancelled without financial impact.
+Finalized invoices cannot be deleted.
+Post-finalization correction uses return, credit note, refund or authorized reversal.
+Void behavior for document numbering is controlled by financial-year/document-series policy.
+Every reversal references the original transaction and records reason/actor.
+27. Hold / Resume Cart
+Hold stores a complete cart snapshot and operator/device context.
+Hold does not permanently reserve stock unless reservation is explicitly enabled.
+Price/tax/stock are revalidated on resume and again at finalization.
+Expired holds cannot be silently finalized.
+Customer information and notes are retained with the hold.
+28. POS Session, Cash Drawer & EOD
+POS session may be opened with opening cash float.
+Cash sales and payouts are linked to the active cash session.
+Drawer operations are audited.
+Expected cash is derived from accounting/cash movement records.
+EOD compares expected cash with physical count and records variance.
+Printer/payment hardware failure does not invalidate the cash session.
+EOD cannot silently modify historical sales.
+Expected cash =
+opening cash
++ cash sales
++ other authorized cash-in
+- cash refunds
+- cash payouts
+- cash withdrawals
+± other configured cash movements
+29. Customer Display / Payment Display
+Optional customer-facing display may show cart lines, subtotal, tax and total.
+During UPI payment, it may display amount and QR.
+Customer display is informational and never authoritative.
+Do not expose sensitive customer credit information on a public display.
+30. Hardware Failure Isolation
+31. Audit & Security
+Permissions are enforced server-side and reflected in Flutter UI.
+Sensitive operations require explicit permission and may require owner PIN.
+Log price overrides, discount overrides, credit overrides, manual weights, reprints, voids, returns, refunds and payment exceptions.
+Do not log payment secrets, API tokens or sensitive credentials.
+Audit entries contain tenant, actor, device, request ID, timestamp, entity and before/after or reason where appropriate.
+RLS applies to all tenant-owned data.
+Device revocation blocks further authoritative operations.
+Session tokens use secure storage and short-lived access-token strategy as defined by auth architecture.
+32. Role & Permission Matrix
+33. API Endpoint Mapping
+Exact route names must remain consistent with Document 02. Any implementation rename requires a versioned API change.
+34. Database Entity Mapping
+35. Cross-Document Service Mapping
+36. Backend Service Responsibilities
+POSService: cart lifecycle, quote orchestration and finalization command.
+PricingService: effective price/tier/discount resolution.
+TaxService: tax profile and calculation.
+InventoryService: availability, allocation, reservation and stock movement.
+PaymentService: payment intents, status verification and allocations.
+CreditService/KhataService: exposure and credit authorization.
+InvoiceService: immutable invoice creation and retrieval.
+ReceiptService: receipt model/rendering data.
+ReturnService: return/credit/refund orchestration.
+AccountingService: journal posting and receivable impact.
+AuditService: sensitive operation audit.
+OutboxService: post-commit integrations.
+37. Flutter Responsibilities
+POS screen and cart state.
+Barcode scanning.
+Tamil/phonetic/fuzzy search UI.
+Scale and printer adapters.
+Customer selection and pricing presentation.
+Discount/authorization UX.
+Payment QR/status UX.
+SQLCipher local cart and transaction envelope.
+Offline queue and sync indicators.
+Receipt/reprint/share UX.
+Error recovery without duplicate submission.
+Accessibility, Tamil localization and large-touch cashier workflow.
+38. Standard Error Catalogue
+39. Critical Edge Cases
+Duplicate barcode scan: add quantity only according to configured scan behavior; avoid accidental double-sale where confirmation is required.
+Unknown barcode: do not auto-create product.
+Stale price: server revalidation wins online; offline policy determines acceptance/reconciliation.
+Stale stock: final inventory allocation decides; no client-only decrement.
+Batch expires during cart: finalization excludes it and reallocates or rejects.
+Scale disconnect: preserve cart; manual entry only when permitted.
+Printer disconnect: invoice remains finalized; retry/fallback.
+UPI delayed: intent remains pending; later verified event reconciles without duplicate invoice/payment.
+Payment duplicate: event idempotency prevents duplicate allocation.
+Split-tender rounding: canonical minor-unit reconciliation; no unexplained residual.
+Overpayment: reject or place excess into explicitly supported customer credit/refund workflow; never silently discard.
+Credit limit changes: finalization rechecks current authority online.
+Device crash: recover cart/envelope and safely replay.
+App restart: no duplicate finalize.
+Concurrent sale: inventory locking prevents double allocation.
+Offline conflict: explicit reconciliation; no LWW.
+Invoice number collision: transaction fails safely; no overwrite.
+Tax profile change: historical invoice remains unchanged; new sale uses current effective profile.
+Product archived: historical invoices remain readable; new sale rejected.
+Printer fails after finalization: financial transaction remains successful.
+Payment webhook arrives before UI returns: backend records it; subsequent status check finds same intent.
+Return after batch transfer: trace original batch and current location/disposition.
+Discount causes negative total: reject.
+Zero/negative weight: reject unless a specifically configured non-weighted product flow applies.
+Customer phone missing: WhatsApp option disabled or asks for valid consented number.
+Clock skew: server timestamps authoritative for finalization; client time retained only as device metadata.
+40. Performance Targets
+Targets are engineering goals and must be validated under production-like load, tenant counts, device concurrency and database sizing.
+41. Observability
+Structured logs with tenant-safe identifiers, request ID, device ID and operation ID.
+Distributed trace from POS finalize → inventory → accounting → payment allocation → outbox.
+Metrics: cart creation rate, finalize success/failure, finalize latency, stock conflicts, payment pending duration, payment failures, discount overrides, credit overrides, printer failures, sync backlog and duplicate/idempotency hits.
+Alerts for elevated finalization failures, stock invariant violations, payment reconciliation gaps, document-series conflicts and sync dead letters.
+Never place secrets, payment credentials or unnecessary personal data in logs.
+42. Testing Strategy
+42.1 Unit tests
+Price resolution and effective dating.
+Tier discounts.
+UOM conversion.
+Weight precision.
+Tax calculation and rounding.
+Discount authorization.
+Minimum margin.
+Multi-tender reconciliation.
+Credit exposure.
+Invoice numbering.
+Idempotency.
+Batch allocation request/response.
+Returnable quantity.
+Receipt formatting.
+42.2 Integration tests
+PostgreSQL transaction finalization.
+RLS tenant isolation.
+Inventory allocation and locking.
+Accounting journal posting.
+Payment intent/webhook state machine.
+Outbox processing.
+Sync upload/replay.
+Return/refund/credit note relationships.
+42.3 Flutter/widget tests
+Search ranking/selection.
+Cart state transitions.
+Scale stabilization UX.
+Payment pending/paid/failed states.
+Printer failure UX.
+Offline recovery.
+Discount authorization dialogs.
+Tamil rendering and accessibility.
+42.4 Hardware/payment tests
+Scale protocol mocks for Bluetooth/USB/RS-232.
+Printer mocks and disconnect scenarios.
+Gateway webhook signature verification.
+Duplicate/out-of-order webhooks.
+Delayed provider status.
+Polling fallback.
+42.5 Golden tests
+Normal receipt.
+Tamil receipt.
+GST receipt with split tax.
+Discounted invoice.
+Khata invoice.
+Return/credit note representation.
+42.6 Concurrency & chaos
+Two devices sell final units simultaneously.
+Finalize retry after network timeout.
+Webhook arrives during finalization.
+Database connection interruption.
+App killed after local persistence but before upload.
+Printer failure after invoice commit.
+Redis unavailable when Redis is enabled.
+Outbox worker restart.
+Offline transaction replayed twice.
+43. End-to-End Scenarios
+43.1 Normal cash sale
+Cashier scans product.
+System resolves Walk-In price.
+Quantity validated against stock.
+Tax calculated.
+Cash tender entered.
+Finalize atomically.
+Stock and accounting post.
+Receipt prints.
+Cash session records cash movement.
+43.2 Loose feed by scale
+Cashier selects loose product.
+Scale sends reading.
+Reading stabilizes.
+Weight converted to kg precision.
+Price per kg resolved.
+Batch allocation performed.
+Tax and total calculated.
+Payment collected.
+Invoice finalized and stock reduced.
+43.3 Khata sale
+Customer selected.
+Tier price resolved.
+Credit exposure checked.
+Invoice calculated.
+Khata tender selected.
+Final credit validation occurs.
+Invoice + receivable + stock + journal commit atomically.
+Updated balance shown.
+43.4 UPI sale
+Cart quoted.
+Payment intent created.
+Dynamic QR displayed.
+Webhook/status confirms payment.
+Payment allocation verified.
+Invoice finalized.
+Receipt printed/shared.
+43.5 Split tender
+Invoice total determined.
+Cash amount entered.
+UPI intent for remaining amount created.
+Verified UPI success received.
+Accepted tenders sum exactly to due.
+Invoice finalized once.
+43.6 Offline sale
+Connectivity unavailable.
+Cached product/price/tax snapshot used under offline policy.
+Sale stored in SQLCipher transaction envelope.
+Local receipt printed if supported.
+Connectivity returns.
+Envelope uploads with idempotency key.
+Server validates stock/credit/pricing policy.
+Authoritative invoice/reconciliation result is stored.
+Any conflict is surfaced, not silently overwritten.
+43.7 Return/refund
+Original invoice located.
+Returnable quantity validated.
+Batch traced.
+Return transaction created.
+Inventory/accounting reversal posted.
+Refund or customer credit recorded.
+Credit note generated where applicable.
+43.8 Printer failure
+Finalize succeeds.
+Printer command fails.
+Invoice remains FINALIZED.
+Cashier sees print retry.
+Cashier may send receipt through WhatsApp.
+Retry/share status is audited separately.
+43.9 Delayed UPI payment
+Intent remains PENDING.
+Cashier does not mark paid manually.
+UI times out to pending state.
+Backend receives later verified webhook/status.
+Same intent becomes PAID.
+Authorized workflow finalizes/reconciles without duplicate payment.
+44. Security Requirements
+All authoritative APIs use HTTPS.
+WebSocket uses authenticated WSS.
+Tenant context is derived from authenticated session/device context, not trusted from arbitrary request body.
+PostgreSQL RLS is mandatory.
+Sensitive PIN/approval verification is server-side.
+Idempotency records cannot be tenant-crossed.
+Payment webhook signatures must be verified.
+Device credentials can be revoked.
+SQLCipher database keys are stored using platform secure storage.
+Rooted/jailbroken device policy follows Document 04.
+Rate limiting applies to authentication, payment status, finalize and other abuse-prone endpoints.
+Audit logs are append-oriented and protected from ordinary cashier mutation.
+45. Data Integrity Invariants
+Finalized invoice total equals its persisted calculation result.
+Invoice tax lines reconcile with invoice tax total.
+Payment allocations never exceed permitted amount without explicit overpayment workflow.
+Stock movements reconcile to invoice batch allocations.
+Returnable quantity never becomes negative.
+Accounting journal is balanced.
+Khata ledger and invoice receivable reconcile.
+Every finalized invoice has unique authoritative number.
+Every authoritative financial command is idempotent.
+No finalized invoice is deleted.
+Historical invoice snapshots remain stable after master-data changes.
+Tenant-owned records cannot be read or written across tenant boundaries.
+46. Docker & Deployment Requirements
+POS itself is a Flutter application; backend POS services run in the Go API container.
+Required infrastructure remains containerized: Go API, worker/job service, PostgreSQL and optional Redis.
+Local device integrations remain on the Flutter device; containers must not be required to access Bluetooth/USB/RS-232 directly.
+Payment/webhook ingress is exposed through the secure API/reverse-proxy layer.
+Receipt and notification workers can be independently scaled.
+Configuration is environment-driven; secrets are not baked into images.
+Database migrations run through controlled migration tooling.
+Health/readiness probes cover database and critical dependencies.
+47. Implementation Checklist
+Implement cart state machine.
+Implement product/barcode/Tamil/alias search.
+Implement effective-dated pricing and customer tiers.
+Implement UOM/quantity validation.
+Implement scale abstraction and stabilization.
+Implement quote/calculation engine.
+Implement tax engine integration.
+Implement discount/authorization policy.
+Implement stock allocation integration.
+Implement payment intent and verification.
+Implement Khata/credit validation.
+Implement atomic invoice finalization.
+Implement invoice numbering.
+Implement multi-tender reconciliation.
+Implement idempotency.
+Implement offline SQLCipher cart/envelope.
+Implement sync reconciliation.
+Implement ESC/POS receipt pipeline.
+Implement WhatsApp fallback.
+Implement returns/refunds/credit notes.
+Implement hold/resume.
+Implement POS session/cash/EOD linkage.
+Implement audit and observability.
+Implement all listed tests and acceptance scenarios.
+Verify Docker deployment and recovery procedures.
+48. Acceptance Criteria
+A cashier can complete a normal cash sale end-to-end without manual database intervention.
+A loose-feed sale captures a stable scale weight and correctly decrements inventory.
+Customer pricing tiers resolve according to effective configuration.
+GST calculation is configuration-driven and auditable.
+FIFO/FEFO allocation excludes expired/held/rejected batches.
+Concurrent finalization cannot oversell inventory.
+Cash, UPI, bank and Khata tenders reconcile exactly.
+Split tender cannot finalize with an unexplained balance.
+UPI is never accepted based only on client state.
+Khata credit limits are enforced and overrides are audited.
+Invoice finalization is atomic across invoice, tax, stock, payment/ledger, accounting and outbox.
+Retrying the same finalize command cannot duplicate the sale.
+Offline transactions survive app restart and reconcile safely.
+Printer failure cannot undo a finalized invoice.
+WhatsApp failure cannot undo a finalized invoice.
+Returns cannot exceed remaining returnable quantities.
+Finalized invoices are immutable.
+RLS prevents cross-tenant POS access.
+All critical operations have audit evidence.
+All end-to-end scenarios in Section 43 pass.
+All non-negotiable rules below are enforced by automated tests.
+49. Non-Negotiable POS Rules
+Never use floating-point arithmetic for money or precision-sensitive weight calculations.
+Never trust a client-only paid flag.
+Never finalize a sale without authoritative or explicitly permitted offline validation.
+Never decrement stock outside the inventory transaction boundary.
+Never edit a finalized invoice in place.
+Never overwrite an existing invoice because of a numbering collision.
+Never use last-write-wins for financial/inventory conflicts.
+Never allow expired/held/rejected batches into allocation.
+Never silently create a product from an unknown barcode.
+Never let printer/WhatsApp failure roll back a finalized financial transaction.
+Never duplicate payment or invoice outcomes on retries.
+Never bypass RLS or application tenant authorization.
+Never hardcode GST rates, legal thresholds or customer discount percentages that are intended to be configuration.
+Never hide manual weight, discount, credit override or reversal activity from audit.
+Never treat offline provisional state as automatically authoritative without reconciliation.
+50. Final Definition of Done
+Database entities and constraints align with Document 01.
+API routes/schemas align with Document 02.
+Go service boundaries and transactions align with Document 03.
+Flutter screens, local DB and hardware adapters align with Document 04.
+Offline envelopes/conflict handling align with Document 05.
+Inventory allocation and stock invariants align with Document 06.
+Accounting/Khata/payment allocation align with Document 07.
+Automated tests cover happy paths, edge cases, concurrency, offline and hardware failures.
+Docker Compose/local environment can reproduce the POS stack.
+Production configuration separates secrets from code.
+Observability dashboards and alerts exist for POS-critical flows.
+Runbooks exist for payment reconciliation, stock conflict, invoice retry, printer failure and offline sync conflict.
+Acceptance criteria are demonstrated in a production-like environment.
+No known P0 integrity or security defects remain.
+51. Document Dependency & Change Control
+This document depends on Documents 01–07 and is itself a normative input to Documents 09–20. If a later document conflicts with this POS specification, the conflict must be explicitly resolved and versioned; implementation teams must not silently choose a different behavior.
+Recommended change record fields: change ID, affected rule, reason, financial impact, database impact, API impact, offline impact, migration requirement, test cases, approval and effective date.
+Appendix A — Example Sale Calculation
+This is a behavior example only. Actual price, tax and batch values are always configuration/transaction data.
+Appendix B — Finalization Command Contract (Conceptual)
+POST /api/v1/sales/invoices/finalize
+Headers:
+  Authorization
+  X-Tenant-ID (only if contract explicitly permits and server validates)
+  X-Device-ID
+  X-Request-ID
+  Idempotency-Key
+
+Request:
+{
+  cart_id,
+  customer_id,
+  tender_allocations[],
+  authorization_context?,
+  client_transaction_id,
+  client_snapshot_version?
+}
+
+Response:
+{
+  invoice_id,
+  invoice_number,
+  financial_year,
+  status: "FINALIZED",
+  totals,
+  taxes[],
+  payment_allocations[],
+  change_amount,
+  stock_allocation_summary[],
+  receipt_reference,
+  reconciliation_status
+}
+Exact field names and schemas are governed by Document 02; this conceptual contract illustrates the required transaction semantics.
+Appendix C — POS Traceability Chain
+User/Device
+  -> POS Cart
+  -> Quote / Price + Tax Snapshot
+  -> Payment Intent (if needed)
+  -> Finalize Command + Idempotency Key
+  -> Sales Invoice
+  -> Invoice Lines
+  -> Tax Lines
+  -> Batch Allocations
+  -> Stock Movements
+  -> Payment Allocations / Khata
+  -> Journal Entries
+  -> Outbox / Notifications
+  -> Receipt / Reprint / WhatsApp
+  -> Audit Log
+Appendix D — Required Future Documents
+The next document in the approved sequence is Document 09 — Hardware Integration Specification, followed by Payment/UPI, GST/Compliance, Security, Docker/DevOps, Testing/QA, UI/UX, Reports/Dashboard, Backup/DR/Archival, Seed Data/Configuration and Implementation/Build Specification.
+End of Document 08 — Complete POS & Billing Engine Specification v1.0.
+Item | Specification
+Document ID | AAF-POS-008
+Version | 1.0
+Status | Implementation Baseline
+Primary owners | Product, Backend, Flutter, QA, Finance/Operations
+Authoritative dependencies | Documents 01–07
+Primary objective | Define the complete POS and billing engine without ambiguity for implementation and testing.
+Financial authority | Server-side PostgreSQL transaction; offline transactions reconcile to server authority.
+Deployment | All backend/support services containerized with Docker.
+State | Meaning | Allowed actions
+DRAFT | Editable cart not finalized. | Add/remove/change lines, customer, UOM, quantities, discounts subject to policy.
+HELD | Temporarily parked cart. | Resume, cancel/expire according to configured hold policy.
+PENDING_PAYMENT | Cart has payment workflow in progress. | Refresh/poll/webhook; cancel/expire payment intent where supported.
+READY_TO_FINALIZE | All required calculations/validations complete. | Finalize only; no arbitrary mutation.
+FINALIZED | Invoice committed and authoritative. | Print/reprint/share; return/credit/reversal only.
+CANCELLED | Draft/held cart cancelled before finalization. | No sale ledger impact.
+EXPIRED | Draft/payment workflow expired. | Restart; do not silently finalize.
+Tier | Default business rule | Configuration
+Walk-In MRP | Base/MRP price. | Tax/price-list dependent.
+Registered Farmer | 2% discount from configured eligible base price. | Rate and eligibility configurable/effective-dated.
+Wholesale Dealer | 5% discount from configured eligible base price. | Rate, price list and eligibility configurable/effective-dated.
+Aavin Sub-Contractor | Dedicated configured price list/rules. | Fully configurable; never hardcoded to one percentage.
+Value | Precision / rule
+Currency | NUMERIC(12,2) minimum.
+Weight quantity | NUMERIC(12,3).
+UOM conversion factor | NUMERIC(12,6).
+Tax rate | NUMERIC(7,4).
+Quantity | Positive decimal; product-UOM rules define permitted precision.
+Conversion | Product-specific conversion where configured; do not assume every bag has the same net weight.
+Discount | Rule
+Line discount | Allowed only for permitted roles/product/tier.
+Invoice discount | Requires appropriate permission; distributed or accounted according to configured policy.
+Tier discount | Automatic from effective customer pricing rule.
+Promotional discount | Optional, effective-dated and rule-driven.
+Manual override | Requires authorization when outside role threshold.
+Minimum margin | Optional guardrail based on configured product cost/current costing snapshot.
+Tender | POS behavior
+Cash | Immediate tender; validate received amount and change.
+UPI | Create payment intent; dynamic QR; await verified gateway/webhook or trusted reconciliation.
+Bank | Record bank/reference details where configured; payment state must be authoritative.
+Khata | Create receivable/Khata allocation after credit validation.
+Split tender | Multiple payment allocations whose accepted total equals invoice due, subject to rounding.
+Mixed cash + UPI + Khata | Allowed when tenant policy permits and each component reaches an accepted state.
+State | Meaning
+CREATED | Intent exists but not presented/started.
+PENDING | Customer may still pay.
+PAID | Authoritatively confirmed.
+FAILED | Provider reports failure.
+EXPIRED | Intent validity window ended.
+CANCELLED | Cancelled according to provider/tenant rules.
+REFUNDED | Paid amount subsequently refunded, fully or partially through refund records.
+Failure | Required behavior
+Scale disconnected | Preserve cart; allow manual weight only if authorized.
+Printer disconnected | Finalize normally; show print retry and WhatsApp fallback.
+Barcode scanner disconnected | Allow search/manual entry.
+UPI display/WebSocket failure | Use verified polling/status API.
+Payment provider timeout | Keep intent state; reconcile later; do not duplicate.
+Device restart | Recover persisted cart/envelope.
+USB/Bluetooth permission failure | Show actionable pairing/permission state; no financial rollback.
+Operation | Cashier | Senior Cashier | Manager/Owner | Admin/Finance
+Create sale | ✓ | ✓ | ✓ | ✓
+Manual weight | Configurable | ✓ | ✓ | ✓
+Standard discount | Configured | Configured | ✓ | ✓
+High discount override | — | Limited | ✓ | ✓
+Khata sale | Configured | ✓ | ✓ | ✓
+Credit override | — | Limited/No | ✓ | ✓
+Reprint receipt | ✓/audit | ✓ | ✓ | ✓
+Return | Limited | ✓ | ✓ | ✓
+Refund | —/limited | Limited | ✓ | ✓
+Void draft | ✓ | ✓ | ✓ | ✓
+Finalized invoice reversal | — | — | ✓ | ✓
+EOD close | —/limited | ✓ | ✓ | ✓
+Tax/price master change | — | — | ✓ | ✓
+Capability | Representative API
+Product search | GET /api/v1/products/search
+Product/barcode | GET /api/v1/products/{id}; GET /api/v1/products/barcodes/{barcode}
+Customer | GET/POST /api/v1/customers
+Price resolution | POST /api/v1/pricing/resolve
+Cart | POST/GET /api/v1/pos/carts; POST /api/v1/pos/carts/{id}/hold
+Quote/preview | POST /api/v1/pos/carts/{id}/quote
+Stock check | POST /api/v1/inventory/availability
+Payment intent | POST /api/v1/payments/intents
+Payment status | GET /api/v1/payments/intents/{id}
+Finalize | POST /api/v1/sales/invoices/finalize
+Invoice | GET /api/v1/sales/invoices/{id}
+Receipt | GET /api/v1/sales/invoices/{id}/receipt
+Return | POST /api/v1/sales/returns
+Refund | POST /api/v1/payments/refunds
+Khata allocation | POST /api/v1/khata/allocations
+EOD | POST/GET /api/v1/eod/sessions
+Sync | POST /api/v1/sync/upload; GET /api/v1/sync/pull
+WebSocket | WSS /api/v1/ws
+POS concern | Document 01 entities
+Cart/local transaction | sync_transactions; local SQLCipher cart/envelope tables
+Invoice | sales_invoices
+Lines | sales_invoice_lines
+Taxes | invoice_tax_lines
+Batch allocation | invoice_batch_allocations
+Inventory impact | stock_movements; stock_balances
+Customer credit | customers; customer_credit_profiles; customer_ledger_entries
+Payments | payment_intents; payments; payment_allocations; payment_webhook_events; refunds
+Accounting | journal_entries; journal_lines
+Cash | cash_sessions; cash_movements; eod_sessions
+Audit | audit_logs
+Notifications | notification_jobs; message_deliveries
+Outbox/integration | integration_events
+Area | Primary document
+Database/RLS/indexes | Document 01
+REST/WebSocket contract | Document 02
+Go orchestration/services | Document 03
+Flutter screens/device adapters/offline UI | Document 04
+Offline transaction envelopes/sync/conflicts | Document 05
+FIFO/FEFO, reservations, stock movement | Document 06
+Double-entry, Khata, credit, payment allocation | Document 07
+POS orchestration | Document 08
+Code | Meaning / response
+POS_CART_NOT_FOUND | Cart does not exist or is inaccessible.
+POS_CART_STATE_INVALID | Operation not valid for current state.
+PRODUCT_NOT_FOUND | Product unavailable.
+BARCODE_UNKNOWN | Barcode not mapped.
+PRODUCT_NOT_SALEABLE | Product archived/blocked.
+UOM_NOT_ALLOWED | Requested UOM is not configured.
+PRICE_NOT_AVAILABLE | No effective price.
+PRICE_STALE | Offline/local price requires reconciliation.
+STOCK_INSUFFICIENT | Available stock cannot satisfy sale.
+BATCH_NOT_ALLOCATABLE | No eligible batch.
+BATCH_EXPIRED | Selected/available batch is expired.
+SCALE_UNSTABLE | Weight is not stable.
+WEIGHT_INVALID | Weight outside configured constraints.
+DISCOUNT_NOT_AUTHORIZED | Role cannot apply discount.
+MIN_MARGIN_VIOLATION | Discount breaches configured margin guard.
+CREDIT_LIMIT_EXCEEDED | Khata exposure exceeds available credit.
+CREDIT_OVERRIDE_REQUIRED | Owner/manager authorization required.
+PAYMENT_PENDING | External payment not yet confirmed.
+PAYMENT_FAILED | Payment failed.
+PAYMENT_EXPIRED | Payment intent expired.
+PAYMENT_AMOUNT_MISMATCH | Verified payment amount differs.
+PAYMENT_DUPLICATE | Duplicate payment event/request.
+TENDER_TOTAL_MISMATCH | Tender allocations do not reconcile.
+INVOICE_ALREADY_FINALIZED | Idempotent replay or duplicate command.
+IDEMPOTENCY_CONFLICT | Same key used with different payload.
+DOCUMENT_SERIES_CONFLICT | Invoice sequence collision/invalid series.
+TAX_PROFILE_INVALID | Tax configuration missing/invalid.
+SYNC_CONFLICT | Offline transaction requires reconciliation.
+DEVICE_REVOKED | Device cannot perform authoritative operation.
+Metric | Target
+Product search cached/local | p95 < 150 ms UI response target
+Online product search API | p95 < 300 ms under normal load
+Cart calculation local | < 100 ms for normal cart
+Quote API | p95 < 500 ms excluding external payment calls
+Finalize API | p95 < 1.5 s excluding printer/WhatsApp
+Payment status refresh | Configurable bounded polling; avoid aggressive loops
+Receipt render | < 500 ms typical
+Offline sync batch | Configurable; should not block cashier UI
+Duplicate finalization | Zero duplicate financial outcomes under retry testing
+Item | Value
+Product | 50 kg cattle feed bag
+Quantity | 2 bags
+Unit price | Configuration-derived
+Customer tier | Registered Farmer
+Tier discount | 2% default starting configuration
+Tax | Tax profile determines applicable rate
+Payment | Cash / UPI / Khata / split
+Batch | Allocated by inventory FEFO/FIFO policy
+Final invoice | Immutable snapshot

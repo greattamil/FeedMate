@@ -1,0 +1,607 @@
+Andipatti Animal Feed System
+Document 05 — Complete Offline-First & Synchronization Specification
+v1.0 — Implementation Baseline
+Aligned with PRD v1.2, Database & ERD v1.0, API Specification v1.0, Go Backend Technical Architecture v1.0, and Flutter Technical Architecture v1.0.
+This document defines the exact client synchronization model for unreliable connectivity, including SQLCipher local persistence, transaction envelopes, upload/download queues, cursors, idempotency, conflicts, retries, reconciliation, recovery and operational visibility.
+1. Objectives
+Allow core shop workflows to continue safely during internet outages.
+Never lose a locally committed supported transaction because the app is closed or restarted.
+Ensure every transaction reaches the backend at most once in business effect, even if transmitted many times.
+Keep PostgreSQL authoritative while preserving a durable local pending queue.
+Prevent cross-tenant and cross-device data leakage.
+Provide deterministic, auditable conflict handling.
+Support delayed payment confirmations and external side effects without corrupting invoices.
+Make synchronization observable to the shop operator and support team.
+2. Source of Truth Model
+The client may act on cached information only within explicitly permitted offline policies. It must not represent cached state as authoritative when freshness matters.
+3. Offline Capability Classes
+Each operation must declare its offline capability explicitly; developers must not infer it from whether an endpoint happens to be reachable.
+4. Offline Transaction Envelope
+Canonical conceptual structure:
+
+transaction_id
+tenant_id
+device_id
+user_id
+operation_type
+schema_version
+client_created_at
+client_sequence
+idempotency_key
+payload
+payload_hash
+depends_on[]
+status
+attempt_count
+created_at
+updated_at
+last_attempt_at
+next_attempt_at
+last_error_code
+last_error_message_safe
+server_entity_id
+server_version
+server_received_at
+
+transaction_id is globally collision-resistant and immutable.
+idempotency_key is immutable and reused for every retry.
+payload_hash detects accidental mutation.
+depends_on supports ordering for related local operations.
+Safe error text may be stored; secrets and raw provider responses must not be stored in plaintext logs.
+5. Local Sync Database Model
+Exact physical columns must remain aligned with the database specification and Flutter implementation. All local tables are SQLCipher protected.
+6. Local Transaction States
+7. Local Database Transaction Rules
+Start SQLite transaction.
+Validate local business invariants.
+Write business data/provisional projection.
+Create immutable sync transaction envelope.
+Update local sync metadata.
+Commit SQLite transaction.
+Only after commit may the UI show the operation as locally finalized.
+Sync runs separately and must never depend on the original UI isolate remaining alive.
+If any step before local commit fails, no partial business transaction may remain.
+8. Upload Queue Algorithm
+Select eligible READY transactions for the authenticated tenant/device.
+Exclude transactions whose dependencies are not terminally accepted.
+Acquire local sync lock.
+Mark selected transaction as UPLOADING.
+Send envelope with idempotency key.
+Validate server response signature/shape according to API contract.
+On ACCEPTED, persist server ID/version and authoritative snapshot.
+On DUPLICATE, persist original server result and reconcile.
+On CONFLICT, persist conflict without destructive local overwrite.
+On REJECTED, preserve transaction and actionable error.
+Commit local result.
+Continue according to retry/backoff policy.
+9. Upload Ordering
+Prefer creation order for independent financial transactions.
+Honor explicit depends_on relationships.
+Do not upload a receipt before its associated local sale if the receipt is represented as a dependent business event.
+Do not upload a payment allocation that requires a server invoice until the invoice has an authoritative ID.
+Master-data updates from the server may be applied independently when safe.
+Ordering is a correctness mechanism, not merely a performance preference.
+10. Download / Pull Algorithm
+Authenticate and request changes from the last persisted cursor.
+Receive a bounded page of changes plus next cursor.
+Validate tenant/scope and schema.
+Apply changes to SQLCipher in one local transaction.
+Preserve local pending mutations and resolve versions according to conflict policy.
+Commit the page.
+Persist the next cursor only after successful commit.
+Request next page until complete or server limits are reached.
+Never advance a cursor when the page was only partially applied.
+11. Cursor Model
+Cursors are opaque server-issued values. The client must not parse, modify, or manufacture cursor contents.
+Cursor scope includes tenant and authorized device/user context.
+Separate cursors may exist for master data and operational events.
+Cursor storage is durable and encrypted.
+Cursor reset requires a controlled full/partial resync.
+Expired/invalid cursors return a documented recovery response.
+After cursor reset, the client rebuilds the relevant local projection without deleting unsynchronized financial envelopes.
+12. Server Change Versioning
+Use monotonically comparable server versions or event sequence numbers within each synchronization scope.
+Every downloaded entity/event carries enough version metadata to reject stale updates.
+Do not use client timestamps as authoritative ordering.
+Server commit order is authoritative for conflicting server changes.
+13. Idempotency Rules
+The local queue must assume that every network timeout may mean 'server committed but client did not receive the response'.
+14. Conflict Taxonomy
+15. No Last-Write-Wins Rule
+Last-write-wins is prohibited for finalized invoices, payments, stock movements, customer ledger, supplier ledger, accounting journals, EOD closure, returns/refunds and other financial records. Corrections are new transactions or reversals. Last-write-wins may be considered only for explicitly nonfinancial presentation preferences where documented.
+16. Offline Pricing
+Store the exact price/tax configuration snapshot required by the offline sale policy.
+Record price-list ID/version and effective timestamp.
+At server acceptance, validate whether offline pricing is still permitted.
+If policy permits, preserve the originally authorized offline price.
+If policy does not permit, route to conflict before final financial acceptance.
+Never silently change the displayed final price after the customer has completed payment.
+17. Offline Tax Handling
+Tax profiles are cached with effective dates/version.
+Calculations use decimal-safe arithmetic.
+Tax configuration is not hardcoded in Flutter.
+If a tax configuration is expired/unknown for an offline transaction, follow tenant policy: block or use an explicitly approved cached profile.
+Server performs authoritative validation on synchronization.
+18. Offline Inventory Policy
+Because inventory is financially and operationally sensitive, the tenant must explicitly choose the supported offline policy.
+Default recommendation: controlled offline with conservative safety buffer for shops that require continuity, subject to business approval.
+19. Offline Credit / Khata Policy
+Cache customer credit limit and last authoritative balance/version.
+Allow offline credit only if tenant policy permits.
+Apply local conservative limit including a safety margin.
+Every offline credit sale is uploaded with the original customer/version context.
+If authoritative balance differs materially, server applies conflict policy rather than overwriting ledger.
+Owner PIN override is still required locally for configured threshold, but backend remains final authority.
+20. Offline Payment Policy
+Cash may be recorded locally as a tender according to offline policy.
+Khata may be recorded as a ledger operation according to credit policy.
+UPI/provider confirmation is online-authoritative unless a provider-specific offline mechanism exists and is explicitly supported.
+A payment intent can remain PENDING until server/provider confirmation.
+Never mark an online UPI transaction permanently PAID merely because the QR was displayed or a client callback fired.
+21. Payment Reconciliation After Offline Sale
+Local sale records payment tender intent/status.
+On reconnect, invoice is synchronized.
+Payment intent is created or reconciled on server.
+Provider status is verified.
+Payment allocation is posted exactly once.
+WebSocket/poll updates the client.
+Any mismatch is surfaced as a reconciliation exception.
+22. Local Provisional IDs
+Generate UUID/ULID-style local IDs for offline entities.
+Server returns authoritative IDs when accepted.
+Maintain local_id → server_id mapping.
+Never reuse a local ID for another business transaction.
+Keep mapping until retention policy permits cleanup.
+23. Dependency Graph
+Example: sale transaction may depend on locally created customer, product sync version, and payment intent. Dependencies are explicit only where necessary.
+Prevent circular dependencies.
+Reject malformed dependency graphs locally.
+Transactions blocked by unresolved dependencies remain READY/BLOCKED with reason.
+Dependency completion should trigger a retry without user re-entry.
+24. Retry & Backoff
+Use exponential backoff with jitter for transient network/server errors.
+Honor Retry-After where supplied.
+Do not retry validation/business-rule failures automatically without state change.
+Do not retry authentication failures indefinitely.
+Cap retry delay and persist next_attempt_at.
+Provide manual retry for operator-visible failures.
+25. Suggested Retry Classification
+26. Connectivity Detection
+Use OS connectivity information only as a trigger.
+Confirm actual API reachability with authenticated requests.
+Do not repeatedly ping the backend while offline.
+Reconnect events start a debounced sync attempt.
+Foreground/resume starts a sync attempt.
+Manual sync is serialized with automatic sync.
+27. Sync Lock
+Only one upload/pull coordinator runs per device.
+Persist or safely recreate lock state after process death.
+Do not use a permanent lock that can survive crashes indefinitely.
+Lock acquisition has a timeout/recovery mechanism.
+UI may request sync but must not execute synchronization logic itself.
+28. Crash Recovery
+On app startup, inspect sync_transactions in UPLOADING state.
+Treat them as READY unless an authoritative local marker proves terminal completion.
+Retry with the same idempotency key.
+Server returns ACCEPTED or DUPLICATE if it already committed.
+Reconcile local state.
+Resume normal queue processing.
+29. Partial Failure Handling
+Never mark an entire batch synchronized because one item succeeded.
+Each transaction receives its own result.
+Pull pages are atomic locally.
+External side effects may be independently pending.
+UI shows partial synchronization accurately.
+30. Server Response Contract
+Each synchronization response should identify transaction_id, result status, server entity ID/version where applicable, authoritative snapshot or reference, error code, safe message, conflict details where applicable, and retryability. The client must ignore undocumented fields but must not ignore status semantics.
+31. Conflict Record
+32. Conflict Resolution UI
+Show what the operator attempted and what the server currently says.
+Do not present raw JSON as the primary interface.
+Use clear actions such as Retry, Accept Server State, Create Adjustment, Contact Admin.
+Financial conflicts must not offer an unsafe 'force overwrite' button.
+Resolution requires permission where financial impact exists.
+Resolution action becomes a new auditable transaction when it changes financial state.
+33. Full Resynchronization
+A full resync rebuilds cached server-derived data while preserving unsynchronized local financial envelopes.
+Pause normal sync.
+Back up/preserve pending transaction envelopes.
+Invalidate relevant cursors.
+Download authoritative master/projection data in pages.
+Rebuild local derived tables transactionally.
+Restore pending transaction references/mappings.
+Resume upload.
+Reconcile results.
+Mark resync complete.
+34. When Full Resync Is Required
+Cursor expired/invalid and cannot be resumed.
+Local database corruption repaired from a known-good state.
+App upgrade changes local projection incompatibly.
+Tenant/device assignment changed.
+Server instructs client to resync.
+Detected local/server version divergence that incremental changes cannot safely resolve.
+35. Local Data Retention
+Retain pending and unresolved transactions until terminal resolution.
+Retain enough invoice/payment/ledger metadata for supported offline recovery.
+Remove obsolete cached history according to tenant policy.
+Never delete a pending financial transaction merely because it is old.
+Local cleanup must not affect server-authoritative data.
+36. Encryption & Key Management
+SQLCipher database is encrypted at rest.
+Encryption key is stored in OS secure storage.
+Key is not derived from a simple user PIN alone.
+Key rotation, if supported, must migrate the database transactionally.
+Key loss means local unsynchronized recovery may be impossible; operational recovery procedures must account for this.
+Never include database keys in crash reports.
+37. Tenant Isolation in Sync
+Every sync request is authenticated and tenant-scoped.
+Server determines permitted tenant from session/device membership.
+Client-supplied tenant_id is validated, not trusted.
+Cursor cannot be reused across tenants/devices if server policy prevents it.
+Downloaded records are filtered by server authorization/RLS.
+Client local database is treated as sensitive and should not be shared between tenants on a device without explicit secure separation.
+38. Device Registration & Revocation
+Each device has a stable device ID.
+Device registration establishes tenant association and server permissions.
+Revocation immediately prevents synchronization when detected.
+Pending transactions remain locally protected but cannot upload until an authorized recovery path is established.
+Device replacement requires explicit migration/recovery policy.
+39. App Version Compatibility
+Every transaction includes app version and schema version.
+Backend defines supported client schema versions.
+Breaking schema changes require migration or version gating.
+Unsupported clients receive a clear update-required response.
+Already committed local transactions must remain recoverable after app upgrade.
+40. Background Synchronization
+Use platform-appropriate background execution where available.
+Treat background execution as opportunistic, not guaranteed.
+Foreground resume remains the primary recovery trigger.
+Do not keep long-lived background sockets solely for sync on mobile platforms.
+Respect OS battery/network restrictions.
+41. Sync Status Model
+42. Operator Sync Dashboard
+Current connection state.
+Last successful sync time.
+Pending transaction count.
+Oldest pending transaction age.
+Conflict count.
+Failed/retryable count.
+Last error category.
+Manual Sync Now action.
+View transaction details.
+Critical unsynchronized financial warning.
+43. Audit Requirements
+Record local transaction creation time and device/user.
+Record every server response state.
+Record conflict resolution actions.
+Record manual retry/recovery.
+Do not allow operators to edit synchronization history.
+Backend remains authoritative for financial audit.
+44. Reconciliation Jobs
+Compare local acknowledged transactions against server state after sync.
+Backend periodically reconciles invoice totals to stock movements, payments and ledgers.
+Payment providers are reconciled using provider transaction IDs.
+Any mismatch becomes an exception, not a silent correction.
+Client can be instructed to refresh specific entities after reconciliation.
+45. Receipt / Printer Interaction
+Printing is a local side effect after local finalization.
+Print job has its own status and retry count.
+Printer failure never changes sync transaction status.
+Reprint uses authoritative/local invoice snapshot.
+WhatsApp fallback is independent of printing.
+Duplicate print is acceptable operationally only when explicitly requested/retried; financial duplicate creation is never acceptable.
+46. WhatsApp Interaction
+Receipt delivery job references finalized invoice ID.
+Message delivery is queued independently.
+Offline app may queue a local send request but provider submission waits for network.
+Delivery failure does not reverse invoice/payment.
+Backend deduplicates message events where provider/event IDs allow.
+47. External Compliance Interaction
+Compliance requests requiring online submission remain PENDING/ONLINE_REQUIRED.
+Do not fabricate compliance success offline.
+Once online, submit through backend adapter.
+Store provider request ID/status.
+Retry according to provider semantics.
+Expose compliance failure separately from invoice financial finalization where legally/business appropriate.
+48. Sync Performance
+Targets are baselines to validate with production-like devices and datasets.
+49. Battery / Data Usage
+Batch uploads and downloads where safe.
+Back off when network is unavailable.
+Use smaller pages on mobile networks.
+Do not download unchanged large images/documents during every sync.
+Prefer deltas/cursors to full catalogue refresh.
+Allow Wi-Fi-only policies for large exports where operationally appropriate.
+50. Schema Evolution
+Version transaction envelopes.
+Add optional fields before making them required.
+Maintain decoders for supported prior versions.
+Backend may reject unsupported schema with a machine-readable error.
+Local migrations must run before processing new transaction types.
+Never reinterpret an old financial payload under a new business meaning.
+51. Security Threat Model
+52. Observability
+Track sync cycle duration.
+Track upload accepted/duplicate/conflict/rejected counts.
+Track pull page size and duration.
+Track pending queue age.
+Track oldest pending transaction.
+Track retry counts.
+Track authentication blocks.
+Track full resync frequency.
+Track payment reconciliation exceptions.
+Never log payload secrets or SQLCipher keys.
+53. Support Diagnostics
+Provide an authorized diagnostic screen with app version, device ID, tenant-safe identifier, last sync, pending count and last error code.
+Allow export of sanitized sync diagnostics.
+Do not export tokens, passwords, database keys or unnecessary customer PII.
+Support can use transaction ID/request ID to trace a server-side issue.
+54. Data Integrity Invariants
+Every local finalized transaction has exactly one sync envelope.
+Every sync envelope has one immutable transaction ID.
+No transaction may be both terminally accepted and unresolved conflict.
+Cursor advances only after successful local application.
+Server IDs never change after authoritative assignment.
+Financial corrections create new events rather than mutating history.
+Pending financial transactions survive app restart.
+Duplicate transmission cannot duplicate financial effect.
+55. Detailed End-to-End Example — Offline POS
+Operator selects customer and products offline.
+Local pricing/tax policy validates cart.
+Scale provides 12.500 kg; reading is converted to exact decimal quantity.
+Operator chooses cash/Khata according to policy.
+Local SQLite transaction writes invoice draft/finalized local state, stock provisional movement and sync envelope.
+Receipt prints locally.
+App loses power.
+On restart, READY envelope is recovered.
+Network returns; sync uploads exact same transaction ID/idempotency key.
+Backend validates tenant, user, pricing, stock and accounting.
+Backend commits invoice, stock, ledger/payment/accounting atomically.
+Backend returns authoritative invoice ID/version.
+Client reconciles local provisional IDs.
+Transaction becomes SYNCED.
+56. Detailed Example — Timeout After Server Commit
+Client sends sale with idempotency key.
+Server commits successfully.
+Network drops before response arrives.
+Client marks transaction READY/retryable, not failed permanently.
+Retry sends same key.
+Server detects existing idempotency record.
+Server returns original result.
+Client adopts original invoice ID/version.
+No duplicate stock, payment or ledger entry occurs.
+57. Detailed Example — Stock Conflict
+Device A and Device B have cached stock.
+Both attempt offline sales from the same product/batch.
+Both create local transactions.
+First server submission consumes available stock.
+Second submission reaches server and fails the configured stock policy.
+Second transaction becomes CONFLICT/REJECTED.
+Client preserves the transaction and displays the authoritative stock/result.
+Operator may choose an approved adjustment/alternative workflow; no silent negative stock is created.
+58. Detailed Example — Payment Delayed
+POS creates UPI payment intent.
+Customer completes payment but webhook is delayed.
+Invoice may remain in a configured pending-payment state or follow the approved atomic sale policy.
+Backend receives and verifies webhook.
+Payment event is deduplicated and allocated.
+WebSocket informs connected POS.
+Client refreshes authoritative invoice/payment state.
+Receipt/payment status updates without duplicate financial posting.
+59. Detailed Example — App Upgrade
+App detects local schema version.
+Migration runs before opening normal UI.
+Pending envelopes are preserved.
+New client understands old supported envelope schema.
+Sync continues using original transaction IDs.
+Server accepts supported schema or clearly requests an upgrade/migration path.
+60. Recovery Matrix
+61. Testing Matrix
+62. Chaos / Fault Injection Scenarios
+Kill app immediately before local commit.
+Kill app immediately after local commit.
+Kill app after request send but before response.
+Drop network during upload.
+Duplicate every request.
+Delay payment webhook.
+Return 500 for several attempts.
+Return 409 with original result.
+Return malformed page/cursor.
+Corrupt one noncritical cached record.
+Revoke device during sync.
+Change price/stock/customer balance between offline creation and server submission.
+63. Acceptance Criteria
+Offline supported POS sale survives app restart.
+Each offline financial transaction has a stable idempotency key.
+Duplicate network delivery cannot create duplicate financial effect.
+Sync resumes automatically after reconnect.
+Pull cursor never skips unapplied changes.
+Financial conflicts never use last-write-wins.
+Local DB is SQLCipher protected.
+Cross-tenant records cannot enter local store from server sync.
+Printer/scale failures do not corrupt sync state.
+Payment status is reconciled from backend/provider authority.
+Operator can identify pending/conflicted transactions.
+Full resync preserves unsynchronized financial envelopes.
+All critical recovery paths are covered by automated tests.
+64. Implementation Checklist
+Implement SQLCipher database and migrations.
+Implement sync_transactions and sync metadata.
+Implement immutable transaction envelope builder.
+Implement local transaction manager.
+Implement upload queue.
+Implement idempotency-aware API client.
+Implement download cursor manager.
+Implement local version reconciliation.
+Implement conflict store and UI.
+Implement retry/backoff scheduler.
+Implement crash recovery.
+Implement connectivity coordinator.
+Implement WebSocket payment/status updates.
+Implement full-resync procedure.
+Implement diagnostics.
+Implement chaos/failure tests.
+Validate end-to-end with backend integration tests.
+65. Traceability
+66. Final Synchronization Architecture
+The system uses a durable, encrypted, transaction-envelope-based synchronization model. Flutter commits supported offline operations atomically into SQLCipher, then independently uploads immutable envelopes using stable idempotency keys. PostgreSQL validates and commits authoritative financial effects atomically. Incremental server changes are consumed through opaque cursors and applied transactionally. Conflicts are explicit and never resolved through unsafe last-write-wins. Crash recovery treats uncertain network outcomes as retryable with the same identity, ensuring that server-side idempotency converts uncertain delivery into safe exactly-once business effect.
+This document is the implementation baseline for Document 06 — Complete Inventory & Batch Engine Specification.
+Appendix A — State Transition Rules
+READY -> UPLOADING only when eligible.
+UPLOADING -> ACCEPTED when server commits.
+UPLOADING -> DUPLICATE when server reports an existing idempotent operation.
+UPLOADING -> CONFLICT for resolvable business state divergence.
+UPLOADING -> REJECTED for non-retryable invalid operations.
+UPLOADING -> READY for transient failure.
+ACCEPTED/DUPLICATE -> SYNCED after local reconciliation.
+CONFLICT -> RESOLVED/BLOCKED only through an explicit resolution workflow.
+REJECTED -> RESOLVED/BLOCKED; never silently retried forever.
+
+Appendix B — Developer Rules
+Never generate a new idempotency key for a retry.
+Never advance a cursor before applying its page.
+Never delete a pending transaction to fix a sync problem.
+Never overwrite authoritative financial data with cached local state.
+Never resolve stock/ledger conflicts by timestamp alone.
+Never assume HTTP timeout means failure.
+Never assume WebSocket delivery means persistence.
+Never expose raw synchronization internals to operators as the primary UI.
+Never put credentials or encryption keys in diagnostic output.
+End of Document 05.
+Data | Authority | Client role
+Finalized invoices | PostgreSQL | Local provisional copy until server acknowledgement
+Payments | Payment provider + PostgreSQL | Local intent/status cache
+Customer ledger | PostgreSQL | Cached display + pending local operations
+Inventory ledger | PostgreSQL | Local operational projection
+Product master | PostgreSQL | Offline cache
+Prices/tax configuration | PostgreSQL | Versioned/effective-date cache
+Sync transaction identity | Client + server | Stable IDs and idempotency
+Audit trail | PostgreSQL | Client records local audit metadata until sync
+Receipt print job | Device | Local operational artifact
+Class | Examples | Policy
+O1 — Fully offline | Browse products, aliases, create cart, scanner, draft receipt | Allowed
+O2 — Offline transactional | Configured POS sale, Khata sale, inventory mutation | Allowed only under tenant policy and local controls
+O3 — Online-required | Some payment-provider operations, compliance submissions | Queue intent or require network
+O4 — Read-online | Heavy reports, current reconciliation | Require network
+O5 — Administrative online | Tenant/security/user configuration | Require authenticated network
+Table | Purpose
+sync_transactions | Durable pending/accepted/rejected/conflict transaction envelopes
+sync_dependencies | Optional dependency graph for ordering
+sync_cursors | Server change-stream cursor per scope
+sync_conflicts | Persisted conflict records and resolution state
+sync_attempts | Optional detailed retry history
+outbox_local | Local event/side-effect queue
+sync_metadata | Device/app/schema/sync state
+local_entity_versions | Optional per-entity server version tracking
+State | Meaning | Next states
+DRAFT | User has not finalized operation | DRAFT / READY
+READY | Committed locally and waiting for upload | UPLOADING / CANCELLED where policy allows
+UPLOADING | Attempt currently in progress | READY / ACCEPTED / DUPLICATE / CONFLICT / REJECTED
+ACCEPTED | Server applied operation | SYNCED
+DUPLICATE | Server confirms operation already exists | SYNCED
+CONFLICT | Requires deterministic policy/manual resolution | RESOLVED / BLOCKED
+REJECTED | Server refused operation | RESOLVED / BLOCKED
+SYNCED | Authoritative result reconciled locally | Terminal
+BLOCKED | Cannot proceed without operator/support action | Terminal until explicit resolution
+Case | Required result
+Same key + same payload | Return original authoritative result
+Same key + changed payload | 409/idempotency conflict
+Repeated webhook | No duplicate payment effect
+Repeated offline invoice | No duplicate invoice/stock/ledger effect
+Retry after timeout | Safe because server deduplicates
+App crash after server commit before response | Next retry returns original result
+Conflict | Severity | Resolution
+Duplicate transaction | Low | Adopt original server result
+Stale master data | Low/Medium | Refresh/merge by version
+Price changed before offline finalization | Business-dependent | Use configured offline pricing snapshot/policy
+Stock insufficient | High | Apply offline stock policy or manual review
+Credit limit changed | High | Refresh authoritative balance; do not overwrite
+Payment already settled | High | Adopt authoritative payment status
+Invoice identity collision | Critical | Server series wins; preserve source transaction
+Permission revoked | High | Reject and require re-auth
+Entity deleted/archived | Medium | Do not recreate silently
+Schema incompatible | Critical | Block transaction and require supported app/backend version
+Policy | Behavior
+Strict online | Sale cannot finalize when stock authority is unavailable
+Controlled offline | Allow within cached stock + safety buffer
+Offline reservation | Reserve configured quantity locally and reconcile server-side
+Negative-stock exception | Only if explicitly enabled and authorized; creates audit exception
+Condition | Action
+No network | Wait; retry when connectivity is restored
+Timeout | Retry safely using same idempotency key
+HTTP 429 | Honor Retry-After
+HTTP 5xx | Bounded exponential retry
+HTTP 401 | Refresh/re-auth; pause queue
+HTTP 403 | Block and show permission issue
+HTTP 409 idempotency | Resolve using server result
+HTTP 422 business rule | Conflict/rejection; no blind retry
+Schema mismatch | Block until compatible version
+Provider pending | Poll/reconcile according to provider policy
+Field | Purpose
+conflict_id | Unique conflict
+transaction_id | Source local operation
+entity_type/entity_id | Affected business entity
+conflict_type | Deterministic category
+local_snapshot | Protected local state
+server_snapshot | Authoritative server state
+resolution_options | Allowed actions
+status | OPEN/RESOLVED/BLOCKED
+resolved_by | Operator/support identity
+resolved_at | Resolution timestamp
+resolution_action | Chosen action
+reason | Audit explanation
+Status | UI meaning
+SYNCED | No pending work
+SYNCING | Upload/download in progress
+OFFLINE | No network
+PENDING | Transactions waiting
+CONFLICT | Operator action required
+ERROR | Retryable failure
+BLOCKED | Requires authentication/version/admin action
+Target | Baseline
+Startup sync decision | < 1–2 seconds for local decision
+Local transaction commit | Interactive; normally < 200 ms for standard POS transaction
+Small sync batch | Process dozens/hundreds efficiently depending network
+Pull page | Bounded server page; avoid unbounded memory
+Search while sync runs | Remain responsive
+UI thread | No blocking database/network work
+Threat | Mitigation
+Stolen device | SQLCipher, secure key, app lock, device revocation
+Modified client | Backend validation/RLS/authorization
+Replay transaction | Idempotency key + unique server constraint
+Cross-tenant cursor | Server scope + RLS
+Tampered payload | Payload hash + server validation
+Credential theft | Secure storage, short-lived access tokens, refresh rotation
+Malicious local DB copy | SQLCipher key protection
+Network interception | TLS
+Webhook replay | Provider signature + event ID deduplication
+Stale client | Version compatibility gates
+Failure | Recovery
+Battery loss | Restart; recover READY/UPLOADING transactions
+App crash | Reopen and resume queue
+Network outage | Queue; retry on reconnect
+API outage | Backoff; preserve queue
+Auth expiry | Refresh/re-auth; pause queue
+Device revoked | Block sync; preserve protected local data
+Cursor invalid | Controlled full resync
+DB corruption | Recovery procedure; preserve server state and any recoverable envelopes
+Provider outage | Keep payment/compliance status pending and reconcile
+Printer outage | Retry/reprint; invoice unaffected
+Test category | Must verify
+Unit | State transitions, retry rules, conflict classification
+Database | SQLCipher migrations, transactions, constraints
+Sync integration | Upload/download/idempotency/cursor
+Crash recovery | Process death at every critical step
+Network chaos | Timeout, disconnect, reorder, duplicate
+Concurrency | Multiple devices competing for stock/credit
+Security | Tenant isolation and tampered payload
+Compatibility | Old/new envelope versions
+Performance | Large pending queue and catalogue
+Hardware | Sync independent of printer/scale/scanner failure
+E2E | Offline sale → restart → reconnect → server acceptance
+Document | Covered here
+PRD v1.2 | Offline-first, POS, Khata, payments, inventory, hardware and recovery
+DB & ERD v1.0 | Sync tables, versions, audit, transaction integrity
+API v1.0 | Sync endpoints, headers, idempotency, errors, WebSocket
+Go Architecture v1.0 | RLS, transaction boundaries, outbox, provider adapters
+Flutter Architecture v1.0 | SQLCipher, repositories, hardware, UI and app lifecycle

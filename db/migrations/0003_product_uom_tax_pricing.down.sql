@@ -1,0 +1,14 @@
+DROP TABLE IF EXISTS price_list_items;
+DROP TABLE IF EXISTS price_lists;
+DROP TABLE IF EXISTS customer_tiers;
+ALTER TABLE IF EXISTS products DROP CONSTRAINT IF EXISTS fk_products_tax_profile;
+DROP TABLE IF EXISTS tax_profiles;
+DROP TABLE IF EXISTS product_aliases;
+DROP TABLE IF EXISTS product_barcodes;
+DROP TABLE IF EXISTS product_uoms;
+ALTER TABLE IF EXISTS uom_conversions DROP CONSTRAINT IF EXISTS fk_uom_conversions_product;
+DROP TABLE IF EXISTS products;
+DROP TABLE IF EXISTS uom_conversions;
+DROP TABLE IF EXISTS uoms;
+DROP TABLE IF EXISTS brands;
+DROP TABLE IF EXISTS categories;

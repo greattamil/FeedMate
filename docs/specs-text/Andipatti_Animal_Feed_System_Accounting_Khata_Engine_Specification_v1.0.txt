@@ -1,0 +1,590 @@
+Andipatti Animal Feed System
+Document 07 — Complete Accounting & Khata Engine Specification
+v1.0 — Implementation Baseline
+Aligned with PRD v1.2 and Documents 01–06. This is the financial-control baseline for customer Khata, supplier payables, sales, receipts, contra/buy-back, payments, refunds, cash/EOD, journal entries, reconciliation and audit.
+1. Purpose
+Provide a deterministic financial ledger for every monetary event.
+Support customer credit/Khata and supplier payable balances.
+Implement double-entry accounting where accounting integration is enabled.
+Ensure invoices, payments, returns, contra and EOD are atomic and auditable.
+Prevent duplicate financial effects through idempotency.
+Separate operational documents from immutable financial postings.
+Support offline transaction envelopes without compromising server authority.
+2. Financial Principles
+Postgres is the authoritative financial source.
+Money uses NUMERIC(12,2) minimum and decimal-safe Go/Flutter types.
+Posted journals and ledger entries are immutable.
+Corrections use reversals, returns, refunds or adjustment documents.
+Every posting references a source event/document.
+Tenant isolation uses PostgreSQL RLS plus application authorization.
+Financial-year and document series are explicit.
+Client assertions never establish payment success by themselves.
+3. Accounting Model
+4. Double-Entry Rules
+For every posted journal entry: total debits must equal total credits. A journal may contain multiple lines but must balance exactly to the smallest supported currency unit.
+Debits and credits are represented as nonnegative amounts plus side/type.
+Do not store ambiguous signed values without a documented convention.
+Journal entry cannot be posted with zero lines.
+Posted journal cannot be edited.
+Reversal references original journal.
+5. Suggested Account Classes
+Exact chart of accounts is tenant-configurable and must not hardcode tax/legal classifications beyond required system behavior.
+6. Source-to-Journal Mapping
+Actual account mapping is configurable and must match the tenant's accounting policy and tax treatment.
+7. Customer Khata Model
+Khata represents an auditable customer subledger, not merely a balance column.
+Every debit/credit entry has source type and source ID.
+Invoice on credit increases receivable.
+Receipt reduces receivable.
+Contra credit reduces receivable/increases customer credit.
+Returns reduce receivable or create refund/credit according to policy.
+Adjustments require permission and reason.
+Running balance is a projection; ledger entries are authoritative.
+8. Khata Entry Types
+9. Credit Limit
+Credit limit validation must occur transactionally at finalization.
+Read customer credit profile.
+Calculate current authoritative outstanding exposure.
+Include pending transaction amount according to policy.
+Compare with credit limit.
+If within limit, continue.
+If exceeded, require configured override permission/PIN or reject.
+Persist override reason and actor.
+Commit sale and ledger atomically.
+10. Credit Exposure Formula
+Available credit = credit limit − outstanding exposure, subject to configured exclusions/holds. The exact exposure definition must be tenant-configurable and documented. It must not depend solely on a cached mobile balance.
+11. Owner/Admin PIN Override
+PIN is separately protected from normal password credentials.
+Verify against secure backend-controlled representation when online.
+Offline override, if allowed, uses a protected local authorization mechanism with later server validation.
+Require elevated permission.
+Record actor, device, time, requested amount, limit, override reason and resulting decision.
+Do not log the PIN.
+12. Customer Receipts
+Identify customer.
+Enter receipt amount and tender.
+Validate payment/tender.
+Allocate against outstanding invoices or oldest eligible ledger items according to policy.
+Create customer ledger credit.
+Create accounting journal.
+Commit atomically.
+Generate receipt.
+Sync if originated offline.
+13. Payment Allocation
+One payment may settle multiple invoices.
+One invoice may be settled by multiple payments.
+Allocations are separate immutable records.
+Allocation total cannot exceed payment amount.
+Invoice settled amount cannot exceed invoice receivable/payment due.
+Unallocated payment remains an explicit unapplied balance.
+Refund reverses the appropriate allocation/payment according to provider and business rules.
+14. Invoice Receivable Lifecycle
+15. Overpayment Policy
+Never silently discard excess payment.
+Represent excess as customer credit/unapplied payment or refund according to policy.
+Require approval for cash refund where configured.
+Maintain full allocation history.
+16. Supplier Payables
+GRN creates supplier payable according to configured accounting.
+Supplier payments reduce payable.
+Supplier debit/credit adjustments require source/reason.
+Supplier ledger is immutable.
+Supplier balance is derived from ledger entries.
+Purchase returns reverse inventory/payable as applicable.
+17. Contra / Buy-Back Accounting
+Contra is a controlled purchase/buy-back flow where a customer/farmer supplies a commodity and receives credit/value.
+Capture supplier/customer identity.
+Capture product/UOM/quantity and quality data.
+Value commodity using configured valuation policy.
+Receive inventory through inventory engine.
+Create customer credit ledger entry.
+Post accounting entry.
+Commit inventory + ledger + accounting atomically.
+Valuation must not be inferred from retail selling price unless explicitly configured.
+18. Contra Valuation
+Use a configured purchase/buy-back rate or approved valuation.
+Record rate version/effective date.
+Record gross/quality adjustments if applicable.
+Preserve original valuation on the transaction.
+Changes to future rates must not rewrite historical contra transactions.
+19. Sales Returns & Refunds
+Reference original invoice.
+Validate returnable quantity.
+Process inventory return.
+Reverse revenue/tax according to configured accounting.
+Reverse/reduce customer receivable or initiate refund.
+Create provider refund if required.
+Commit internal return transaction atomically.
+Track external refund asynchronously.
+20. Refund Rules
+Provider refund has its own idempotency key.
+Do not create duplicate refunds on retry.
+Refund status is pending until provider confirmation where applicable.
+Refund failure does not erase the original return.
+Cash refunds require authorization according to policy.
+21. Multi-Tender Accounting
+Tender allocation must sum exactly to invoice grand total, subject to explicit rounding rules.
+22. Rounding
+Calculate line/tax totals using decimal arithmetic.
+Apply documented rounding at the defined boundary.
+Store rounded financial amounts used for posting.
+Do not recalculate historical totals using changed rounding rules.
+Rounding differences, if material/accounting-relevant, use a configured rounding account.
+23. GST / Tax Accounting
+Tax rates/profiles are configuration-driven and effective-dated.
+Tax components are stored separately when required.
+Invoice tax lines feed tax liability reporting.
+Returns reverse applicable tax postings.
+Tax exports must reconcile to invoices and credit/return documents.
+Do not hardcode product tax assumptions such as universal 0% or 18%.
+24. Cash Session
+Open session with opening float.
+Record cash sales.
+Record cash customer receipts.
+Record cash payouts/expenses.
+Record authorized cash refunds.
+Calculate expected cash.
+Count physical cash.
+Record variance and reason.
+Close session immutably.
+25. Expected Cash Formula
+Expected closing cash = opening cash + cash inflows − cash outflows, with each included movement type explicitly configured. UPI, credit sales and noncash tenders must not be included as physical cash.
+26. EOD Reconciliation
+Freeze/close transaction intake according to policy.
+Calculate system expected cash.
+Enter physical cash count.
+Compare expected vs physical.
+Calculate variance.
+Require reason/approval when threshold exceeded.
+Post variance adjustment if authorized.
+Close EOD session.
+Generate EOD report and sync.
+27. Financial Year & Document Series
+Maintain explicit financial_year records.
+Invoice/GRN/return/receipt series are configurable per tenant/document type.
+Prevent duplicate document numbers through database constraints.
+Do not derive document sequence from mobile device time.
+Offline transactions may receive provisional local identity and server-authoritative document number on synchronization.
+28. Journal Posting Service
+All application modules call a centralized accounting posting service rather than inserting journal lines directly.
+Validate source event.
+Resolve account mapping.
+Construct journal.
+Verify debit = credit.
+Attach source reference.
+Persist journal header/lines in same transaction.
+Return journal ID.
+29. Accounting Transaction Boundary
+30. Reversal Architecture
+Original posted event remains unchanged.
+Create reversal referencing original event.
+Reversal has its own journal/ledger/movement IDs.
+Partial reversal records exact amount/quantity reversed.
+Prevent reversing more than original available balance.
+Repeated reversal request is idempotent.
+31. Audit Trail
+Record actor, device, tenant, request ID, source document and timestamp.
+Record overrides, adjustments, refunds, reversals and configuration changes.
+Record before/after balances where useful.
+Never store PIN/password/token values.
+Audit history is append-only from the application perspective.
+32. Idempotency
+Financial POST endpoints require Idempotency-Key.
+Store request fingerprint and original response.
+Same key/same request returns original result.
+Same key/different request returns conflict.
+Payment provider IDs are unique.
+Webhook event IDs are unique.
+33. Offline Financial Transactions
+Flutter creates immutable transaction envelope.
+Local Khata/payment/invoice state is provisional.
+Server validates financial policy at synchronization.
+Accepted operation receives authoritative IDs/version.
+Duplicate submission adopts original result.
+Conflict preserves transaction and requires defined resolution.
+Offline local journal projections must never be treated as a replacement for server accounting.
+34. Financial Sync Conflict Examples
+35. Customer Statement
+Chronological ledger entries.
+Opening balance where applicable.
+Invoice debits.
+Receipts.
+Returns/credits.
+Contra credits.
+Adjustments/reversals.
+Running balance.
+Invoice/payment references.
+Exportable statement.
+36. Supplier Statement
+Opening payable.
+GRNs/purchases.
+Purchase returns.
+Supplier payments.
+Debit/credit adjustments.
+Running balance.
+Outstanding aging.
+37. Aging
+Aging buckets are configurable and must use tenant-local business dates.
+38. Collection Grace Period
+Tenant config defines due/cycle date.
+Grace days are configurable.
+Reminder lead days are configurable.
+Pause dates can suppress reminders.
+Duplicate reminders are prevented.
+Collection status is separate from financial ledger.
+39. Aavin / Collection Cycle
+Cycle dates such as 9th/24th may be seeded as defaults but must remain configurable.
+Tenant may change cycle dates.
+Grace period and reminder schedule are configurable.
+Pause dates support holidays/business exceptions.
+Cycle reminders never alter ledger balances.
+40. Payment Reconciliation
+Match provider transaction ID.
+Match payment intent.
+Match amount/currency.
+Match tenant/merchant context.
+Reject or quarantine mismatches.
+Record reconciliation status.
+Provide manual exception workflow with audit.
+41. Bank/UPI Reconciliation
+Import provider/bank settlement data where supported.
+Match internal payment IDs.
+Match amount/date/reference.
+Mark matched.
+Identify missing internal payment.
+Identify missing provider settlement.
+Create exception case.
+Resolve through controlled adjustment/reversal.
+42. Financial Integrity Checks
+Every journal balances.
+Every payment allocation is within payment and invoice limits.
+Customer ledger equals sum of applicable source postings.
+Supplier ledger reconciles to payable postings.
+Cash expected amount matches cash movements.
+Invoice totals equal line/tax/discount totals.
+Returns cannot exceed returnable quantity/value.
+Reversals cannot exceed original posted effect.
+No duplicate idempotency effect.
+43. Reconciliation Dashboard
+Unallocated payments.
+Payment/provider mismatches.
+Khata balance exceptions.
+Supplier payable exceptions.
+Unbalanced journal attempts.
+Inventory/accounting valuation mismatch.
+EOD cash variances.
+Pending refunds.
+Pending offline financial transactions.
+44. Credit Approval Controls
+45. Discounts
+Discounts are explicit invoice fields/lines as configured.
+Discount permission may depend on role/customer tier.
+Discount cannot bypass minimum margin policy if enabled.
+Historical discount remains immutable.
+Discount accounting treatment is documented.
+46. Customer Pricing Tier Interaction
+Walk-In MRP uses active price list.
+Registered Farmer 2% discount is a configurable example, not hardcoded business logic.
+Wholesale Dealer 5% discount is configurable.
+Aavin Sub-Contractor pricing is configurable.
+Effective dates prevent historical price changes.
+Tier changes do not rewrite finalized invoices.
+47. Credit Notes / Adjustments
+Use explicit credit/debit adjustment documents.
+Require reason.
+Require permission.
+Link to original invoice when relevant.
+Post corresponding customer ledger and accounting effects.
+Never directly edit outstanding balance.
+48. Supplier Payment
+Select supplier.
+Load payable exposure.
+Enter payment amount/tender.
+Allocate against outstanding supplier invoices.
+Validate not over-allocating without explicit unapplied policy.
+Post supplier ledger reduction.
+Post accounting journal.
+Commit.
+Generate payment voucher.
+49. Cash Payout
+Requires reason/category.
+Permission according to policy.
+Creates cash movement.
+Creates expense/payable posting where appropriate.
+Included in expected cash calculation.
+Cannot be deleted after EOD; correction uses reversal.
+50. EOD Variance Accounting
+Variance within tolerance may be recorded as configured.
+Variance above threshold requires approval.
+Shortage/overage account is configurable.
+Reason is mandatory.
+Physical count is preserved.
+Posting is immutable.
+51. Financial Reports
+Daily sales summary.
+Cash/UPI/Khata tender summary.
+Customer outstanding.
+Customer statement.
+Supplier outstanding.
+Supplier statement.
+Receipts.
+Refunds.
+Contra purchases.
+Gross margin.
+Tax/GST summary.
+EOD reconciliation.
+Journal/ledger report.
+Payment reconciliation.
+52. Tax Export Reconciliation
+Invoice tax totals reconcile to tax report.
+Credit/return tax reversals reconcile.
+Taxable value + tax components match invoice totals.
+Export includes required configured fields.
+Large exports run asynchronously.
+Export job is auditable.
+53. Security
+RLS on tenant-owned financial tables.
+Least-privilege DB roles.
+Owner/admin overrides permission-checked.
+Sensitive financial actions audited.
+Secure authentication and device sessions.
+Idempotency on financial writes.
+No secret in logs.
+54. Concurrency
+Credit limit check and ledger posting occur in one transaction.
+Invoice document series uses database-safe sequencing.
+Payment allocation locks relevant receivable rows.
+Cash session close prevents conflicting late movements according to policy.
+Reversal checks are transactional.
+Deadlock/serialization retry only for safe operations.
+55. Offline Accounting Projection
+Client may maintain provisional balances for usability.
+Provisional state is visibly distinguishable where material.
+Server authoritative result replaces provisional state after sync.
+Local journal IDs map to server journal IDs.
+Rejected/conflicted financial operations remain preserved for review.
+56. Financial Event Model
+Recommended event names: SaleFinalized, PaymentCaptured, PaymentRefunded, ReceiptPosted, CustomerLedgerPosted, SupplierPayablePosted, SupplierPaymentPosted, ContraPosted, ReturnPosted, JournalPosted, EODClosed. Events are emitted after successful commit and consumed idempotently.
+57. Outbox
+Write outbox record in same transaction as financial state.
+Worker publishes after commit.
+Retry transient delivery errors.
+Dead-letter permanent failures.
+Consumers use event ID for deduplication.
+58. Archival
+Financial history follows retention policy, not simply paid+old.
+Archive manifest includes source IDs and checksums.
+Archive does not alter financial meaning.
+Restore testing verifies statement/invoice traceability.
+Postgres backups remain primary recovery control.
+59. Data Retention
+Posted financial records retained according to legal/accounting policy.
+Do not hardcode a universal retention period without business/legal confirmation.
+Local device history can be pruned separately from server financial records.
+Audit and source-document links must remain available for required retention.
+60. Error Catalogue
+61. Transaction Examples
+Cash sale: invoice + cash tender + stock movement + revenue/tax + inventory cost posting commit together. Khata sale: invoice + customer receivable + stock movement + revenue/tax + inventory cost. Customer receipt: payment + allocations + customer ledger + cash/bank journal. Contra: inventory receipt + customer credit + valuation/accounting.
+62. Detailed Khata Example
+Customer outstanding = ₹8,000.
+Credit limit = ₹10,000.
+New sale = ₹1,500.
+Exposure becomes ₹9,500.
+Sale is accepted.
+Customer later pays ₹2,000.
+Receipt allocation reduces outstanding to ₹7,500.
+Every event has its own immutable ledger/journal references.
+63. Credit Override Example
+Customer outstanding ₹9,500, limit ₹10,000, requested credit ₹2,000. Transaction exceeds available credit by ₹1,500. System rejects or requires authorized override. If overridden, actor/reason/amount/limit are recorded. The backend performs the final decision transactionally.
+64. Supplier Payable Example
+GRN creates a payable of ₹50,000 according to configured purchase accounting. Supplier payment of ₹20,000 is allocated. Outstanding payable becomes ₹30,000. Both events remain separately traceable.
+65. EOD Example
+Opening cash ₹5,000 + cash sales ₹20,000 + cash receipts ₹4,000 − cash payouts ₹2,500 = expected ₹26,500. Physical count is entered. Any variance is displayed and handled by the configured approval/accounting policy. Noncash UPI/Khata amounts are excluded from physical cash.
+66. Accounting Test Matrix
+67. Property Invariants
+Every posted journal has equal debits and credits.
+Customer balance equals ledger-derived balance under defined scope.
+Supplier balance equals ledger-derived balance.
+Payment allocations never exceed payment amount.
+Invoice allocations never exceed invoice receivable.
+Return cannot exceed eligible original quantity/value.
+Reversal cannot exceed original posted amount.
+Duplicate financial command has one business effect.
+68. Performance Targets
+69. Testing Strategy
+Unit tests for all financial calculations.
+Integration tests against real PostgreSQL.
+RLS tenant-isolation tests.
+Concurrency tests for credit/payment allocation.
+Idempotency/replay tests.
+Offline synchronization tests.
+Provider webhook tests.
+Accounting balance property tests.
+Restore/reconciliation tests.
+Load tests for statements and reporting.
+70. Acceptance Criteria
+No posted journal is unbalanced.
+No duplicate payment/receipt/financial effect from retry.
+Credit limit is enforced transactionally.
+Owner override is permissioned and audited.
+Customer/supplier balances reconcile to ledger.
+Cash EOD reconciles expected vs physical.
+Returns/refunds are linked and idempotent.
+Contra creates both inventory and financial effects correctly.
+Financial-year/document series cannot duplicate.
+Offline transactions reconcile without double posting.
+RLS blocks cross-tenant financial access.
+71. Implementation Checklist
+Implement chart/account mapping model.
+Implement journal posting service.
+Implement customer ledger service.
+Implement supplier ledger service.
+Implement credit-limit service.
+Implement receipt/payment allocation service.
+Implement contra accounting.
+Implement returns/refunds accounting.
+Implement cash/EOD accounting.
+Implement reversal/adjustment workflow.
+Implement financial-year/document series.
+Implement reconciliation.
+Implement audit and outbox.
+Implement offline financial hooks.
+Implement reports and exports.
+Implement comprehensive financial tests.
+72. Traceability
+73. Final Financial Architecture
+The Accounting & Khata Engine provides immutable, auditable financial history with double-entry journal support, customer and supplier subledgers, transactional credit controls, exact payment allocation, contra/buy-back accounting, returns/refunds, cash/EOD reconciliation, tax linkage and idempotent synchronization. Operational projections may exist on Flutter, but PostgreSQL remains the financial authority.
+This document is the implementation baseline for Document 08 — Complete POS & Billing Engine Specification.
+Appendix A — Non-Negotiable Financial Rules
+Never use floating-point money arithmetic.
+Never directly edit a posted ledger balance.
+Never directly edit a posted journal.
+Never post an unbalanced journal.
+Never trust client payment success alone.
+Never exceed credit limit without explicit policy/authorization.
+Never duplicate a financial effect on retry.
+Never silently erase an overpayment.
+Never silently rewrite historical pricing/tax/accounting.
+Never use last-write-wins for financial records.
+End of Document 07.
+Component | Purpose
+Chart of accounts | Defines financial accounts
+Journal entry | Accounting transaction header
+Journal line | Debit/credit line
+Customer ledger | Customer-level subledger
+Supplier ledger | Supplier-level subledger
+Payment | Settlement event
+Payment allocation | Links payment to invoice/ledger item
+Receivable | Customer amount owed
+Payable | Supplier amount owed
+Cash session | Physical cash control
+EOD session | End-of-day reconciliation
+Contra | Inventory receipt + customer credit
+Refund | Money returned/credited
+Class | Examples
+Asset | Cash, bank, UPI receivable, inventory
+Liability | Supplier payable, tax payable
+Equity | Owner capital/opening equity
+Revenue | Feed sales, supplement sales
+Expense | Stock loss, bank/payment fees, operating expense
+Contra/adjustment | Discounts, returns, rounding according to policy
+Business event | Typical accounting effect
+Cash sale | Cash Dr / Sales Cr; tax liability as applicable
+Khata sale | Customer receivable Dr / Sales Cr; tax liability as applicable
+UPI sale | UPI/bank receivable Dr / Sales Cr; tax liability as applicable
+Purchase GRN | Inventory Dr / Supplier payable Cr, subject to configured accounting
+Customer receipt | Cash/Bank Dr / Customer receivable Cr
+Supplier payment | Supplier payable Dr / Cash/Bank Cr
+Sales return | Return/Revenue adjustment Dr / Customer/cash/receivable Cr; tax reversal as applicable
+Contra buy-back | Inventory Dr / Customer credit/payable Cr according to valuation policy
+Expense cash payout | Expense Dr / Cash Cr
+Stock write-off | Loss/expense Dr / Inventory Cr
+Entry | Effect on customer outstanding
+CREDIT_SALE | Increase
+RECEIPT | Decrease
+SALES_RETURN | Decrease
+CONTRA_CREDIT | Decrease
+DEBIT_ADJUSTMENT | Increase
+CREDIT_ADJUSTMENT | Decrease
+REVERSAL | Inverse of original
+State | Meaning
+OPEN | Amount due
+PARTIALLY_PAID | Some amount allocated
+PAID | Fully settled
+OVERPAID | Payment exceeds due; requires defined treatment
+CANCELLED | Voided only before final posting under policy
+RETURN_ADJUSTED | Due changed by return/credit
+REVERSED | Original financial event reversed
+Tender | Typical account
+Cash | Cash on hand
+UPI | UPI/bank receivable
+Bank transfer | Bank account
+Khata | Customer receivable
+Split tender | Multiple corresponding accounts
+Operation | Atomic financial scope
+Sale | Invoice + receivable/tender + tax + inventory cost/accounting
+Receipt | Payment + allocations + customer ledger + journal
+GRN | Inventory + supplier payable + journal
+Supplier payment | Payment + supplier allocation + journal
+Return | Return + inventory + receivable/refund + journal
+Contra | Inventory + customer credit + journal
+EOD variance | Cash session + variance posting
+Adjustment | Source adjustment + journal where applicable
+Scenario | Resolution
+Credit limit changed | Server evaluates current exposure
+Invoice already posted | Return original server result
+Receipt already allocated | Return existing allocation
+Payment already refunded | Return authoritative refund state
+Contra already posted | Deduplicate by idempotency
+Document series collision | Server assigns authoritative number
+Tax profile changed | Use documented offline policy/version
+Bucket | Typical use
+Current | Not overdue
+1–7 days | Early overdue
+8–30 days | Moderate overdue
+31–60 days | High attention
+61–90 days | Escalation
+90+ days | Critical collection
+Condition | Control
+Within limit | Normal authorization
+Near limit | Warning
+Over limit | Reject or owner override
+Large amount | Elevated approval if configured
+Past due | Policy-specific restriction
+Suspicious/manual override | Audit + possible second approval
+Code | Meaning
+CREDIT_LIMIT_EXCEEDED | Credit policy failed
+OVERRIDE_REQUIRED | Elevated authorization required
+PAYMENT_ALREADY_ALLOCATED | Duplicate/over-allocation attempt
+JOURNAL_UNBALANCED | Debit/credit mismatch
+RECEIVABLE_OVERALLOCATED | Allocation exceeds due
+REFUND_NOT_ALLOWED | Refund exceeds eligible amount
+REVERSAL_EXCEEDS_ORIGINAL | Invalid reversal
+EOD_ALREADY_CLOSED | Cash session immutable
+DOCUMENT_SERIES_CONFLICT | Duplicate/invalid number
+RECONCILIATION_MISMATCH | Provider/internal mismatch
+Test | Expected
+Cash sale | Balanced journal + cash/stock/receivable state
+Khata sale | Customer receivable increases
+Receipt | Customer outstanding decreases
+Supplier payment | Supplier payable decreases
+Return | Revenue/receivable/tax reversal as configured
+Contra | Inventory increases + customer credit
+Refund | Refund idempotent
+Duplicate webhook | No second posting
+Reversal | Original unchanged, inverse posted
+EOD variance | Cash and variance posting reconcile
+Operation | Baseline
+Khata balance read | p95 < 250 ms
+Receipt posting | p95 < 500 ms excluding external provider
+Sale financial commit | Within POS transaction target
+Statement page | p95 < 500 ms paginated
+Reconciliation | Async for large datasets
+Document | Accounting/Khata dependency
+PRD v1.2 | Khata, credit, contra, Aavin reminders, payments, EOD, GST
+DB & ERD v1.0 | Customer/supplier ledgers, journals, payments, cash, contra
+API v1.0 | Khata, receipts, payments, refunds, contra, EOD routes
+Go Architecture v1.0 | Transactions, decimal, idempotency, RLS, outbox
+Flutter Architecture v1.0 | POS, Khata, payment and EOD UI
+Offline Sync v1.0 | Financial transaction envelopes and conflict handling
+Inventory v1.0 | Stock/accounting linkage, costing and contra

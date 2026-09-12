@@ -1,0 +1,1045 @@
+Andipatti Animal Feed System
+Document 19 — Complete Implementation & Build Specification v1.0
+Implementation-ready engineering specification translating Documents 01–18 into an executable build contract for Flutter, Go, PostgreSQL, Docker, integrations, hardware, testing, deployment and production operations. No sprint planning.
+1. Purpose, Scope, Objectives & Non-Goals
+1.1 Purpose
+Provide the complete build-level contract: repository structure, coding standards, module boundaries, database migration order, API implementation, frontend implementation, offline synchronization, hardware adapters, financial/inventory transaction boundaries, Docker deployment, testing gates and production acceptance.
+1.2 Scope
+Flutter mobile client and local SQLCipher database.
+Go backend modular monolith and workers.
+PostgreSQL authoritative database with RLS.
+Redis/queue where enabled.
+Cloudflare R2 object/archive storage.
+REST API and WebSocket events.
+POS, inventory, procurement, accounting, Khata, payments, GST/compliance, reports and hardware.
+CI/CD, Docker and infrastructure.
+Observability, security, backup/DR and release controls.
+1.3 Non-Goals
+No sprint planning or sprint schedule.
+No permanent hardcoding of legal tax rates or thresholds.
+No replacement of official provider certification or legal review.
+2. Implementation Principles
+PostgreSQL is the authoritative transactional source.
+Go is the business-rule and authorization boundary.
+Flutter is offline-first but never authoritative for financial truth.
+Every tenant-owned table is tenant-scoped and protected by RLS.
+Financial and inventory writes are atomic.
+External side effects are asynchronous, signed/idempotent and auditable.
+Decimal types are mandatory for money, tax, quantity and conversion-sensitive values.
+Finalized financial documents are immutable; corrections use returns, reversals or credit/debit notes.
+All production services run in Docker-compatible environments.
+Every implementation feature must map to a requirement, API, DB model, UI, test and operational control.
+3. Technology Baseline
+4. Repository Structure
+Recommended monorepo:
+andipatti-animal-feed/
+  apps/flutter/
+  services/api/
+  services/worker/
+  db/migrations/
+  db/seed/
+  packages/contracts/
+  packages/openapi/
+  integrations/payment/
+  integrations/compliance/
+  integrations/whatsapp/
+  integrations/r2/
+  hardware/simulators/
+  deploy/docker/
+  deploy/compose/
+  deploy/terraform/
+  scripts/
+  docs/
+  tests/e2e/
+  tests/load/
+  .github/
+Exact repository naming may vary, but module ownership and dependency direction must remain explicit.
+5. Build Artifacts
+Flutter Android/iOS application artifacts.
+Go API container image.
+Go worker container image.
+Migration/administration image or controlled migration binary.
+Database migration package.
+OpenAPI contract.
+Seed package.
+Hardware simulator images/tools.
+Operational Docker Compose/deployment manifests.
+SBOM and security scan evidence.
+6. Go Backend Package Architecture
+Recommended:
+cmd/api
+cmd/worker
+internal/platform
+internal/auth
+internal/tenant
+internal/rbac
+internal/products
+internal/uom
+internal/tax
+internal/pricing
+internal/customers
+internal/khata
+internal/suppliers
+internal/procurement
+internal/inventory
+internal/sales
+internal/pos
+internal/payments
+internal/returns
+internal/contra
+internal/accounting
+internal/cash
+internal/compliance
+internal/notifications
+internal/reports
+internal/sync
+internal/files
+internal/archive
+internal/devices
+internal/audit
+internal/jobs
+6.1 Dependency Direction
+Transport → application/use-case → domain → repository/infrastructure. Domain packages must not depend on HTTP, Flutter, SQL driver or provider-specific SDKs.
+7. Flutter Architecture
+Recommended:
+lib/core/
+lib/features/auth/
+lib/features/dashboard/
+lib/features/pos/
+lib/features/products/
+lib/features/customers/
+lib/features/khata/
+lib/features/procurement/
+lib/features/inventory/
+lib/features/payments/
+lib/features/returns/
+lib/features/accounting/
+lib/features/compliance/
+lib/features/reports/
+lib/features/settings/
+lib/features/hardware/
+lib/features/sync/
+Presentation/state layer
+Use-case/application layer
+Repository layer
+SQLCipher local store
+Remote REST/WSS adapters
+Hardware adapters
+Secure credential/key storage
+8. Database Implementation Order
+Extensions and common types.
+Tenants/settings/financial years/document series.
+Identity/RBAC/devices.
+Reference/master data.
+Products/UOM/tax/pricing.
+Customers/Khata/suppliers.
+Locations/procurement.
+Batches/inventory.
+Sales/POS/invoices.
+Payments/returns/refunds.
+Contra/accounting/cash/EOD.
+Notifications/compliance.
+Sync/audit/files/archive.
+Reporting views/materialized aggregates.
+Indexes/constraints/RLS policies.
+9. Migration Rules
+Every migration has an ordered version.
+Migrations are forward-compatible where practical.
+Destructive migrations require explicit recovery strategy.
+Production migrations run from a controlled artifact.
+Schema changes are tested against realistic data.
+RLS policies are part of migration state.
+Indexes for large tables may require production-safe creation strategy.
+Migration completion is recorded.
+10. PostgreSQL Implementation Rules
+Use NUMERIC(12,2) or stronger for currency.
+Use NUMERIC(12,3) for weight/quantity baseline.
+Use NUMERIC(12,6) for UOM factors.
+Use NUMERIC(7,4) for tax rates.
+Use UUID or equivalent stable IDs.
+Use UTC timestamps with tenant-local presentation.
+Use composite tenant-aware foreign keys where appropriate.
+Use CHECK constraints for non-negative quantities and valid states.
+Use unique constraints for tenant-scoped natural identifiers.
+Enable RLS on every tenant-owned table.
+11. Transaction Boundary Rules
+External network calls must not be placed inside a long database transaction unless a provider-specific safe orchestration requires it. Use payment intent/outbox patterns.
+12. Idempotency Implementation
+Require Idempotency-Key for designated financial mutation endpoints.
+Persist tenant + endpoint + key + request hash + outcome.
+Reject same key with materially different payload.
+Webhook event IDs are unique.
+Outbox events have stable IDs.
+Replay returns the original authoritative result.
+Idempotency records have documented retention.
+13. Concurrency Controls
+Lock stock rows/batch allocation candidates during finalization.
+Use deterministic lock ordering.
+Prevent negative stock unless explicitly configured.
+Use optimistic version fields where appropriate.
+Use serializable/appropriate isolation only where justified.
+Retry serialization/deadlock failures safely.
+Never retry a non-idempotent external side effect blindly.
+14. Inventory Build
+Implement stock movement as immutable ledger.
+Maintain balances as an optimized projection.
+Support FIFO/FEFO allocation.
+Exclude expired/held/rejected batches.
+Support loose/fraction quantity.
+Support reservations.
+Support transfers/counts/adjustments/damage/expiry.
+Trace every sale/return to batches where required.
+Reconciliation rebuilds balance from movement ledger.
+15. GRN Build
+Create draft GRN.
+Capture PO reference.
+Capture vehicle/supplier metadata.
+Capture bag count.
+Capture gross weight.
+Capture actual tare.
+Validate tare threshold.
+Calculate net weight.
+Capture batch/expiry.
+Validate over/under receipt.
+Post stock movement atomically.
+Post payable/accounting effect according to policy.
+Finalize and audit.
+16. POS Build
+Fast barcode input.
+Tamil Unicode/phonetic/colloquial search.
+Customer/pricing tier selection.
+UOM selection.
+Live scale integration.
+Batch allocation.
+Tax calculation.
+Discount/authorization.
+Multi-tender payment.
+Khata credit validation.
+Atomic finalization.
+Receipt/WhatsApp fallback.
+Hold/resume cart.
+Return/refund flow.
+17. Pricing Engine
+Resolve product + UOM + customer tier + effective time.
+Apply product/customer price-list priority.
+Validate minimum margin where enabled.
+Apply approved discount.
+Snapshot unit price and pricing source into invoice line.
+Reject ambiguous/expired price configuration.
+Never recalculate historical finalized invoices from current prices.
+18. Tax Engine
+Resolve effective tax profile.
+Determine intra/inter-state treatment.
+Calculate taxable base.
+Calculate CGST/SGST/IGST as applicable.
+Apply configured rounding.
+Snapshot HSN/tax profile/rates into invoice.
+Support exempt/zero-rated/other configured states.
+Keep legal thresholds/rates configuration-driven.
+19. Payment Engine
+Client cannot directly set Paid.
+Verify amount/currency/merchant/transaction reference.
+Webhook signature and idempotency mandatory.
+Polling is fallback, not a substitute for secure webhook validation.
+20. Accounting Engine
+Implement journal-posting service.
+Every journal must balance.
+Use source-document references.
+Use reversal rather than mutation for posted financial errors.
+Customer/supplier subledgers reconcile to control accounts.
+Inventory/COGS postings follow configured costing method.
+Tax postings follow approved tax configuration.
+Opening balances require evidence.
+21. Khata Engine
+Credit exposure = approved outstanding obligations minus eligible credits/payments.
+Check credit limit before finalization.
+Owner override requires authorization and audit.
+Receipt allocation must be explicit.
+Overpayments become unapplied credit or controlled refund.
+Collection-cycle reminders are configurable.
+Grace period is configurable.
+Statements are reproducible from ledger entries.
+22. Contra / Buy-Back
+Create contra draft.
+Identify customer/farmer.
+Capture commodity/product and quantity.
+Capture valuation price.
+Validate receiving location.
+Post stock receipt.
+Credit customer ledger.
+Post balancing journal.
+Finalize with audit.
+Contra valuation rules must be explicit and must not permit arbitrary negative inventory or unbalanced accounting.
+23. Returns & Refunds
+Validate original invoice/reference.
+Validate returnable quantity.
+Use original tax/price snapshot where required.
+Reverse inventory/accounting appropriately.
+Create credit note/refund evidence.
+Refund only through authoritative payment workflow.
+Prevent duplicate return/refund.
+24. Cash & EOD
+Expected cash = opening cash + cash receipts − cash payouts − approved cash adjustments. Physical count is compared to expected cash; variance requires reason and authorization according to policy.
+Separate cash and non-cash tenders.
+EOD finalization is auditable.
+Reopen requires controlled authorization.
+EOD reports are reproducible.
+25. Offline Implementation
+SQLCipher local DB.
+Secure encryption key storage.
+Local transaction envelope.
+Dependency-aware upload queue.
+Opaque server cursor for downloads.
+Idempotent server processing.
+Explicit conflict states.
+No last-write-wins for financial/inventory conflicts.
+Master-data versioning.
+Device revocation.
+Full-resync capability.
+26. Sync Envelope
+27. Hardware Implementation
+Define vendor-neutral interfaces.
+Scanner adapter converts raw input to normalized barcode events.
+Scale adapter emits raw + normalized weight + stability state.
+Printer adapter accepts receipt commands and reports outcome.
+Cash drawer adapter supports controlled trigger.
+Device registry binds hardware to tenant/device.
+Hardware failure must not corrupt financial state.
+28. Scale Safety Rules
+Reject negative/overload/error readings.
+Require stable reading before automatic capture.
+Show unit and precision.
+Allow authorized manual entry with reason when policy permits.
+Record source of weight: scale/manual.
+Prevent accidental repeated readings from generating duplicate line quantities.
+29. Printer Rules
+Finalized invoice is independent of printer success.
+Persist print job and attempt state.
+Detect uncertain outcome.
+Do not automatically duplicate-print a receipt after uncertain outcome without operator confirmation.
+Support Tamil rendering and bitmap fallback.
+Provide WhatsApp receipt fallback.
+30. API Implementation
+All routes follow Document 02 and `/api/v1` versioning. Required common headers include Authorization, X-Request-ID, Idempotency-Key where required, X-Device-ID and X-App-Version.
+Standard success/error envelope.
+Cursor pagination for large datasets.
+Validation errors with field-level details.
+Tenant context derived from authenticated identity, not trusted request body.
+Role/permission enforcement in Go.
+RLS enforcement in PostgreSQL.
+31. API Module Catalogue
+32. WebSocket Implementation
+Authenticate connection.
+Bind to tenant/device/user.
+Subscribe only to authorized channels.
+Use payment and operational event types.
+Reconnect with backoff.
+Never use WebSocket event as the sole financial source of truth.
+After reconnect, fetch authoritative status.
+33. Outbox/Event Implementation
+Write domain event/outbox record in same transaction as source mutation.
+Worker claims event safely.
+External side effect has provider idempotency/reference.
+Retry transient failures.
+Dead-letter permanent failures.
+Record delivery attempts.
+Reconciliation can identify orphaned events.
+34. Worker Jobs
+35. Reports Implementation
+Read from authoritative normalized data.
+Use safe views/materialized aggregates for heavy dashboards.
+All queries tenant-scoped.
+Date/time boundaries are explicit.
+Financial totals reconcile to source.
+Exports are asynchronous for large datasets.
+Export files are access-controlled and time-limited.
+36. GST/Compliance Implementation
+Tax profiles are effective-dated.
+Compliance providers are adapters.
+Credentials remain server-side.
+Requests/responses are persisted.
+Webhook/provider responses are idempotent.
+External submissions are reconciled after recovery.
+Exports are versioned and auditable.
+37. Security Implementation Gates
+RLS tests for every tenant-owned table.
+RBAC matrix tests.
+Secret scanning.
+Dependency vulnerability scanning.
+Container image scanning.
+SAST/DAST as appropriate.
+Input validation/injection tests.
+Webhook signature tests.
+Rate-limit and brute-force tests.
+Audit-log coverage.
+38. Authentication & Session
+Short-lived access tokens with controlled refresh.
+Session revocation.
+Device binding where appropriate.
+Secure storage on mobile.
+Password/PIN policy.
+Owner approval for sensitive actions.
+Idle/session timeout.
+Concurrent-session policy.
+39. Mobile Security
+SQLCipher database.
+Secure key storage.
+Production builds signed.
+Disable debug endpoints.
+Protect sensitive screens from screenshots where justified.
+Secure deep links.
+Validate WebView origins.
+Do not log secrets or personal financial data.
+Handle rooted/jailbroken devices according to approved policy.
+40. Docker Build Specification
+Every service image should use a multi-stage build, minimal runtime image, non-root user, pinned dependencies where practical, health check and explicit environment configuration.
+API image.
+Worker image.
+Migration image/tool.
+Optional report/export worker.
+Hardware simulator image for CI.
+No secret values baked into images.
+SBOM generated for release artifacts.
+41. Docker Compose Reference
+Local/controlled deployment may include: edge/reverse-proxy, api, worker, scheduler, postgres, redis, observability and optional local object-storage emulator. Production should use managed services or HA equivalents where justified while retaining Dockerized application services.
+42. Environment Configuration
+43. Configuration Validation
+Fail fast on missing required production settings.
+Validate URLs and environment names.
+Validate decimal precision policies.
+Validate provider configuration.
+Validate database connectivity.
+Validate R2 access.
+Validate WebSocket configuration.
+Validate observability endpoints.
+Do not start financial services with incomplete security configuration.
+44. CI/CD Pipeline
+Checkout pinned source.
+Dependency resolution.
+Format/lint.
+Unit tests.
+Static analysis.
+Database migration tests.
+RLS/security tests.
+API contract tests.
+Flutter tests/build.
+Integration/E2E tests.
+Build Docker images.
+Generate SBOM.
+Container/security scans.
+Publish immutable artifacts.
+Deploy only after required gates.
+45. Release Versioning
+Backend/API semantic versioning policy.
+Mobile app version/build number.
+Database schema version.
+Seed version.
+Archive format version.
+API compatibility window.
+Record complete release manifest.
+46. Feature Flags
+Use for controlled enablement, not for bypassing security.
+Tenant-scoped where required.
+Flag changes audited.
+Critical financial behavior defaults to safe state.
+Remove obsolete flags through controlled code changes.
+47. Testing Pyramid
+48. Mandatory Financial Tests
+Tax rounding.
+Discount calculation.
+Split tender.
+Khata credit limit.
+Overpayment.
+Refund.
+Credit/debit note.
+Journal balance.
+Cash/EOD variance.
+Invoice numbering.
+Financial-year boundary.
+Offline duplicate replay.
+49. Mandatory Inventory Tests
+FIFO allocation.
+FEFO allocation.
+Expired batch exclusion.
+Negative stock prevention.
+Loose quantity precision.
+Bag conversion.
+Tare validation.
+Stock reservation.
+Concurrent sales.
+Return to batch.
+Stock count adjustment.
+Reconciliation from movement ledger.
+50. Mandatory Payment Tests
+Valid webhook.
+Invalid signature.
+Duplicate webhook.
+Out-of-order webhook.
+Wrong amount.
+Wrong merchant.
+Timeout/unknown outcome.
+Duplicate payment.
+Refund retry.
+Provider outage.
+Offline pending payment.
+Reconciliation mismatch.
+51. Mandatory GST/Compliance Tests
+Intra-state.
+Inter-state.
+Tax-exempt/zero-rated configured case.
+Tax-inclusive price.
+Credit note.
+Cancellation.
+E-invoice timeout.
+E-way provider failure.
+Export generation.
+Period lock.
+Historical tax snapshot.
+52. Mandatory Offline Tests
+Create sale offline.
+Restart app with pending transaction.
+Replay same envelope.
+Connectivity loss during upload.
+Server conflict.
+Device revocation.
+Full resync.
+Master-data update while offline.
+Clock skew.
+Corrupted local transaction.
+53. Performance Targets
+Targets must be validated against real hardware and data volume. Recommended engineering objectives: common master-data reads <500ms server-side under normal load; POS search should feel immediate using local indexes; finalized sale should normally complete within a few seconds excluding external payment wait; reports above operational thresholds should become asynchronous.
+Measure p50/p95/p99.
+Load test concurrent checkout.
+Test DB locks and connection pool saturation.
+Test sync batches and large exports.
+54. Observability
+Structured logs.
+Request ID/correlation ID.
+Tenant/device context without sensitive payloads.
+Metrics for API latency/errors.
+Database pool metrics.
+Queue/outbox metrics.
+Payment reconciliation metrics.
+Sync conflict metrics.
+Inventory reconciliation metrics.
+Backup/restore metrics.
+Distributed tracing where practical.
+55. Alerting
+56. Logging Rules
+Never log passwords, PINs, tokens, payment secrets or provider signatures.
+Minimize PII.
+Use structured event names.
+Keep financial identifiers needed for tracing.
+Audit sensitive actions separately from operational logs.
+Redact request bodies for sensitive endpoints.
+57. API Error Catalogue
+58. Data Validation
+Validate at API boundary.
+Validate again in domain service.
+Use DB constraints for invariant enforcement.
+Normalize Tamil/search input.
+Reject NaN/infinite numeric values.
+Reject invalid decimal precision where required.
+Validate dates/time zones.
+Validate tenant ownership.
+59. Search Implementation
+Local indexed exact search.
+Tamil Unicode normalization.
+Transliteration index.
+Alias index.
+Prefix matching.
+Controlled fuzzy/phonetic fallback.
+Rank exact barcode/SKU highest.
+Require user confirmation for ambiguous fuzzy matches.
+Search must remain fast offline.
+60. Localization
+Tamil primary UI capability.
+English fallback.
+All user-visible strings externalized.
+Number/weight/currency formatting localized.
+Dates/timezone localized.
+Printer rendering supports Tamil fallback.
+Do not concatenate translated strings unsafely.
+61. Accessibility
+Large touch targets.
+Readable contrast.
+Keyboard/scanner support.
+Screen-reader labels where applicable.
+Error messages understandable in selected language.
+Do not rely on color alone.
+POS critical actions accessible with minimal interaction.
+62. File Handling
+Private object storage.
+Content-type/size validation.
+Malware scanning where required.
+Randomized object keys.
+Signed URLs.
+Tenant authorization on every access.
+Checksum for archival/compliance evidence.
+Never trust client filename/path.
+63. Archive Implementation
+Eligibility query uses retention policy.
+Check legal/audit holds.
+Generate deterministic package.
+Generate manifest/checksum.
+Upload encrypted object.
+Verify object.
+Record archive manifest.
+Retain source until policy permits destruction.
+Test restore before trusting new format.
+64. Backup Implementation
+Automated PostgreSQL backups.
+WAL/PITR where required.
+Independent recovery copy.
+Encrypted storage.
+Backup health monitoring.
+Restore tests.
+Retention policy.
+Immutable copy where required.
+65. Disaster Recovery Implementation
+Provision clean infrastructure from IaC.
+Restore secrets through approved mechanism.
+Restore/promote database.
+Verify schema/RLS.
+Deploy immutable application images.
+Restore object access.
+Validate queues/outbox.
+Run reconciliation.
+Open traffic gradually.
+Record RPO/RTO and evidence.
+66. Infrastructure-as-Code
+Network/security groups.
+Container services.
+Database resources.
+Object storage.
+DNS/edge.
+Monitoring.
+Secrets references.
+Backup policies.
+DR environment.
+All changes reviewed and versioned.
+67. Database Seed & Configuration Build
+Use Document 18 seed version.
+Reference data first.
+Tenant configuration second.
+Products/UOM/tax/pricing third.
+Operational configuration fourth.
+Opening data only through approved migration path.
+Seed is idempotent.
+Production secrets excluded.
+68. Development Commands — Conceptual Contract
+Provide documented commands equivalent to:
+make setup
+make test
+make lint
+make generate
+make migrate-up
+make migrate-down-local
+make seed-demo
+make api
+make worker
+make docker-up
+make docker-down
+make e2e
+make load-test
+make security-scan
+Actual tooling may use task runners/scripts, but equivalent repeatable commands must exist.
+69. Code Generation
+Generate OpenAPI clients/contracts where adopted.
+Generate SQL code using the selected SQL tooling.
+Keep generated code reproducible.
+Do not hand-edit generated files.
+Pin generator versions.
+70. Database Code
+Prefer explicit SQL for critical financial queries.
+Use sqlc or equivalent typed SQL generation.
+Keep transaction ownership explicit.
+Review query plans for large reports.
+Use prepared/parameterized queries.
+Do not construct SQL from raw user input.
+71. Flutter Data Layer
+Repository decides local-vs-remote behavior.
+Local writes use SQLCipher transaction.
+Sync queue records operation.
+Remote confirmation updates local projection.
+Conflict state is visible.
+Financial data is not silently overwritten.
+72. Flutter POS State Model
+73. Hardware Simulator Build
+Fake barcode stream.
+Fake stable/unstable scale readings.
+Negative/overload scale errors.
+Printer success/failure/uncertain outcome.
+Payment webhook simulator.
+Provider timeout simulator.
+Used in CI/integration tests.
+Never connected to production credentials.
+74. External Provider Adapter Contract
+Each provider adapter should expose normalized operations and preserve raw provider references/evidence separately.
+Create intent
+Query status
+Verify webhook
+Refund
+Reconcile
+Compliance submit/query
+WhatsApp send/status
+Provider-specific fields remain behind adapter boundaries.
+75. Configuration Precedence
+A safe default must never override an explicit tenant configuration.
+76. Release Safety
+Backward-compatible API changes preferred.
+Mobile versions may lag backend within documented compatibility window.
+Database changes must support deployed application during migration where required.
+Feature flags allow controlled rollout.
+Rollback plan exists before deployment.
+Financial behavior changes require expanded regression tests.
+77. Production Smoke Test
+Authenticate owner.
+Open dashboard.
+Search product by barcode/Tamil alias.
+Open customer.
+Perform test/approved sale path.
+Verify payment status.
+Verify invoice.
+Verify stock movement.
+Verify journal.
+Verify receipt path.
+Verify report totals.
+Verify audit event.
+Verify monitoring.
+78. Operational Acceptance
+Backup verified.
+Restore test evidence exists.
+RLS tests pass.
+Security scans pass within policy.
+Payment reconciliation works.
+GST/compliance configuration validated.
+Hardware tested.
+Offline/sync tested.
+EOD tested.
+Reports reconcile.
+79. Data Integrity Invariants
+Every finalized invoice has balanced financial effect.
+Every stock-out has available stock unless approved policy says otherwise.
+Stock balance equals ledger projection within defined rules.
+Every payment allocation references a valid payment.
+Every journal balances.
+Customer ledger reconciles to source documents.
+Tenant data cannot cross RLS boundary.
+Finalized documents cannot be silently mutated.
+Idempotent requests cannot create duplicate financial effects.
+80. Disaster/Recovery Build Tests
+Restore DB backup.
+PITR to before/after test transaction.
+Rebuild Docker stack.
+Restore R2 object.
+Recover secrets.
+Replay payment webhook.
+Reconcile inventory.
+Reconcile accounting.
+Reconcile Khata.
+Validate GST evidence.
+Reconnect offline device.
+81. Documentation Deliverables
+82. Support/Diagnostics
+Tenant-safe diagnostic ID.
+Device ID.
+App/backend versions.
+Sync status.
+Last successful sync.
+Pending transaction count.
+Hardware status.
+Payment reconciliation status.
+Last backup status.
+Recent audit events for authorized support.
+Support tooling must not expose secrets or permit unauthorized financial edits.
+83. Production Access
+Least privilege.
+Separate operational and development identities.
+Break-glass access is controlled and audited.
+Production database direct write access is prohibited for ordinary support.
+All privileged actions have traceability.
+84. Build Quality Gates
+85. Implementation Traceability
+Every feature must have a trace record containing: requirement ID, user/business rule, database entities, API route, Go use case/service, Flutter screen/state, offline behavior, audit event, permissions, tests, observability metric, failure behavior and documentation reference.
+86. Recommended Build Order — Without Sprints
+Repository/tooling and CI foundation.
+PostgreSQL migrations/RLS.
+Go platform/auth/tenant/RBAC.
+Master-data services.
+Inventory/procurement.
+Accounting/Khata.
+POS/billing.
+Payments.
+Hardware.
+GST/compliance.
+Offline sync.
+Notifications/WhatsApp.
+Reports.
+Backup/DR/archive.
+Flutter UI integration and production hardening.
+End-to-end qualification and release.
+This is a technical dependency order, not sprint planning.
+87. Environment Promotion
+Developer → CI validation → staging → production.
+Promotion uses immutable artifacts.
+Configuration is environment-specific.
+Production data is never copied to lower environments without approved masking/process.
+Database migrations are promoted with release artifacts.
+Rollback/recovery procedure is tested.
+88. Performance/Capacity Build Checklist
+Measure database connection pool.
+Measure API p95/p99.
+Measure POS search.
+Measure invoice finalization.
+Measure sync batch size/time.
+Measure report query duration.
+Measure backup duration.
+Measure restore duration.
+Measure object upload/download.
+Measure worker backlog.
+89. Failure Handling Contract
+Every external dependency has timeout.
+Every retry has bounded backoff.
+Permanent failures go to controlled review/DLQ.
+Unknown financial outcomes become reconciliation states.
+User-facing errors explain next safe action.
+System never reports success before authoritative commit.
+Partial failures are recoverable without duplicate financial effects.
+90. Production Configuration Checklist
+Tenant settings approved.
+Tax configuration approved.
+Price lists approved.
+Credit policies approved.
+Document series approved.
+Payment providers verified.
+Compliance providers verified.
+WhatsApp templates approved.
+Hardware profiles verified.
+Backup/DR enabled.
+Monitoring/alerts enabled.
+RLS/security verified.
+Retention/archive policy approved.
+91. Acceptance Scenarios
+92. Non-Negotiable Implementation Rules
+Do not bypass PostgreSQL RLS.
+Do not use floating-point money calculations.
+Do not trust client-side payment status.
+Do not mutate finalized financial documents.
+Do not use LWW for financial/inventory conflicts.
+Do not allow negative stock unless explicitly approved by policy.
+Do not hardcode tax law thresholds/rates.
+Do not place provider secrets in Flutter.
+Do not roll back an invoice because a printer failed.
+Do not delete old records merely because an archive exists.
+Do not deploy without a verified backup and recovery path.
+Do not allow cross-tenant imports or restores.
+Do not manually edit production financial rows as a routine support action.
+93. Definition of Done — Complete Implementation
+All Documents 01–18 are represented in code/configuration/tests.
+Database migrations and RLS are production-ready.
+Go backend modules compile and pass tests.
+Flutter application builds for supported targets.
+Offline SQLCipher and synchronization work.
+POS, inventory, procurement, accounting and Khata reconcile.
+Payments/UPI are idempotent and reconciled.
+GST/compliance adapters are validated.
+Hardware adapters and simulators are available.
+Reports reconcile to authoritative data.
+Backup/restore and DR tests pass.
+Docker images are hardened and scanned.
+CI/CD gates are automated.
+Observability and alerts are active.
+Security acceptance criteria pass.
+Production smoke and E2E tests pass.
+Runbooks and release artifacts are complete.
+94. Mapping to Documents 01–18
+95. Final Architecture Summary
+The implementation is a tenant-isolated, transactionally consistent, offline-first animal-feed retail platform. Flutter provides fast local operation and hardware integration; Go owns business rules and external orchestration; PostgreSQL owns authoritative financial/inventory state with RLS; Redis is optional and rebuildable; R2 stores protected objects/archives; Docker provides reproducible deployment; CI/CD enforces quality and security; and every production release is supported by backup, restore, reconciliation, monitoring and audited operational controls.
+96. Final Production Readiness Statement
+The system is ready for production only when implementation, configuration, security, financial integrity, inventory integrity, offline synchronization, payment reconciliation, GST/compliance validation, hardware operation, backup/DR, performance, observability and acceptance tests have all passed. Configuration examples in prior documents remain configurable and must be approved before live operation.
+Layer | Required baseline
+Mobile | Flutter/Dart
+Backend | Go
+Database | PostgreSQL
+Local DB | SQLCipher SQLite
+Cache/queue | Redis optional
+Object storage | Cloudflare R2
+Transport | HTTPS REST + WSS
+Containerization | Docker
+CI/CD | Automated build/test/security gates
+Printer | ESC/POS
+Scale | USB/RS-232/Bluetooth/BLE via adapters
+Barcode | USB HID/Bluetooth/serial as applicable
+Operation | Atomic scope
+Finalize invoice | Invoice + lines + taxes + stock + allocations + journal + payment allocation
+GRN | GRN + batch + stock movement + payable effect as applicable
+Receipt | Payment + allocation + Khata/journal
+Return | Return + stock + refund/credit + accounting
+Contra | Receipt stock + valuation + customer ledger + journal
+Stock count approval | Count + adjustment + ledger + audit
+EOD | Cash session + movements + reconciliation/finalization
+State | Meaning
+Created | Intent created
+Pending | Awaiting provider confirmation
+Paid | Authoritative confirmation received
+Failed | Provider failure
+Expired | Intent expired
+Unknown | Outcome uncertain; reconciliation required
+RefundPending | Refund initiated
+Refunded | Refund confirmed
+Field | Purpose
+transaction_id | Stable local/server identity
+tenant_id | Isolation
+device_id | Origin
+operation | Create/update/action
+entity | Target aggregate
+payload | Validated data
+dependencies | Ordering
+created_at | Origin time
+schema_version | Compatibility
+idempotency_key | Replay protection
+state | Queue lifecycle
+Module | Core routes
+Auth | /auth/login, /auth/refresh, /auth/logout
+Products | /products, /products/search, /products/{id}/aliases
+Pricing | /pricing/price-lists
+Customers | /customers, /customers/{id}/khata
+Suppliers | /suppliers
+Procurement | /purchase-orders, /goods-receipts
+Inventory | /inventory, /stock-counts, /transfers
+POS | /pos/carts, /pos/finalize
+Invoices | /invoices, /invoices/{id}
+Payments | /payment-intents, /payments, /webhooks
+Returns | /returns, /refunds
+Accounting | /journals, /statements, /eod
+Compliance | /compliance/e-invoice, /compliance/e-way, /exports
+Reports | /reports/*
+Sync | /sync/push, /sync/pull, /sync/conflicts
+Devices | /devices
+Archive | /archive/jobs, /archive/manifests
+Job | Function
+Expiry alert | Near-expiry/expired batch detection
+Reorder | Reorder candidate generation
+Payment reconciliation | Provider/internal comparison
+WhatsApp | Async message delivery
+Compliance | Provider submission/status
+Archive | Retention-controlled packaging
+Backup verification | Health/evidence
+Reports | Async export
+Sync cleanup | Retention/maintenance
+EOD reminders | Operational alerts
+Environment | Rule
+Local | Developer-safe defaults; synthetic data
+CI | Ephemeral; deterministic
+Staging | Production-like; no uncontrolled real secrets/data
+Production | Secret manager + approved infrastructure
+DR | Isolated; restore authoritative data
+Layer | Required focus
+Unit | Domain calculations/rules
+Repository | SQL/constraints/RLS
+API | Contracts/auth/validation
+Integration | DB/providers/outbox
+E2E | POS/procurement/accounting
+Hardware | Scale/printer/scanner
+Offline | Sync/replay/conflicts
+Security | Authorization/tenant isolation
+Performance | Load/soak/concurrency
+DR | Backup/restore/reconciliation
+Alert | Priority
+Database unavailable | Critical
+Backup failure/age breach | Critical
+RLS/security anomaly | Critical
+Payment reconciliation mismatch | High
+Inventory reconciliation mismatch | High
+Compliance submission failure | High
+Outbox backlog | High
+Sync conflict spike | High
+R2 capacity/access failure | High
+Hardware fleet failure spike | Medium
+Code | Meaning
+VALIDATION_ERROR | Input invalid
+UNAUTHORIZED | Authentication missing/invalid
+FORBIDDEN | Permission denied
+TENANT_CONTEXT_ERROR | Invalid tenant context
+CONFLICT | State/version conflict
+IDEMPOTENCY_CONFLICT | Key reused with different payload
+INSUFFICIENT_STOCK | Stock unavailable
+CREDIT_LIMIT_EXCEEDED | Khata limit exceeded
+PAYMENT_PENDING | Payment not confirmed
+PAYMENT_UNKNOWN | Outcome uncertain
+COMPLIANCE_PENDING | Provider processing
+ARCHIVE_HOLD | Retention/legal hold
+INTERNAL_ERROR | Unexpected failure
+State | Meaning
+Empty | No cart
+Editing | Items being entered
+Review | Totals/customer/tax reviewed
+PaymentPending | Awaiting payment
+Finalizing | Server/local transaction commit
+Completed | Invoice finalized
+PrintPending | Receipt delivery unresolved
+SyncPending | Offline transaction awaiting server
+ErrorRecovery | Operator action required
+Level | Priority
+Runtime secret/config | Highest for secrets
+Tenant effective configuration | Business behavior
+Environment defaults | Infrastructure
+Application safe defaults | Last resort only
+Artifact | Required
+Architecture docs | Yes
+OpenAPI | Yes
+DB ERD/migrations | Yes
+Seed/config docs | Yes
+Runbooks | Yes
+Security model | Yes
+Backup/DR | Yes
+Hardware profiles | Yes
+Provider integration docs | Yes
+Test plan/evidence | Yes
+Release manifest | Yes
+Gate | Pass condition
+Compile | All supported targets build
+Unit | Required tests pass
+Integration | DB/provider tests pass
+Security | Required security gates pass
+RLS | Tenant isolation tests pass
+Financial | Accounting invariants pass
+Inventory | Stock invariants pass
+Offline | Replay/conflict tests pass
+Hardware | Simulator/physical tests pass
+Performance | Approved thresholds pass
+DR | Restore test passes
+Release | Immutable artifacts generated
+Scenario | Expected result
+Fresh tenant | Provision → seed → validate → backup → production readiness.
+Retail sale | Barcode → price/tax → cash → invoice → stock/journal.
+Loose sale | Scale stable weight → calculate → invoice → stock.
+Wholesale sale | Customer tier → price → split payment/Khata → invoice.
+GRN | PO → truck → gross/tare/net → batch → stock/AP.
+Offline sale | Local commit → reconnect → idempotent sync → reconciliation.
+UPI | Intent → QR → webhook → authoritative Paid → invoice/payment allocation.
+Return | Original invoice → return → stock reversal → credit/refund.
+Contra | Receive commodity → stock increase → customer credit → journal.
+EOD | Cash session → expected vs physical → variance → close.
+GST | Tax snapshot → compliance request → response → export.
+Disaster | Restore → RLS → reconciliation → controlled reopening.
+Document | Implementation output
+01 Database & ERD | Migrations, constraints, indexes, RLS
+02 API | OpenAPI, handlers, validation, errors
+03 Go Backend | Modules/services/repositories/workers
+04 Flutter | Screens/state/repositories/hardware
+05 Offline Sync | SQLCipher queue/cursors/conflicts
+06 Inventory | Ledger/batches/allocation/reservations
+07 Accounting & Khata | Journals/ledgers/credit/EOD
+08 POS | Cart/pricing/tax/finalization
+09 Hardware | Adapters/profiles/simulators
+10 Payment/UPI | Intent/webhook/reconciliation
+11 GST/Compliance | Tax/e-invoice/e-way/export
+12 Security | Auth/RBAC/RLS/secrets/security gates
+13 Docker/DevOps | Images/Compose/CI/CD/IaC
+14 Testing/QA | Automation/coverage/release qualification
+15 UI/UX | Production Flutter UX
+16 Reports | Queries/views/dashboards/exports
+17 Backup/DR | Backups/PITR/restore/runbooks
+18 Seed/Setup | Provisioning/master-data/imports

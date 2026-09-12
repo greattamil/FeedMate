@@ -1,0 +1,645 @@
+Andipatti Animal Feed System
+Document 17 — Complete Backup, Disaster Recovery & Archival Architecture / Specification v1.0
+Implementation-ready specification for protecting PostgreSQL transactional data, encrypted offline data, object/archive data, configuration, audit evidence and deployment state; recovering the platform after failure; and managing long-term archival without compromising financial, inventory, tax, audit or tenant integrity. No sprint planning.
+1. Purpose, Scope, Objectives & Non-Goals
+1.1 Purpose
+Define the backup, restore, disaster recovery, business continuity, retention and archival architecture for the complete Andipatti Animal Feed System.
+1.2 Scope
+PostgreSQL authoritative transactional database.
+Cloudflare R2 objects, attachments, exports and archive packages.
+Redis/queue state where deployed and required for recovery.
+Docker images, deployment configuration and infrastructure definitions.
+Secrets/configuration recovery procedures without exposing secret values.
+Flutter offline SQLCipher databases and device recovery.
+Audit logs, financial evidence, compliance exports and archive manifests.
+Backup verification, restore testing, disaster scenarios and operational runbooks.
+1.3 Objectives
+Minimize data loss and service downtime.
+Recover to a known, internally consistent state.
+Ensure backups cannot silently cross tenant boundaries.
+Protect backups against unauthorized access, deletion and corruption.
+Verify backups through automated integrity and restore tests.
+Retain required financial/compliance evidence for the applicable policy.
+Keep archival separate from primary backup so archival failure cannot eliminate recoverability.
+1.4 Non-Goals
+This document does not define legal retention periods; those must be approved against current requirements.
+This document does not replace provider-specific disaster-recovery commitments.
+No sprint planning is included.
+2. Recovery Principles
+PostgreSQL is the authoritative transactional source.
+A backup is not considered valid until it is verified.
+R2 archive storage is not the sole backup of PostgreSQL.
+Backups must be encrypted and access-controlled.
+Restore must preserve tenant isolation, accounting, inventory and audit integrity.
+Point-in-time recovery is preferred where supported.
+Recovery procedures are documented, automated where practical and regularly tested.
+Archive packages are immutable/versioned where policy requires.
+Never delete old primary records merely because an archive was created.
+Recovery must account for external side effects such as payments, webhooks and compliance submissions.
+3. Business Continuity Model
+4. RPO & RTO Framework
+Final targets must be approved as business SLOs. The architecture supports the following target classes.
+Do not claim a specific RPO/RTO until the actual PostgreSQL provider, deployment topology, backup frequency and tested restoration time establish it.
+5. Backup Inventory
+6. PostgreSQL Backup Strategy
+Use provider-native automated backups where available.
+Maintain independent logical/custom backups for portability where justified.
+Enable WAL/PITR when supported and appropriate for required RPO.
+Store backup copies outside the primary failure domain where feasible.
+Encrypt backup artifacts.
+Restrict backup access using least privilege.
+Record backup metadata, timestamp, source environment and checksum.
+Monitor backup success/failure.
+7. Backup Types
+8. Backup Frequency
+Choose frequency from approved RPO rather than convenience.
+At minimum, daily verified database backup is expected for a production baseline, subject to provider capabilities and approved policy.
+WAL/PITR should be enabled when the required RPO cannot be met by daily backups.
+Configuration and infrastructure state should be backed up/versioned continuously through protected source control and artifact storage.
+Critical object data requires a documented backup/versioning policy.
+9. Backup Encryption
+Encrypt backups in transit and at rest.
+Use managed KMS/encryption where available.
+Separate backup access from normal application credentials.
+Rotate encryption keys according to approved policy.
+Document key recovery dependencies.
+Do not store encryption keys beside unencrypted backup artifacts.
+10. Backup Access Control
+Application runtime must not have broad backup-administration privileges.
+Only authorized operations roles can initiate restore.
+Restore to isolated infrastructure by default.
+Production overwrite restore requires explicit controlled authorization.
+All backup/restore actions are audited.
+Downloadable backup artifacts require strong authorization.
+11. Backup Integrity Verification
+Verify backup job completion.
+Verify expected object/file size and metadata.
+Verify checksum where applicable.
+Verify encryption metadata.
+Periodically restore into an isolated environment.
+Run database integrity/reconciliation checks.
+Run application smoke tests.
+Record restore duration and outcome.
+12. Restore Testing
+Clean restore from latest full/base backup.
+Point-in-time restore to a selected timestamp.
+Restore after simulated corruption.
+Restore after accidental deletion.
+Restore to a new environment.
+Restore with application version compatibility checks.
+Restore with migration compatibility checks.
+Restore with RLS and authorization tests.
+Restore with accounting/inventory reconciliation.
+13. Restore Validation — Mandatory Checks
+14. Point-in-Time Recovery
+Identify target recovery timestamp.
+Freeze affected application writes if required.
+Restore base/full backup.
+Replay WAL/logs to target.
+Validate database consistency.
+Reconcile transactions around the recovery boundary.
+Start application in controlled mode.
+Run smoke and financial/inventory reconciliation.
+Resume normal traffic only after approval.
+Recovery to a time before a known bad transaction requires explicit analysis of external side effects; restoring the database alone cannot automatically reverse an external payment or government-provider action.
+15. Disaster Scenarios
+16. Application Recovery Order
+Establish incident/change freeze.
+Provision clean infrastructure.
+Restore secrets through approved secret-management process.
+Restore PostgreSQL or promote approved replica.
+Validate schema/migrations.
+Restore required R2/object access.
+Deploy tested Docker image digests.
+Start API/readiness checks.
+Start worker/scheduler.
+Validate outbox/queue behavior.
+Run reconciliation and smoke tests.
+Open traffic progressively.
+Monitor closely and document recovery.
+17. Docker Recovery
+Use immutable image tags/digests.
+Do not rebuild unpinned production images during an incident.
+Keep deployment manifests/IaC in protected version control.
+Maintain documented environment variables without committing secret values.
+Verify health checks after recovery.
+Verify non-root/container security settings.
+Record recovered image digests.
+18. PostgreSQL Recovery Architecture
+Use separate roles for application, migration, reporting and backup operations.
+Restore roles/permissions as part of infrastructure recovery.
+Reapply RLS policies and security configuration.
+Verify extensions and version compatibility.
+Validate sequences/document-series behavior after restore.
+Verify financial-year state.
+Check indexes and constraints.
+Run reconciliation before accepting new financial transactions.
+19. Sequence & Document Number Recovery
+Invoice/document series must remain unique after restore.
+Never manually guess the next invoice number.
+Verify sequence state against authoritative document records.
+If a recovery creates uncertainty around numbering, freeze finalization until reconciled.
+Financial-year boundaries must be revalidated after recovery.
+20. Payment Recovery
+Identify provider transactions around the recovery window.
+Replay provider webhooks through idempotent processing where safe.
+Reconcile provider statements against internal payment records.
+Do not manually mark payments Paid without authoritative evidence.
+Investigate duplicate/unknown outcomes.
+Record all recovery decisions in audit records.
+21. GST/Compliance Recovery
+Preserve invoice tax snapshots.
+Preserve compliance request/response evidence.
+Identify submissions made externally before recovery.
+Reconcile e-invoice/e-way state with providers.
+Do not blindly resubmit without idempotency/reference checks.
+Regenerate exports from authoritative restored data and compare.
+22. Inventory Recovery
+Restore stock movements and balances.
+Reconcile balances from movement ledger.
+Verify reservations are not stale.
+Verify batch/expiry status.
+Verify FIFO/FEFO allocation history.
+Investigate sales/returns around recovery point.
+Perform controlled physical count when data integrity is uncertain.
+23. Accounting/Khata Recovery
+Verify every journal balances.
+Reconcile customer ledger to invoices/receipts.
+Reconcile supplier payables to GRNs/payments.
+Verify refund/credit-note lineage.
+Reconcile EOD sessions.
+Freeze financial posting if reconciliation fails.
+24. Offline Device Recovery
+Server data remains authoritative.
+Lost/stolen device is revoked.
+SQLCipher local DB is encrypted and key-protected.
+Pending local transactions are reconciled after device recovery.
+Duplicate/replayed envelopes are rejected idempotently.
+If local data is irrecoverable, rebuild from server master data and supported history.
+Do not copy raw SQLCipher keys into support channels.
+25. R2/Object Recovery
+Use private buckets/objects.
+Use versioning/retention controls where supported.
+Store archive objects with checksums.
+Keep archive manifests in authoritative DB and protected backup.
+Use server-generated object keys.
+Use short-lived signed URLs for recovery/download.
+Verify object integrity after restore.
+26. Archive vs Backup
+The system must maintain both concepts independently.
+27. Archival Eligibility
+Eligibility is policy-driven, not simply 'older than 365 days and paid'.
+Consider financial period closure, legal retention, audit holds, disputes, refunds, pending compliance, unresolved reconciliation and operational dependencies.
+Only immutable/closed records should be candidates for archival.
+Archive manifests identify exactly which records and objects are included.
+28. Archive Package Design
+29. Archive Integrity
+Serialize records deterministically.
+Generate cryptographic checksums.
+Store manifest with record counts.
+Upload encrypted archive object.
+Verify uploaded object.
+Record archive object/version.
+Run restore/read verification.
+Mark archive complete only after verification.
+30. Archive Lifecycle
+31. Archive Deletion / Destruction
+Never destroy solely because a record is old or paid.
+Check retention policy and legal/audit holds.
+Require authorized deletion policy.
+Destroy both metadata/object copies where required.
+Record destruction event and scope.
+Retain evidence of destruction where policy requires.
+Ensure backups containing the data follow their own retention lifecycle.
+32. Archive Restore
+Authorize restore request.
+Identify tenant and period.
+Retrieve manifest.
+Verify object checksum.
+Decrypt using controlled key access.
+Validate schema/version compatibility.
+Load into isolated read-only environment.
+Run record-count and financial/inventory reconciliation.
+Expose to authorized user only.
+Record restore audit event.
+33. Retention Policy Model
+Actual durations must be configured from approved legal/business policy and reviewed periodically.
+34. Legal/Audit Hold
+Hold can prevent archival destruction.
+Hold applies to identified tenant/records/periods/objects.
+Hold creation/release is authorized and audited.
+Archive jobs skip held data from destruction.
+Reports expose held status to authorized administrators.
+35. Backup Retention
+Use layered retention: recent frequent backups, periodic longer-lived backups and disaster-recovery copies.
+Align retention to approved RPO/RTO and compliance requirements.
+Avoid uncontrolled accumulation of backups.
+Test that retention automation does not delete the only recoverable copy.
+36. Backup Immutability
+Use immutable/WORM-style controls where available for critical recovery copies.
+Separate backup administration from application administration.
+Prevent ordinary application credentials from deleting backups.
+Monitor unexpected backup deletion/retention-policy changes.
+Test ransomware-like recovery using isolated copies.
+37. Disaster Recovery Environments
+38. DR Network Security
+Recovery environments use the same or stronger network segmentation.
+Database ports are private.
+Administrative access uses controlled identities.
+TLS remains mandatory.
+Recovery credentials are not shared in chat or documents.
+R2/object access is least-privileged.
+39. Secret & Key Recovery
+Document where production secrets are managed without recording secret values.
+Maintain emergency access procedures.
+Test key recovery before a disaster.
+Rotate compromised secrets immediately.
+Verify payment/GST/WhatsApp credentials after recovery.
+Keep separate credentials for backup and application operations.
+40. Incident Response Integration
+Detect and classify incident.
+Protect evidence.
+Contain compromised systems.
+Decide restore point.
+Recover into clean infrastructure.
+Validate integrity.
+Rotate credentials where needed.
+Restore traffic progressively.
+Monitor.
+Perform post-incident review.
+41. Disaster Severity
+42. Recovery Freeze Rules
+Freeze non-essential writes during uncertain recovery.
+Do not perform manual data fixes directly in production without controlled procedure.
+Do not resubmit external payment/compliance requests until state is reconciled.
+Do not delete potentially duplicated records merely to make reports look correct.
+Preserve evidence before destructive remediation.
+43. Reconciliation After Recovery
+44. Backup Monitoring
+Backup success/failure.
+Backup age.
+PITR/WAL health where applicable.
+Backup storage capacity.
+Encryption/key status.
+Restore-test success.
+Unexpected deletion/retention changes.
+Archive verification failures.
+45. DR Metrics
+46. Automated Restore Verification
+Schedule isolated restore tests according to risk.
+Provision ephemeral recovery infrastructure.
+Restore latest selected backup.
+Run schema/RLS/authorization tests.
+Run accounting/inventory/payment reconciliation.
+Run representative application smoke tests.
+Destroy temporary recovery environment after evidence collection.
+47. Migration & Restore Compatibility
+Maintain supported database/application version compatibility matrix.
+Test restore from the prior production version before upgrading where appropriate.
+Never assume a schema migration is reversible.
+For destructive migrations, require backup/PITR and explicit rollback/recovery procedure.
+Record migration version in backup metadata.
+48. Archive Schema Versioning
+Archive packages include schema version.
+Archive reader supports approved historical versions or documented migration.
+Do not overwrite historical archive packages in place.
+Version archive manifests when package format changes.
+49. Backup of Configuration
+Tenant configuration.
+Tax/pricing master data.
+Document series.
+Feature flags.
+Notification templates.
+Device configuration metadata.
+Provider configuration metadata excluding raw secrets.
+Retention/archive policy.
+Configuration backups must preserve effective dates and audit lineage.
+50. File & Export Recovery
+Identify whether an export is reproducible from authoritative data.
+If reproducible, prefer regeneration rather than treating temporary export files as primary data.
+Long-lived compliance evidence is archived according to policy.
+Verify checksums for retained files.
+Protect exported PII and tax data.
+51. Log & Audit Recovery
+Security and audit records needed for incident investigation must have protected retention.
+Application logs are not a substitute for authoritative audit tables.
+Logs may be reconstructed only as observability evidence, not as financial truth.
+Redaction policies remain active during recovery.
+52. Redis / Queue Recovery
+Redis is not authoritative for financial/inventory state.
+Rebuild caches from PostgreSQL where possible.
+Use durable outbox/integration event records for important asynchronous work.
+After queue loss, identify pending events from authoritative outbox state.
+Avoid blindly replaying non-idempotent external side effects.
+53. Scheduled Job Recovery
+Jobs have unique IDs and idempotency where appropriate.
+After restore, determine jobs that were running at the recovery point.
+Prevent duplicate execution of financial/compliance side effects.
+Resume safe read/report jobs first.
+Reconcile payment/compliance jobs before replay.
+54. Device Theft/Loss
+Mark device revoked.
+Invalidate device sessions/tokens.
+Stop synchronization.
+Assess pending offline transactions.
+Issue replacement device credentials.
+Verify no secrets are exposed.
+Audit the incident.
+55. Ransomware / Malicious Deletion Recovery
+Isolate affected infrastructure.
+Do not trust compromised application credentials.
+Preserve forensic evidence.
+Revoke/rotate credentials.
+Use clean immutable backups.
+Rebuild infrastructure from trusted images/source.
+Restore database and objects.
+Run full security/reconciliation tests.
+Resume only after containment and validation.
+56. Business Continuity During DB Outage
+Offline POS can continue only within the documented offline policy.
+Do not expand offline permissions merely because the server is down.
+Payment state remains subject to authoritative confirmation.
+Operators should see clear outage/offline status.
+When restored, synchronize and reconcile before normal confidence is assumed.
+57. Backup/DR Security Testing
+Unauthorized backup download is denied.
+Unauthorized restore is denied.
+Backup encryption is verified.
+Backup deletion requires elevated authorization.
+Cross-tenant restore data cannot be exposed.
+Signed archive downloads expire.
+Compromised application credentials cannot administer backups.
+58. DR Testing Scenarios
+Restore latest full backup.
+Point-in-time recovery.
+Primary DB unavailable.
+Primary host unavailable.
+R2 object unavailable.
+Application image rollback.
+Credential compromise.
+Device theft.
+Corrupt archive object.
+Deleted invoice test data.
+Payment provider outage during recovery.
+Compliance provider reconciliation after recovery.
+59. Restore Acceptance Criteria
+Database restores successfully.
+RLS policies are active.
+Authorization matrix passes.
+Invoices are complete and internally consistent.
+Payment states are reconciled.
+Inventory reconciles.
+Accounting balances.
+Khata reconciles.
+EOD data remains intact.
+Compliance evidence is accessible.
+Required R2 objects verify.
+Application smoke tests pass.
+Recovery duration is recorded.
+60. Archival Acceptance Criteria
+Only eligible closed records are archived.
+Legal/audit holds prevent destruction.
+Manifest includes scope and checksum.
+Archive upload is private and encrypted.
+Verification passes before completion.
+Archive restore succeeds in an isolated environment.
+Historical records remain traceable to original IDs.
+No deletion occurs without approved retention/destruction policy.
+61. Operational Runbooks
+Database restore.
+Point-in-time recovery.
+R2/object recovery.
+Archive restore.
+Payment reconciliation after outage.
+GST/compliance reconciliation after outage.
+Device theft/revocation.
+Credential compromise.
+Ransomware/malicious deletion.
+Failed backup investigation.
+Failed restore investigation.
+62. DR Communication
+Maintain an internal incident owner and technical recovery owner.
+Record incident start/end times.
+Communicate user-facing status without exposing sensitive technical details.
+Document what transactions may be pending or require reconciliation.
+After recovery, communicate restored operational state and any required operator actions.
+63. Documentation & Evidence
+Backup job logs.
+Restore test reports.
+Checksums.
+Archive manifests.
+Recovery timestamps.
+Reconciliation results.
+Approval records.
+Incident timeline.
+Credential rotation evidence.
+Post-recovery validation.
+64. Capacity & Storage Planning
+Estimate database growth by invoice, line, ledger, stock and audit volume.
+Estimate object growth from receipts, compliance documents and exports.
+Track backup storage growth separately.
+Forecast archive storage.
+Set alerts before capacity exhaustion.
+Test restore time with realistic data volume, not only a tiny development backup.
+65. Cost Controls
+Use retention tiers.
+Compress logical/archive packages where appropriate.
+Expire temporary exports.
+Avoid duplicate uncontrolled backups.
+Keep at least the approved independent recovery copies.
+Never optimize storage by deleting the only recoverable copy.
+66. Data Classification in Backup/Archive
+67. Testing Frequency
+Backup success monitoring: continuous/automated.
+Backup integrity checks: automated.
+Restore validation: scheduled according to risk and approved policy.
+Full DR exercise: periodically, at least often enough to validate stated RTO/RPO.
+Archive restore verification: periodically and before relying on a new archive format.
+Key recovery test: periodically.
+68. Disaster Recovery Checklist
+Incident classified.
+Evidence protected.
+Traffic/write freeze applied where needed.
+Recovery point selected.
+Clean infrastructure available.
+Secrets recovered/rotated.
+Database restored/promoted.
+RLS/authorization validated.
+Application deployed from trusted image.
+R2/object access validated.
+Payment state reconciled.
+Inventory/accounting/Khata reconciled.
+Compliance state reconciled.
+Smoke tests passed.
+Monitoring active.
+Incident documented.
+69. Mapping to Documents 01–16
+70. Non-Negotiable Backup/DR Rules
+R2 archives are not the sole PostgreSQL backup.
+Never declare a backup recoverable without restore verification.
+Never delete old transactions solely because they are archived.
+Never overwrite historical archive packages without versioned control.
+Never restore directly over production without controlled authorization.
+Never trust application credentials as backup-admin credentials.
+Never resume financial posting when reconciliation is unresolved.
+Never blindly replay payment or compliance side effects after recovery.
+Never expose backup/archive files through public URLs.
+Never allow recovery procedures to bypass RLS, authorization or audit controls.
+71. Definition of Done — Backup, DR & Archival
+Production backup strategy is configured and monitored.
+Required RPO/RTO targets are approved and measured.
+Database restore and PITR procedures are tested.
+R2/object recovery is tested.
+Archive package creation, verification and restore are tested.
+Backup encryption and access controls are verified.
+Restore preserves RLS and authorization.
+Financial/inventory/Khata/payment reconciliation passes after restore.
+Compliance evidence can be recovered.
+Docker/infrastructure rebuild is documented and tested.
+Device loss/revocation recovery is tested.
+Operational runbooks and evidence are maintained.
+72. Final Backup, DR & Archival Architecture Summary
+The system uses layered resilience: authoritative PostgreSQL backups and point-in-time recovery protect transactional state; protected object storage protects files and archives; immutable/versioned copies protect against destructive incidents; Docker/IaC artifacts allow clean infrastructure reconstruction; offline SQLCipher data is treated as recoverable operational state rather than the source of truth; and every recovery ends with tenant, financial, inventory, payment and compliance reconciliation. Archival is a separate long-term retention function and never substitutes for backup.
+73. Important Production Note
+Actual RPO/RTO, backup frequency, retention duration, legal holds, statutory retention, provider capabilities, geographic recovery strategy and object-versioning configuration must be finalized against the selected production infrastructure and current legal/business requirements. These values must be tested, not merely documented.
+Service | Priority | Recovery approach
+POS/API | Critical | Restore application + DB; preserve transaction integrity
+PostgreSQL | Critical | PITR/full backup + verified restore
+Payment webhook | Critical | Replay/idempotent recovery from provider events
+Inventory | Critical | DB recovery + ledger reconciliation
+Accounting/Khata | Critical | DB recovery + journal/ledger reconciliation
+GST/compliance | High | DB + stored evidence + provider reconciliation
+R2 files/archive | High | Versioned object recovery
+Redis | Medium | Rebuildable where used; do not treat as source of truth
+Reports | Medium | Recompute from authoritative data
+Flutter local DB | Device-dependent | Encrypted local recovery/sync from server
+Tier | Illustrative target class | Recovery expectation
+Tier 0 | Near-zero/minimal loss | PITR/replication + rapid failover
+Tier 1 | Minutes | Frequent WAL/log backup + application restore
+Tier 2 | Hours | Scheduled backup + restore
+Tier 3 | Best effort | Rebuild/recompute
+Asset | Backup method
+PostgreSQL data | Managed/provider backup + logical/custom backups + WAL/PITR where supported
+R2 objects | Versioning/replication or independent object backup strategy
+Archive manifests | Database + object copy
+Docker images | Immutable registry artifacts
+IaC/config | Version-controlled repository + protected backup
+Secrets | Approved secret manager backup/recovery mechanism
+Audit evidence | Primary DB backup + protected archive where required
+Device local DB | SQLCipher local recovery/sync strategy; server remains authority
+Type | Purpose
+Full/base | Complete recovery baseline
+Incremental/differential | Reduce backup time/storage where supported
+WAL/PITR | Fine-grained recovery
+Logical | Portability, selective restore, migration
+Configuration | Application/deployment reconstruction
+Object | R2/files/archive protection
+Check | Expected
+Row/schema integrity | Expected schema and constraints
+Tenant isolation | RLS and authorization pass
+Invoice count/total | Matches expected test baseline
+Payment state | No unexplained duplicate/false Paid
+Inventory | Balances reconcile to movements
+Accounting | Journals balance
+Khata | Ledger balances reconcile
+EOD | Expected/physical test data preserved
+Audit | Audit records retained
+Objects | Required R2 objects/checksums available
+Scenario | Recovery direction
+DB corruption | PITR/backup restore + reconciliation
+DB accidental deletion | PITR/restore
+Primary host loss | Recreate containers/infrastructure + restore
+R2 outage | Use provider recovery/versioning/secondary strategy
+Region outage | Recover in alternate failure domain where designed
+Credential compromise | Revoke/rotate credentials + preserve evidence
+Ransomware-like event | Isolated immutable backups + clean rebuild
+Bad deployment | Rollback application/image; DB rollback only via controlled migration/recovery
+Device theft | Revoke device; server remains authority
+Queue loss | Rebuild from authoritative DB/outbox where designed
+Backup | Archive
+Designed for recovery | Designed for long-term retention/access
+Frequent | Less frequent
+Short/medium retention | Long retention
+Restores operational state | Preserves historical evidence
+PITR may apply | Manifest/checksum/versioning important
+Not a substitute for archive | Not a substitute for current backup
+Component | Content
+Manifest | Tenant, period, schema/report version, counts, checksum
+Invoices | Immutable finalized invoice data
+Lines/taxes | Invoice line/tax snapshots
+Payments | Payment state/allocation evidence
+Ledger | Relevant accounting/Khata records
+Inventory | Required historical movement/batch evidence
+Compliance | Requests/responses/documents/exports
+Audit | Required audit evidence
+Attachments | Referenced approved files
+Metadata | Creation time, archive policy, tool/version
+State | Meaning
+Candidate | Eligible under retention policy
+Prepared | Data package generated
+Uploaded | Object stored
+Verified | Checksum/restore verification passed
+Retained | Within policy
+Hold | Deletion blocked by legal/audit/dispute hold
+Expired | Eligible for policy-approved destruction
+Destroyed | Deletion evidence recorded
+Policy dimension | Examples
+Financial | Approved accounting/statutory retention
+Tax/compliance | Applicable current requirements
+Audit/security | Security event retention
+Operational | Short-lived exports/logs
+Payment | Provider/reconciliation evidence
+Archive | Long-term historical records
+Legal hold | Indefinite until released
+Environment | Purpose
+Primary | Normal production
+Warm/standby | Rapid recovery where justified
+Recovery | Isolated restore/DR validation
+Archive restore | Historical read-only recovery
+Test | Routine restore testing
+Severity | Example
+Critical | Database loss/corruption, tenant isolation breach, payment integrity incident
+High | Primary service unavailable, major object loss
+Medium | Report/archive subsystem unavailable
+Low | Non-critical operational feature unavailable
+Domain | Reconciliation
+Sales | Invoice counts/totals vs expected
+Payments | Internal vs provider
+Inventory | Balances vs movements
+Accounting | Debits vs credits
+Khata | Ledger vs invoice/receipts
+Procurement | GRN vs payables
+GST | Tax snapshots vs exports/provider
+EOD | Sessions/cash/variance
+Objects | Manifest/checksum
+Metric | Purpose
+Backup success rate | Reliability
+Backup age | RPO adherence
+Restore duration | RTO evidence
+Restore success rate | Recoverability
+Archive verification rate | Long-term integrity
+Unreconciled recovery items | Data correctness
+Recovery incidents | Operational trend
+Class | Examples | Protection
+Restricted | Secrets, payment credentials | Secret manager; never ordinary archive
+Confidential | Customer/Khata/financial data | Encrypted, RBAC, audit
+Compliance | GST/evidence documents | Encrypted, retention/hold
+Operational | Reports/configuration | Access-controlled
+Public | Approved static assets | Normal controlled storage
+Document | DR/Archive dependency
+01 Database & ERD | Schema, audit, archive jobs, transaction integrity
+02 API | Idempotency, restore-safe APIs, export/archive endpoints
+03 Go Backend | Transactions, workers, outbox, recovery orchestration
+04 Flutter | Offline SQLCipher/device recovery
+05 Offline Sync | Replay/reconciliation after outage
+06 Inventory | Stock movement/batch reconciliation
+07 Accounting & Khata | Financial recovery/reconciliation
+08 POS | Invoice/document-series recovery
+09 Hardware | Device failure/replacement
+10 Payment/UPI | Provider reconciliation after restore
+11 GST/Compliance | Compliance evidence and resubmission safety
+12 Security | Backup encryption/access/key recovery
+13 Docker/DevOps | Infrastructure/image recovery
+14 Testing/QA | Restore/DR test evidence
+15 UI/UX | Outage/offline/recovery states
+16 Reports/Dashboard | Post-recovery reporting/reconciliation

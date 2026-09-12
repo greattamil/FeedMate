@@ -1,0 +1,551 @@
+Andipatti Animal Feed System
+Document 13 — Complete Docker & DevOps / Deployment Architecture Specification v1.0
+Implementation-ready deployment, containerization, CI/CD, infrastructure, observability, backup, security, scaling and operational baseline for the complete Andipatti Animal Feed System. No sprint planning.
+Technology baseline: Flutter client • Go backend • PostgreSQL • optional Redis/queue • Cloudflare R2 • WebSocket • payment/compliance/messaging adapters • Docker
+1. Purpose, Scope, Objectives & Non-Goals
+1.1 Purpose
+Define a repeatable Docker-first deployment architecture so development, testing, staging and production environments can be built, operated, upgraded and recovered consistently.
+1.2 Scope
+Go API, WebSocket service, background workers and scheduled jobs.
+PostgreSQL authoritative database and migration process.
+Optional Redis/cache/queue layer.
+Reverse proxy/TLS edge and internal service networking.
+Cloudflare R2 object/archive storage.
+Observability: logs, metrics, traces, health checks and alerts.
+CI/CD, image registry, SBOM, vulnerability scanning, release signing and rollback.
+Backup, restore, disaster recovery, archival and operational runbooks.
+Flutter Android/iOS release pipeline and environment configuration.
+Local developer environment using Docker Compose.
+1.3 Objectives
+One reproducible containerized architecture from laptop to production.
+Least-privilege, non-root containers and private internal services.
+No production secrets baked into images or source control.
+Safe database migrations and rollback-aware releases.
+Independent scaling of API, WebSocket and workers.
+Observable and diagnosable production behavior.
+Automated security and quality gates before release.
+Fast recovery without sacrificing financial/inventory integrity.
+1.4 Non-Goals
+This document does not mandate one cloud provider, Kubernetes, or one reverse-proxy vendor.
+Exact hosting sizes are baseline recommendations and must be validated using production measurements.
+Legal/tax/payment provider requirements remain governed by their current authoritative specifications.
+2. Deployment Principles
+PostgreSQL is the authoritative transactional database.
+Docker is the packaging/runtime baseline for server-side components.
+Flutter is distributed as signed native mobile applications, not as a production container.
+API and workers share domain code but use separate runtime processes/containers.
+Database and Redis are never publicly exposed.
+All financial and inventory writes occur through transactional application services.
+Configuration is externalized; secrets are injected securely at runtime.
+Infrastructure is reproducible and preferably represented as version-controlled configuration.
+Every production deployment is traceable to an immutable release artifact.
+Backups are independent of the primary runtime environment.
+3. Target Logical Topology
+Recommended production model: use managed PostgreSQL where practical; keep the application services containerized. A single-host Docker deployment is suitable for smaller installations, while multi-node/container orchestration can be adopted when availability or scale requires it.
+4. Docker Compose Reference Architecture
+The repository should provide a production-like Compose baseline and a development Compose profile. Typical services are: edge, api, worker, scheduler, postgres (development/local only when managed DB is not used), redis (optional), migrations, and observability dependencies.
+Use named networks such as edge_net and backend_net.
+Only edge publishes public ports.
+API/worker/scheduler connect to backend_net.
+PostgreSQL and Redis have no host port publication in production.
+Use explicit healthchecks and dependency readiness rather than assuming container start order equals service readiness.
+Pin image versions; avoid floating latest tags in production.
+Use restart policies appropriate to the hosting platform.
+Use resource limits for every long-running service.
+5. Repository & DevOps Structure
+cmd/api — API entry point.
+cmd/worker — background worker entry point.
+cmd/scheduler — scheduled job entry point.
+migrations/ — versioned database migrations.
+deploy/docker/ — Dockerfiles and hardened runtime assets.
+deploy/compose/ — development/staging/production Compose overlays where used.
+deploy/infra/ — IaC such as Terraform/OpenTofu or provider-specific definitions.
+deploy/monitoring/ — dashboards, alerts and collectors.
+scripts/ — safe local/admin scripts.
+docs/runbooks/ — operational procedures.
+.github/workflows/ or equivalent CI definitions.
+6. Container Image Standards
+Use multi-stage builds: builder image → minimal runtime image.
+Run as a dedicated non-root UID/GID.
+Copy only the compiled binary and required CA certificates/configuration into the runtime image.
+Set a read-only filesystem where application behavior permits.
+Drop unnecessary Linux capabilities.
+Do not install compilers, package managers or debugging tools in production runtime images unless operationally justified.
+Pin base-image versions/digests for production releases.
+Generate SBOMs for every release image.
+Scan images for vulnerabilities before deployment.
+Sign images/artifacts where supported.
+Use labels for version, Git commit, build timestamp and source provenance.
+7. Runtime Security Baseline
+8. Environment Strategy
+Never copy production database dumps into developer environments without an approved masking process.
+Never reuse production provider credentials in staging.
+Configuration differences are explicit and version-controlled where safe.
+9. Configuration Management
+Use environment variables or mounted configuration for non-secret runtime configuration. Use a dedicated secret-management mechanism for credentials.
+10. Secrets Management
+Production secrets must be stored in a secret manager, encrypted CI/CD secret store, or equivalent protected facility.
+Secrets must not be stored in Git, Dockerfiles, Compose YAML committed to source, images or mobile binaries.
+Use separate credentials per environment and preferably per workload.
+Rotate credentials on schedule and immediately after suspected compromise.
+Record secret version/rotation metadata without logging secret material.
+Restrict who and which workload can retrieve each secret.
+Database, R2, payment, WhatsApp and compliance credentials are server-side only.
+11. Database Deployment Architecture
+11.1 Preferred Production Model
+Managed PostgreSQL is preferred when it provides automated backups, patching, encryption, private networking and reliable restore tooling.
+If PostgreSQL is containerized, use durable encrypted volumes, controlled host access, backup/WAL strategy, resource limits and tested recovery.
+Application runtime must not use a PostgreSQL superuser.
+Migration identity and application runtime identity must be separated.
+11.2 Database Network
+No public database listener.
+Permit connections only from API/worker/migration networks.
+Use TLS where supported/required.
+Restrict administrative access to approved private network/VPN.
+12. Migration Strategy
+Build an immutable release artifact containing the application version and migration set.
+Run pre-deployment compatibility checks.
+Acquire a migration lock so only one migration process runs.
+Apply forward-compatible schema changes first where rolling deployment is needed.
+Verify migration success and schema version.
+Start/roll application containers using the compatible release.
+Run post-deployment smoke checks.
+Never automatically destroy production data during a normal migration.
+Destructive schema changes require a separate reviewed operation, backup/recovery validation and compatibility analysis. Do not depend on application rollback to undo irreversible database changes.
+13. Release & Deployment Lifecycle
+Developer change is reviewed and merged into a protected branch.
+CI runs formatting, unit tests, integration tests, security checks and build validation.
+Container image and SBOM are generated.
+Image is vulnerability-scanned and, where required, signed.
+Staging deployment uses the same immutable image digest.
+Smoke, regression and integration checks run in staging.
+Production deployment is approved and uses the exact tested artifact.
+Migrations run safely before or during deployment according to compatibility plan.
+Health checks confirm API, DB, queue and integration readiness.
+Deployment metadata is recorded for audit and rollback.
+14. CI Pipeline
+15. CI/CD Security Gates
+No production secret detected in source or build artifacts.
+No critical vulnerability accepted automatically.
+High-risk vulnerabilities require explicit documented exception.
+RLS/authorization tests pass.
+Race detector/concurrency tests pass for financial workflows.
+Container runs with required security baseline.
+SBOM exists for the release.
+Artifact provenance is recorded.
+Database migration tests pass.
+Production deployment uses the same artifact digest tested in staging.
+16. Image Registry
+Private registry for production images.
+Separate push and pull credentials.
+CI may push; runtime hosts may pull only required repositories.
+Use immutable tags or digests for production.
+Enable registry vulnerability scanning where available.
+Retain releases according to rollback policy; remove unneeded artifacts securely.
+17. Reverse Proxy / Edge
+TLS 1.2+ or provider-approved current secure baseline.
+HTTP to HTTPS redirection or rejection.
+Forward only required headers.
+Apply request body/header/time limits.
+Rate-limit authentication and abusive endpoints.
+Protect WebSocket upgrade paths.
+Do not expose internal health/debug/admin endpoints publicly.
+Set security headers for any browser-based administration UI.
+Use trusted proxy configuration so client IP information cannot be spoofed.
+18. API, WebSocket & Worker Deployment
+API instances must be horizontally scalable.
+WebSocket connections must tolerate reconnects; clients can recover through REST/sync state.
+Workers use idempotent jobs and retry policies.
+Scheduler must use a distributed/advisory lock or single active deployment to prevent duplicate scheduled execution.
+19. Background Jobs & Queue Operations
+Jobs carry tenant context and correlation ID.
+Job payloads contain minimum necessary data.
+Retries use exponential backoff with jitter.
+Permanent failures go to a controlled dead-letter queue.
+Financial jobs are idempotent and reconcile before retrying uncertain external outcomes.
+Worker shutdown must finish or safely release in-flight work.
+Jobs have execution timeouts and maximum retry counts.
+Sensitive job data is never printed to logs.
+20. Redis Deployment
+Optional; PostgreSQL remains authoritative.
+Use only for cache, short-lived coordination or queue functionality explicitly designed for Redis.
+Never store irreplaceable financial truth solely in Redis.
+No public port.
+Authentication/ACLs where supported.
+Memory limits and eviction policy must be deliberate.
+Do not use unrestricted Redis commands from application code.
+21. Object Storage / Cloudflare R2
+Use private buckets/objects.
+Application receives R2 credentials only at runtime.
+Use scoped signed URLs for authorized downloads.
+Store files under server-generated tenant/resource paths.
+Apply lifecycle policies for temporary objects.
+Archive manifests include checksums and schema/version metadata.
+R2 is not the only backup copy.
+22. Observability Architecture
+Never log secrets, tokens, PINs, SQLCipher keys or full payment credentials.
+Use sampling for high-volume traces while preserving financial/security events.
+Keep clocks synchronized across infrastructure.
+23. Health Checks
+Health endpoints must not expose versions, credentials, database details or stack traces unnecessarily.
+24. Monitoring & Alert Baseline
+5xx rate and latency by endpoint.
+Authentication failures and rate-limit events.
+Authorization/RLS denial spikes.
+Database connection pool exhaustion.
+Slow queries and lock/deadlock rates.
+Worker queue depth and job retry/DLQ counts.
+Payment webhook failures/replay attempts.
+Compliance provider failures.
+R2 upload/download failures.
+Disk/memory/CPU/PID exhaustion.
+Container restart loops.
+Certificate/TLS expiry.
+Backup failure and restore-test failure.
+Unusual refund, discount, stock-adjustment or export activity.
+25. Performance & Capacity Baseline
+Capacity numbers must be finalized from observed workload. Do not hardcode arbitrary production limits without load testing.
+26. High Availability
+For higher availability, run multiple API instances behind a load balancer.
+Use managed PostgreSQL HA/failover where available.
+Use redundant edge/load-balancing infrastructure when required.
+Workers can scale horizontally; idempotency prevents duplicate side effects.
+WebSocket clients reconnect and rehydrate state from authoritative APIs.
+Do not claim zero downtime if a migration contains incompatible schema changes.
+27. Disaster Recovery Architecture
+28. Backup Strategy
+Automated PostgreSQL backups with encryption.
+Point-in-time recovery/WAL retention where supported and justified.
+Separate backup credentials from application credentials.
+At least one backup copy should be isolated from the primary runtime account/environment.
+Backup success is monitored; failures alert operators.
+Test restoration regularly.
+Backups must preserve tenant isolation and financial integrity.
+28.1 Recovery Objectives
+Define RPO and RTO explicitly for the deployment. Recommended starting policy: prioritize zero/near-zero loss of committed financial transactions where the database provider supports it, and establish an operational RTO appropriate to the shop's business hours. Exact values must be agreed before production.
+29. Restore Verification
+Restore into an isolated environment.
+Verify database checksum/integrity and migration compatibility.
+Run RLS and authorization tests.
+Verify financial and inventory reconciliation.
+Verify archive object checksums.
+Confirm external side effects are disabled in the restore environment.
+Run application smoke tests.
+Record restore-test result, duration and findings.
+30. Archive & Retention Deployment
+Archive jobs run as isolated worker processes with minimum permissions.
+Archive eligibility is policy-driven; age/payment status alone must not cause unsafe deletion.
+Generate manifest/checksum before finalizing archive.
+Keep restore metadata and object references.
+Deletion, if legally/business-approved, is a separate controlled operation.
+Archive credentials are separate from ordinary API credentials.
+31. Flutter Release / DevOps
+Flutter Android/iOS builds run in controlled CI.
+Use separate development, staging and production configuration.
+Production builds are signed with protected Android/iOS signing credentials.
+Provider secrets are never embedded in the app.
+API base URLs and public configuration may be injected at build time but must not contain privileged secrets.
+Release versions map to backend compatibility ranges.
+Crash reporting must redact sensitive data.
+Test offline mode, sync, printer, scale and payment flows on release candidates.
+32. Android/iOS Release Controls
+33. Infrastructure as Code
+Represent production infrastructure as code where practical.
+Review infrastructure changes like application changes.
+Scan IaC for public exposure, weak security groups, secret leakage and over-privilege.
+Separate state storage from application hosts and protect state files.
+Never commit secret values into IaC state/configuration unless the mechanism encrypts and controls them appropriately.
+Use least-privilege deployment identities.
+34. Network Segmentation
+Public edge network: only reverse proxy/load balancer.
+Application network: API/WebSocket/worker/scheduler.
+Data network: PostgreSQL/Redis.
+Management network: CI/admin/monitoring access.
+External provider traffic exits through controlled egress where feasible.
+Firewall/security groups deny by default.
+35. TLS & Certificates
+Use managed certificates or automated renewal.
+Monitor expiry.
+Do not disable certificate verification in production.
+For outbound providers, validate certificates normally.
+If certificate pinning is adopted in mobile, design pin rotation and emergency recovery before enabling it.
+36. Security Testing in DevOps
+37. Database & Application Concurrency Deployment Tests
+Concurrent invoice finalization cannot duplicate invoice numbers.
+Concurrent stock allocation cannot oversell authoritative stock.
+Concurrent payment webhook delivery is idempotent.
+Concurrent refund requests create at most one intended refund.
+Concurrent owner approvals cannot approve an invalid/stale action.
+Scheduler cannot execute the same tenant job twice unintentionally.
+38. Deployment Compatibility & Versioning
+Backend API versions follow the API specification.
+Database schema version is tracked.
+Flutter app declares supported backend compatibility.
+During rolling deployments, old and new API instances must tolerate the deployed schema.
+Breaking changes require explicit versioning/migration strategy.
+Feature flags allow safe activation where a feature depends on coordinated mobile/backend release.
+39. Rollback Strategy
+39.1 Application Rollback
+Stop promotion of the faulty release.
+Return traffic to the last known-good image.
+Confirm health and financial/inventory consistency.
+Disable affected feature flag if available.
+Preserve logs/audit evidence for investigation.
+39.2 Database Rollback
+Prefer forward-compatible fixes. Never automatically downgrade a production schema if that could destroy data. For destructive or incompatible changes, restore/point-in-time recovery only through a reviewed disaster-recovery procedure.
+40. Deployment Runbook
+Verify release artifact digest and security gates.
+Verify backup freshness.
+Verify migration compatibility.
+Confirm provider credentials and certificates are healthy.
+Deploy migrations using controlled identity.
+Deploy API/WebSocket/worker images.
+Run readiness checks.
+Run smoke tests: login, product lookup, invoice draft, safe test payment integration, sync health.
+Monitor errors, latency, DB locks, queue and security events.
+Record release result.
+41. Incident Runbooks
+Production container compromise: isolate workload, revoke credentials, deploy clean image, investigate provenance.
+Database credential compromise: revoke/rotate, audit access, validate RLS and integrity.
+Secret leak in Git: revoke immediately, rotate, purge from active distribution, audit usage.
+Payment credential compromise: disable/rotate provider credentials and reconcile payments.
+R2 exposure: revoke access, rotate credentials, inspect object ACLs/logs, assess affected data.
+Cross-tenant incident: contain immediately, preserve evidence, revoke sessions if necessary, assess exposure and notify according to obligations.
+Host loss: provision clean infrastructure, restore from trusted artifacts/backups and validate.
+42. Local Development with Docker
+One command should provision development dependencies where practical.
+Use seeded synthetic tenant/product/customer data.
+Use local PostgreSQL/Redis containers only for development/test.
+Never use production secrets or production customer data.
+Provide migration and reset commands that are safe for local environments.
+Provide health/status commands for developers.
+43. Docker Compose Development Baseline
+44. External Integrations & Egress
+Payment provider, WhatsApp, GST/e-invoice/e-way and R2 outbound access should be explicit.
+Provider DNS/HTTPS failures must not corrupt financial state.
+Use timeouts, retries with backoff and circuit-breaking where appropriate.
+Do not retry non-idempotent external operations blindly.
+Persist provider correlation IDs for reconciliation.
+45. Operational Access
+No shared production administrator accounts.
+Use individual identities and MFA where available.
+Production shell/database access is exceptional and audited.
+CI deployment identities cannot be used as human admin identities.
+Break-glass access is time-limited and rotated after use.
+Access reviews are performed periodically.
+46. Resource Limits & DoS Protection
+Set request body limits and upload limits.
+Set API concurrency/timeouts.
+Limit WebSocket connections and heartbeat resources.
+Bound worker concurrency and job duration.
+Set container CPU/memory/PID limits.
+Protect expensive reports/exports with asynchronous processing.
+Rate-limit login, search abuse, file upload, exports and webhooks appropriately.
+47. Security Headers / Browser Surface
+For browser administration: HSTS, appropriate Content-Security-Policy, X-Content-Type-Options, Referrer-Policy and frame restrictions as applicable.
+Do not expose internal admin/debug routes through the public API edge.
+Cookie-based sessions, if introduced, require Secure, HttpOnly and appropriate SameSite settings plus CSRF protection.
+48. Deployment Acceptance Criteria
+All server components build as reproducible/pinned Docker images.
+Production application containers run non-root.
+Database/Redis are private and not publicly exposed.
+No production secret exists in repository or image.
+CI security gates pass.
+SBOM is generated and retained.
+Production artifact is immutable and traceable.
+Migrations are tested and compatible with deployment strategy.
+Backup and restore procedures have passed a restore test.
+Health/readiness checks work without exposing sensitive information.
+API/WebSocket/worker scale independently.
+Logs/metrics/audit events are available and redacted.
+RLS and authorization tests pass after deployment.
+Rollback/forward-fix procedure is documented.
+Payment, GST, WhatsApp and R2 credentials are isolated and protected.
+Flutter production builds are signed and use production-safe configuration.
+49. Non-Negotiable DevOps Rules
+Never expose PostgreSQL or Redis directly to the public internet.
+Never run production application containers as root.
+Never bake secrets into Docker images or Flutter binaries.
+Never use floating production image tags such as latest.
+Never deploy an artifact that did not pass required security gates.
+Never treat a successful container start as proof of application readiness.
+Never downgrade production schema automatically.
+Never use Redis as the authoritative financial ledger.
+Never restore production data into test without approved protection/masking.
+Never allow CI/CD credentials broader access than required.
+Never disable TLS/certificate verification in production.
+Never skip backup verification for high-risk production changes.
+50. Mapping to Documents 01–12
+51. Production Checklist
+Domain/DNS and TLS configured.
+Reverse proxy configured with safe headers and limits.
+API containers deployed with non-root user.
+Worker and scheduler deployed with least privilege.
+PostgreSQL configured with private access, RLS and backups.
+Redis private and authenticated if used.
+R2 private with scoped credentials.
+Payment/GST/WhatsApp credentials injected securely.
+Secret rotation procedure tested.
+Image scanning/SBOM/signing enabled as required.
+CI/CD protected and audited.
+Monitoring/alerts configured.
+Backup restore test completed.
+DR procedure documented.
+Incident runbooks available.
+Production smoke tests automated.
+Flutter release signing configured.
+No debug/test credentials or endpoints exposed.
+Capacity/load baseline documented.
+Release/rollback procedure validated.
+52. Definition of Done — Docker & DevOps
+A clean environment can build and start the required server components from version-controlled configuration.
+Production images are pinned, scanned, SBOM-backed and non-root.
+Secrets are externalized and access-controlled.
+Database migration and rollback/forward-fix procedures are validated.
+CI/CD automatically enforces required quality/security gates.
+Production deployment is traceable to a tested immutable artifact.
+Observability and alerts cover API, DB, workers, providers, containers and backups.
+Backup restoration has been demonstrated.
+DR and incident runbooks are executable.
+Flutter release pipeline produces signed production builds.
+The deployment satisfies Documents 01–12 without weakening their financial, inventory, tenant-isolation or security invariants.
+53. Recommended Initial Production Topology
+For a small-to-medium animal-feed retail operation, the practical starting point is: managed PostgreSQL + one or more Go API containers + one worker container + one scheduler instance + optional Redis + reverse proxy/load balancer + private R2 + centralized logs/metrics + automated encrypted backups. As usage grows, API/WebSocket/worker replicas can scale independently without redesigning the domain architecture.
+For a single-server installation, use Docker Compose with encrypted host storage and an independent backup destination. Do not place database backups only on the same server.
+54. Final Architecture Summary
+The deployment model is Docker-first, secure-by-default and database-authoritative: Flutter ships as signed native applications; the public edge terminates secure traffic; Go API/WebSocket/worker/scheduler services run as least-privilege containers; PostgreSQL remains the authoritative ledger with RLS; Redis is optional and non-authoritative; R2 is private object/archive storage; CI/CD produces scanned, SBOM-backed, traceable immutable artifacts; secrets are injected at runtime; backups and restore tests protect recovery; and observability, incident response and rollback controls protect continuous operation.
+55. Important Production Note
+Container sizes, RPO/RTO, autoscaling thresholds, database sizing, retention periods, provider limits and exact cloud/network controls must be finalized from measured workload and current provider capabilities. Security and legal requirements in Document 12 remain mandatory. Production changes must not weaken tenant isolation, financial integrity, payment verification, inventory integrity or auditability.
+Component | Container/Service | Exposure | Purpose
+Edge | Reverse proxy / ingress | Public 443 | TLS termination, routing, limits
+API | Go API | Private behind edge | REST business APIs
+WebSocket | Go WS service or API | Private behind edge | Real-time payment/device events
+Worker | Go worker | Internal only | Async jobs/outbox/reconciliation
+Scheduler | Go scheduler/cron | Internal only | Scheduled jobs
+PostgreSQL | Managed or containerized DB | Private | Authoritative data
+Redis | Optional Redis | Private | Cache/queue/coordination
+R2 | External object storage | Outbound HTTPS | Files/archive
+Observability | Metrics/log/trace stack | Private | Operations/security
+Registry | Container registry | CI/private | Image distribution
+Control | Required baseline
+User | Non-root runtime user
+Filesystem | Read-only where practical
+Capabilities | Drop all; add only required capabilities
+Privileges | No privileged containers
+Docker socket | Never mount into application containers
+Secrets | Runtime injection only
+Network | Private backend networks
+Ports | Expose only required ports
+Resources | CPU/memory/PID limits
+Healthcheck | Non-sensitive liveness/readiness
+Restart | Automatic restart with controlled policy
+Logging | Structured and bounded
+Environment | Purpose | Data | Credentials
+Local | Developer workstation | Synthetic/local | Developer-only
+CI | Automated build/test | Ephemeral fixtures | Short-lived CI credentials
+Staging | Production-like validation | Synthetic/masked | Separate staging secrets
+Production | Real business operations | Real tenant data | Production-only secrets
+Configuration | Example policy
+APP_ENV | local/staging/production
+HTTP_ADDR | :8080
+DATABASE_URL | Injected secret/config; never committed
+REDIS_URL | Injected when enabled
+R2_* | Credentials injected at runtime
+PAYMENT_* | Provider secrets injected at runtime
+WHATSAPP_* | Provider secrets injected at runtime
+GST_* | Compliance credentials injected at runtime
+LOG_LEVEL | Controlled by environment
+FEATURE_* | Explicit feature flags
+Stage | Required checks
+Source | Formatting, linting, static analysis
+Tests | Unit + integration + race/concurrency tests
+Security | SAST, dependency, secret, IaC scans
+Build | Reproducible Go binary and container
+Container | Image scan + non-root/security configuration checks
+SBOM | Generate and retain SBOM
+Artifact | Sign/provenance metadata where supported
+Migration | Schema validation and migration tests
+Staging | Deploy + smoke/regression tests
+Release | Approval + immutable artifact promotion
+Service | Scale independently? | State
+API | Yes | Stateless except DB/cache
+WebSocket | Yes | Connection state in process; authoritative events via backend
+Worker | Yes | Stateless job consumers; idempotent
+Scheduler | Usually one active leader | Schedule coordination/lock
+Migration | One controlled process | Ephemeral
+Signal | Minimum fields/controls
+Logs | timestamp, level, service, request_id, tenant-safe reference, event
+Metrics | request rate, latency, errors, DB pool, queue depth, job failures
+Traces | request correlation across API/DB/provider where safe
+Audit | actor, device, action, resource, result, reason, timestamp
+Security | auth failures, authorization failures, webhook failures, device events
+Alerts | thresholds + anomaly indicators + ownership
+Check | Meaning
+/health/live | Process is alive
+/health/ready | Can serve traffic safely
+DB readiness | Database connection usable
+Redis readiness | Only required when feature depends on Redis
+Provider readiness | Do not make third-party availability block basic API readiness unless strictly required
+Area | Initial target/guardrail
+API | Stateless; horizontal scaling supported
+DB pool | Explicit max/min; load tested
+Worker | Bounded concurrency per job class
+Uploads | Strict size limits
+Exports | Async jobs; streaming/chunking where appropriate
+WebSocket | Connection limits and heartbeat
+Redis | Bounded memory
+Containers | CPU/memory limits
+Backups | Validated against recovery-point objective
+Scenario | Recovery approach
+API container failure | Restart/reschedule; stateless API
+Worker failure | Retry/requeue idempotent jobs
+Redis loss | Rebuild cache; recover queue only if queue data is not otherwise authoritative
+PostgreSQL failure | Provider failover or restore from trusted backup/WAL
+R2 outage | Retry later; preserve local/DB references; do not corrupt financial state
+Host loss | Provision clean host and redeploy immutable artifacts
+Region/site failure | Restore to secondary environment according to DR plan
+Control | Requirement
+Android signing | Protected keystore/signing service
+iOS signing | Protected certificates/profiles or signing service
+Debug mode | Disabled in production
+Logs | No sensitive production logs
+Permissions | Minimum required permissions
+Deep links | Allowlisted and validated
+Secure storage | Platform keychain/keystore
+Versioning | Immutable release version/build number
+Rollback | Previous compatible mobile build retained where practical
+Test | When
+Unit/security tests | Every change
+RLS tests | Every relevant DB/application change
+SAST | Every CI build
+Dependency scan | Every build + scheduled refresh
+Secret scan | Every commit/PR
+Container scan | Every release image
+IaC scan | Infrastructure changes
+DAST/API scan | Staging/release validation
+Penetration test | Before production + periodic/release-triggered
+Load test | Before capacity-sensitive releases
+Backup restore test | Scheduled operational exercise
+Service | Local purpose
+api | Go API hot/rebuild runtime
+worker | Background jobs
+scheduler | Scheduled jobs
+postgres | Local authoritative DB
+redis | Optional cache/queue
+edge | Optional local TLS/routing
+mail/test stub | Optional notification testing
+payment simulator | Optional provider webhook simulation
+observability | Optional local metrics/log/tracing
+Document | Deployment/DevOps dependency
+01 Database & ERD | Migrations, PostgreSQL/RLS, backup, partitioning
+02 API Specification | API edge, health, rate limits, WSS, headers
+03 Go Backend | API/worker/scheduler images, configuration, jobs, observability
+04 Flutter | Signed mobile CI/CD and environment configuration
+05 Offline Sync | Device/API compatibility, replay protection, reconnect behavior
+06 Inventory & Batch | DB transaction integrity and load/concurrency testing
+07 Accounting & Khata | Backup/restore, migration safety and audit preservation
+08 POS & Billing | Release smoke tests and payment/hardware integration
+09 Hardware | Device simulator/testing and edge-independent operation
+10 Payment & UPI | Provider egress, webhook routing, secrets, reconciliation jobs
+11 GST & Compliance | Provider credentials, async jobs, exports and retention
+12 Security | Container, network, secrets, CI/CD, access and incident controls

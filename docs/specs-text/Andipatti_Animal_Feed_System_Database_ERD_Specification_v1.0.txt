@@ -1,0 +1,623 @@
+ANDIPATTI ANIMAL FEED SYSTEM
+COMPLETE DATABASE & ERD SPECIFICATION
+Version 1.0 • Implementation Baseline • PostgreSQL + Flutter SQLCipher Offline Store
+This document is the database-level companion to the Final Master PRD v1.2. It is intentionally exhaustive and defines the logical model, physical PostgreSQL model, tenant isolation, accounting/inventory ledgers, offline synchronization, integrations, auditability, indexing, constraints, partitioning, retention and migration rules.
+Regulatory values such as tax rates, HSN classification, statutory thresholds and provider-specific fields are configuration-driven and must be validated against current applicable rules before production.
+1. Database Design Objectives
+PostgreSQL is the authoritative transactional source of truth.
+Every tenant-owned row is tenant-scoped and protected by application authorization plus PostgreSQL Row-Level Security (RLS).
+Financial and inventory events are append-oriented and auditable; derived balances are projections/caches.
+Money uses NUMERIC(12,2) unless a wider approved precision is required.
+Weight and inventory quantities use NUMERIC(12,3); UOM factors use NUMERIC(12,6).
+All authoritative financial timestamps are server-generated and timezone-aware.
+Offline transactions use UUIDs, device identity, local sequence and idempotency keys.
+Historical transactions retain snapshots of the master data needed to reproduce the original result.
+Referenced master records are deactivated rather than physically deleted.
+Database migrations are version-controlled and tested.
+2. Technology Baseline
+3. Naming Conventions
+Schema: public unless a deliberate domain schema split is approved.
+Table names: plural snake_case.
+Column names: singular snake_case.
+Primary key: id UUID.
+Foreign keys: referenced_table_singular_id.
+Tenant key: tenant_id.
+Created/updated: created_at, updated_at.
+Actor fields: created_by_user_id, updated_by_user_id where applicable.
+External references: provider_name + provider_reference or a dedicated integration reference table.
+Boolean fields use is_/has_ where appropriate.
+Status columns use controlled values validated by CHECK constraints or PostgreSQL enum only when migration stability is acceptable.
+4. Common Columns
+5. Entity Catalogue
+Tenant & configuration: tenants, tenant_settings, financial_years, document_series, tenant_features.
+Identity: users, roles, permissions, role_permissions, user_roles, devices, device_sessions.
+Product: categories, brands, products, product_barcodes, product_aliases, uoms, uom_conversions, product_uoms, price_lists, price_list_items, tax_profiles.
+Customer: customer_tiers, customers, customer_addresses, customer_credit_profiles.
+Supplier: suppliers, supplier_contacts, supplier_bank_accounts.
+Locations: inventory_locations.
+Procurement: purchase_orders, purchase_order_lines, goods_receipts, goods_receipt_lines.
+Inventory: batches, stock_movements, stock_balances, stock_counts, stock_count_lines, stock_adjustments.
+Sales: sales_invoices, sales_invoice_lines, invoice_tax_lines, invoice_batch_allocations, sales_returns, sales_return_lines.
+Payments: payment_intents, payments, payment_allocations, payment_webhook_events, refunds, refund_allocations.
+Ledgers: customer_ledger_entries, supplier_ledger_entries, journal_entries, journal_lines.
+Contra: contra_transactions, contra_lines.
+Cash: cash_sessions, cash_movements, eod_sessions.
+Notifications: message_templates, notification_jobs, message_deliveries.
+Sync: sync_transactions, sync_conflicts, sync_cursors.
+Compliance: compliance_documents, compliance_requests, compliance_responses, export_jobs.
+Archive: archive_jobs, archive_manifests, archive_objects, archive_restore_tests.
+Audit: audit_logs.
+Operational: attachments, integration_events, system_jobs.
+6. Logical ERD — Core
+Tenant
+├── Users / Roles / Devices
+├── Products ── UOM / Tax / Price / Batches
+├── Customers ── Credit Profile ── Customer Ledger
+├── Suppliers ── Supplier Ledger
+├── Locations
+├── Purchase Orders ── GRNs ── Batches ── Stock Movements
+├── Sales Invoices ── Lines ── Taxes ── Batch Allocations
+│                    ├── Payments / Allocations
+│                    └── Customer Ledger / Journal
+├── Returns ── Refunds / Stock Movements
+├── Contra Transactions ── Inventory + Customer Ledger
+├── EOD / Cash Movements
+├── Sync Transactions / Conflicts
+├── Compliance / Exports
+└── Audit / Archive
+7. Tenant & Configuration Tables
+7.1 tenants
+7.2 tenant_settings
+Key/value or strongly typed configuration may be used, but security-critical and frequently queried values should have typed columns/tables.
+Settings include invoice numbering, financial year, tax behavior, reorder policy, expiry thresholds, Khata grace period, reminder schedules, tare threshold, offline policy, printer/scale policy, payment configuration references and archive retention.
+Secrets must never be stored in plaintext here. Store secret references only.
+7.3 financial_years
+7.4 document_series
+Separate series per document type where required: INVOICE, CREDIT_NOTE, DEBIT_NOTE, PO, GRN, RECEIPT, RETURN, CONTRA.
+Fields: id, tenant_id, financial_year_id, document_type, prefix, next_number, padding, device_allocation_mode, active, created_at, updated_at.
+Unique: tenant_id + financial_year_id + document_type + prefix.
+Number allocation must be transactional and collision-safe.
+8. Identity, RBAC & Devices
+8.1 users
+id, tenant_id, username/email/phone identifier, password_hash, display_name, status, last_login_at, failed_login_count, locked_until, created_at, updated_at.
+Never store passwords or override PINs in plaintext.
+8.2 roles / permissions / mappings
+roles: id, tenant_id, name, description, is_system_role.
+permissions: id, code, description.
+role_permissions: role_id, permission_id.
+user_roles: user_id, role_id.
+System permission codes include invoice.finalize, invoice.cancel, payment.refund, stock.adjust, credit.override, contra.approve, eod.reopen, tax.configure, archive.purge, tenant.admin.
+8.3 devices
+id, tenant_id, device_uuid, display_name, platform, app_version, status, last_seen_at, last_sync_at, registered_at, deactivated_at, security_state.
+Unique tenant_id + device_uuid.
+Device deactivation must prevent future sync.
+9. Product & UOM Model
+9.1 products
+9.2 product_barcodes
+id, tenant_id, product_id, barcode, barcode_type, is_primary, active, created_at.
+Unique tenant_id + barcode.
+9.3 product_aliases
+id, tenant_id, product_id, alias_text, normalized_text, language_code, script_code, alias_type, region_code, priority, active, created_at, updated_at.
+Supports colloquial Tamil, transliteration, phonetic shorthand, English aliases and shop-specific terms.
+9.4 uoms / uom_conversions / product_uoms
+uoms: id, tenant_id/global, code, name, symbol, dimension, decimal_scale, active.
+uom_conversions: from_uom_id, to_uom_id, factor NUMERIC(12,6), effective dates, product-specific flag, product_id nullable.
+product_uoms: product_id, uom_id, purchase/sale/inventory flags, pack_size, standard_weight_kg NUMERIC(12,3), conversion_to_base NUMERIC(12,6).
+Never change historical conversion semantics; new effective-dated conversion rows are created.
+9.5 categories / brands
+Standard master entities with id, tenant_id, name, local_name, active, timestamps.
+10. Tax & Pricing
+10.1 tax_profiles
+id, tenant_id, code, description, supply_type, hsn_applicability, cgst_rate NUMERIC(7,4), sgst_rate NUMERIC(7,4), igst_rate NUMERIC(7,4), cess_rate, exemption_type, effective_from, effective_to, active.
+Tax profile is configuration and must be approved before use.
+10.2 price_lists / price_list_items
+Price list: id, tenant_id, name, customer_tier_id nullable, currency_code, effective dates, priority, active.
+Item: price_list_id, product_id, uom_id, unit_price NUMERIC(12,2), minimum_quantity, discount_type/value, effective dates.
+Precedence must be deterministic: customer-specific > tier > default, subject to product/tenant rules.
+10.3 customer_tiers
+id, tenant_id, code, name, default_discount_type/value, credit_allowed, priority, active.
+11. Customer & Khata
+11.1 customers
+id, tenant_id, customer_code, name, local_name, phone, whatsapp_phone, email, gstin nullable, customer_type, tier_id, status, notes, created_at, updated_at.
+Phone/WhatsApp fields require appropriate privacy/access controls.
+11.2 customer_credit_profiles
+customer_id PK/FK, tenant_id, credit_limit NUMERIC(12,2), payment_terms_days, grace_days, risk_status, offline_credit_limit, override_required_above, effective dates, updated_by.
+Available credit is derived from posted receivables and approved credit rules, not a manually editable balance.
+11.3 customer_addresses
+id, tenant_id, customer_id, address type, address fields, state_code, postal_code, is_default.
+11.4 customer_ledger_entries
+id, tenant_id, customer_id, entry_date, document_type, document_id, debit NUMERIC(12,2), credit NUMERIC(12,2), running_balance optional projection, currency_code, description, reversal_of_id, created_at.
+Ledger rows are append-oriented. Reversal creates a compensating entry.
+Customer balance = sum(debits) - sum(credits) over posted entries, with performance indexes/materialized balance allowed.
+12. Supplier & Payables
+12.1 suppliers
+id, tenant_id, supplier_code, legal_name, trade_name, gstin, phone, email, address, payment_terms_days, credit_limit, status, timestamps.
+12.2 supplier_contacts / supplier_bank_accounts
+Contacts and bank/settlement details are permission-restricted.
+Store only required banking data; encrypt sensitive fields where applicable.
+12.3 supplier_ledger_entries
+Same append-oriented pattern as customer ledger: purchases/payables are debits/credits according to accounting convention; receipts/payments reverse the payable balance.
+13. Inventory Locations
+inventory_locations: id, tenant_id, code, name, location_type (SHOP/GODOWN/TRANSIT/QUARANTINE/RETURN), active.
+Unique tenant_id + code.
+14. Procurement
+14.1 purchase_orders
+id, tenant_id, financial_year_id, po_number, supplier_id, status, order_date, expected_date, currency_code, subtotal, tax_total, grand_total, notes, approved_by, approved_at, created_by, timestamps.
+14.2 purchase_order_lines
+id, tenant_id, purchase_order_id, line_no, product_id, uom_id, ordered_qty NUMERIC(12,3), unit_cost NUMERIC(12,2), discount, tax_profile_id, expected_tax, line_total, received_qty, status.
+14.3 goods_receipts / goods_receipt_lines
+GRN header: id, tenant_id, financial_year_id, grn_number, supplier_id, purchase_order_id nullable, supplier_document_no, received_at, vehicle_no, receiver_user_id, status, gross_weight_kg, tare_weight_kg, net_weight_kg, tare_method, tare_threshold_pct, override fields.
+Line: product, batch, location, received_qty, received_uom, gross_weight, tare_weight, net_weight, unit_cost, tax profile, quality_status, accepted/rejected quantities.
+Tare threshold must be checked before posting. Override requires permission and audit.
+15. Batches
+batches: id, tenant_id, product_id, supplier_id, grn_line_id, batch_code, manufacture_date, expiry_date, received_date, received_qty, received_uom_id, unit_cost, location_id, quality_status, status, created_at, updated_at.
+Unique tenant_id + product_id + batch_code where batch codes are supplier-provided; duplicate handling must support legitimate repeated supplier batch codes only with a documented rule.
+Batch status: ACTIVE, NEAR_EXPIRY, EXPIRED, QUARANTINED, DEPLETED, CLOSED.
+Batch availability must exclude expired/quarantined/blocked quantities. FEFO can be enabled as a tenant/product policy; FIFO remains supported.
+16. Stock Ledger
+16.1 stock_movements
+16.2 stock_balances
+Projection/cache keyed by tenant_id + product_id + batch_id + location_id + uom_id.
+May contain on_hand, reserved, available, damaged, quarantine quantities.
+Must be reconcilable to stock_movements; never treat a manually edited balance as authoritative.
+16.3 stock_counts / stock_count_lines
+Count session header: location, started_at, status, counter, approver.
+Line: product, batch, expected_qty, counted_qty, variance_qty, variance_value, reason.
+Posting creates stock_adjustment/stock_movement events; it does not overwrite balances.
+17. Sales & POS
+17.1 sales_invoices
+17.2 sales_invoice_lines
+id, tenant_id, invoice_id, line_no, product_id, product_name_snapshot, sku_snapshot, hsn_snapshot, uom_id, uom_code_snapshot, quantity NUMERIC(12,3), unit_price NUMERIC(12,2), discount, taxable_value, tax_profile_snapshot JSONB or normalized snapshot fields, tax_total, line_total.
+Snapshot fields make historical reproduction possible.
+17.3 invoice_tax_lines
+id, tenant_id, invoice_id, invoice_line_id nullable, tax_type, rate NUMERIC(7,4), taxable_value, tax_amount, jurisdiction/state codes.
+Supports multiple tax treatments in one invoice.
+17.4 invoice_batch_allocations
+id, tenant_id, invoice_line_id, batch_id, quantity NUMERIC(12,3), uom_id, unit_cost, cost_value.
+This is the traceability link from sale to physical batch.
+18. Sales Returns
+sales_returns: id, tenant_id, return_number, original_invoice_id, customer_id, return_date, reason, status, subtotal, tax, total, refund_status, created_by.
+sales_return_lines: original_line_id, product, batch, quantity, uom, condition_status, restock_location, refund_amount.
+Posting return creates stock and financial reversal events.
+19. Payments
+19.1 payment_intents
+id, tenant_id, invoice_id nullable, customer_id nullable, provider, provider_order_reference, amount, currency, status, expires_at, idempotency_key, created_at.
+19.2 payments / payment_allocations
+payments: id, tenant_id, payment_intent_id, provider, provider_payment_id, method, amount, status, received_at, settlement_status, raw_reference metadata.
+payment_allocations: payment_id, invoice_id/customer ledger document, allocated_amount.
+One payment may allocate to multiple invoices if business rules permit.
+19.3 payment_webhook_events
+id, tenant_id nullable until safely resolved, provider, event_id, signature_verified, received_at, event_type, payload_hash, payload JSONB encrypted/restricted as appropriate, processing_status, processed_at, error_code.
+Unique provider + event_id.
+Never trust client-reported payment success.
+19.4 refunds
+id, tenant_id, payment_id, return_id nullable, provider_refund_id, amount, status, reason, requested_by, approved_by, timestamps.
+20. Multi-Tender
+Tender lines may be normalized as payment/tender records linked to the invoice. Supported method codes include CASH, UPI, BANK, CREDIT, OTHER_CONFIGURED. A database constraint or posting validation must guarantee sum(tender_amounts) = invoice.grand_total. Credit tender posts receivable; non-credit tenders post settlement accounts.
+21. Contra / Buy-Back
+contra_transactions: id, tenant_id, contra_number, customer_id, date, status, total_value, approval fields, source/reference.
+contra_lines: product_id, batch_id nullable, quantity, uom, valuation_unit_price, value, quality_status, location.
+Posting creates inventory receipt + customer receivable reduction + accounting journal entries as configured.
+Contra reversal creates compensating inventory and financial events.
+22. Accounting Journal
+22.1 journal_entries
+id, tenant_id, financial_year_id, journal_number, entry_date, source_type, source_id, description, status, posted_at, posted_by, reversal_of_id.
+22.2 journal_lines
+id, tenant_id, journal_entry_id, account_code/account_id, debit NUMERIC(12,2), credit NUMERIC(12,2), customer_id nullable, supplier_id nullable, product/batch references nullable, description.
+Constraint: debit >= 0, credit >= 0, and not both positive. Posting rule: sum(debit)=sum(credit).
+A chart_of_accounts table may be added if the system owns accounting configuration. If an external accounting package remains authoritative, the journal model still records the system's operational accounting events for reconciliation.
+23. Cash & EOD
+23.1 cash_sessions
+id, tenant_id, device_id/location_id, business_date, opening_cash, opened_by, opened_at, status.
+23.2 cash_movements
+id, tenant_id, cash_session_id, movement_type (SALE/REFUND/PAYOUT/EXPENSE/DEPOSIT/WITHDRAWAL/ADJUSTMENT), source_id, amount, direction, reason, user, timestamp.
+23.3 eod_sessions
+id, tenant_id, business_date, opening_cash, cash_sales, cash_refunds, cash_payouts, expected_cash, actual_cash, variance, variance_reason, status, closed_by, timestamps.
+EOD close should lock the business date against unauthorized edits.
+24. Notifications & WhatsApp
+message_templates: id, tenant_id, code, language_code, version, body_template, purpose, active.
+notification_jobs: id, tenant_id, customer_id nullable, template_id, scheduled_at, status, dedupe_key, payload.
+message_deliveries: id, tenant_id, notification_job_id, provider, provider_message_id, status, sent_at, delivered_at, read_at, failed_at, error_code.
+Collection settings include expected cycle date, reminder lead days, grace_period_days and pause dates.
+25. Offline Synchronization
+25.1 sync_transactions
+id, tenant_id, device_id, client_transaction_id, local_sequence, entity_type, operation_type, payload_version, payload_hash, created_at_device, received_at_server, status, authoritative_entity_id, error_code, retry_count.
+Unique tenant_id + device_id + client_transaction_id.
+25.2 sync_conflicts
+id, tenant_id, sync_transaction_id, entity_type, entity_id, conflict_type, local_payload, server_state_reference, resolution, resolved_by, resolved_at.
+Financial conflicts are never auto-resolved by last-write-wins.
+25.3 sync_cursors
+device_id, entity/domain, last_server_cursor, last_ack_sequence, updated_at.
+25.4 Offline transaction rules
+Write transaction locally in SQLCipher.
+Assign UUID client_transaction_id and monotonic local_sequence.
+Hash/integrity-protect the envelope.
+Upload with idempotency key.
+Server validates tenant/device/auth/business rules.
+Server atomically posts the transaction or returns a deterministic conflict/error.
+Client records authoritative IDs/result.
+Retries return the original result for duplicates.
+Rejected transactions remain visible with actionable resolution status.
+26. Audit Logs
+audit_logs: id, tenant_id, actor_user_id nullable, actor_device_id nullable, action_code, entity_type, entity_id, request_id/correlation_id, ip_address where legally/operationally appropriate, user_agent/device metadata, before_json, after_json, reason, created_at.
+Do not place secrets, passwords, access tokens or full payment credentials in audit payloads.
+Audit records are append-only to application roles.
+27. Attachments & Documents
+attachments: id, tenant_id, entity_type, entity_id, object_provider, object_key, file_name, mime_type, size_bytes, checksum, encrypted, created_by, created_at.
+Actual document bytes should live in controlled object storage rather than bloating transactional tables.
+Examples: PO PDFs, supplier invoices, compliance documents, exported reports, archive manifests.
+28. Compliance & Exports
+compliance_requests: id, tenant_id, document_type, source_document_id, provider, request_reference, request_payload_hash, status, submitted_at, completed_at.
+compliance_responses: request_id, response_code, status, provider_reference, response_metadata, received_at.
+compliance_documents: document ID, type, status, source, generated object reference, checksum.
+export_jobs: id, tenant_id, export_type, date_from, date_to, filters JSONB, requested_by, status, object reference, checksum, created_at.
+Provider-specific payloads should be versioned and stored/referenced safely. Do not make statutory logic dependent on a single provider's response shape.
+29. Archive Model
+29.1 archive_jobs
+id, tenant_id, financial_year_id, cutoff_date, policy_version, status, started_at, completed_at, initiated_by, row_count, byte_count, error.
+29.2 archive_manifests / archive_objects
+Manifest contains schema version, tenant, FY, date ranges, table counts, checksum list, generated_at, tool/version and restore metadata.
+Objects contain bucket/provider, object_key, checksum, encryption metadata, size, status.
+A successful archive must be verified before any retention-based purge.
+29.3 archive_restore_tests
+id, tenant_id nullable, archive_manifest_id, test_date, restored_environment, checksum_verified, row_counts_verified, sample_records_verified, result, tester, notes.
+30. System Jobs & Integration Events
+system_jobs: id, tenant_id nullable, job_type, schedule_key, status, started_at, completed_at, retry_count, error.
+integration_events: id, tenant_id, event_type, aggregate_type, aggregate_id, payload_version, payload JSONB, status, retry_count, next_attempt_at, created_at.
+Use an outbox pattern for reliable publication of payment/notification/websocket events after DB commit.
+31. PostgreSQL RLS Requirements
+RLS is mandatory for tenant-owned tables.
+Enable ROW LEVEL SECURITY and FORCE ROW LEVEL SECURITY where appropriate.
+Application database role must not be a superuser and must not have BYPASSRLS.
+At transaction start, Go establishes trusted tenant context after authentication/authorization.
+Policies use current_setting('app.tenant_id', true) converted to UUID, with fail-closed behavior when absent/invalid.
+INSERT/UPDATE policies require NEW.tenant_id to match the trusted context.
+SELECT/DELETE policies require row tenant_id to match.
+Cross-tenant administrative operations use a separately authorized service path with explicit controls.
+CI tests must verify RLS on every tenant-owned table.
+Illustrative policy pattern: CREATE POLICY tenant_isolation ON table USING (tenant_id = current_setting('app.tenant_id', true)::uuid) WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid); Production implementation must additionally handle missing context safely and test role permissions.
+32. Indexing Strategy
+Use PostgreSQL full-text/trigram indexes only where justified. For Tamil/local alias search, validate PostgreSQL collation/extension behavior; otherwise maintain normalized searchable columns or a dedicated search service.
+33. Constraints & Integrity Rules
+All monetary amounts >= 0 unless a signed adjustment field is explicitly defined.
+Invoice grand_total = subtotal - discounts + tax + charges + rounding according to one deterministic formula.
+Invoice tender total = grand_total.
+Posted journal entry debits = credits.
+Stock movement signed quantity is derived from movement type and cannot be arbitrary without a privileged adjustment type.
+GRN net_weight = gross_weight - tare_weight and net_weight >= 0.
+Tare_weight <= gross_weight × configured maximum percentage unless approved override.
+Inventory quantity must not be negative unless an explicit tenant policy allows it; offline conflict rules must still prevent accidental negative stock.
+Expired/quarantined batches cannot be allocated to normal sales.
+Historical invoice snapshot fields cannot be updated after finalization.
+Referenced master rows cannot be physically deleted.
+All tenant FKs should include tenant consistency checks where feasible, or composite tenant-scoped FK patterns for critical tables.
+34. Composite Tenant Foreign Keys
+For high-integrity tables, prefer composite uniqueness and foreign keys such as UNIQUE(tenant_id,id) on parent tables and FOREIGN KEY(tenant_id,parent_id) REFERENCES parent(tenant_id,id). This prevents an accidental cross-tenant foreign-key reference even if application code is defective. This complements RLS.
+35. Transaction & Locking Rules
+Invoice finalization uses one DB transaction for invoice, lines, taxes, tender allocation, batch allocation, stock movements, customer ledger and journal entries.
+Stock allocation locks the relevant balance/batch rows or uses serializable-safe logic.
+Document number allocation uses SELECT FOR UPDATE or an equivalent atomic sequence strategy.
+Payment webhook processing uses unique provider event IDs plus transaction locking/idempotency.
+EOD close locks the applicable business date/session.
+Do not hold DB transactions open while calling external APIs.
+Use an outbox record within the transaction and publish externally after commit.
+36. Partitioning Strategy
+Consider range partitioning high-volume tables by financial year/month: sales_invoices, sales_invoice_lines, stock_movements, customer_ledger_entries, supplier_ledger_entries, audit_logs and integration_events.
+Partitioning must preserve tenant isolation and index performance.
+Archive operations can operate at partition granularity where policy permits.
+Partition keys must be stable and must not prevent efficient tenant/date queries.
+Do not introduce partitioning solely for theoretical scale; benchmark first.
+37. Retention & Purge
+Retention policy must be documented per data class.
+Financial/statutory records cannot be purged solely because they are paid.
+Archive eligibility must consider legal/accounting retention, open disputes, returns, audits, compliance, restoration requirements and business policy.
+Purges are privileged, logged and preferably soft/partition-based.
+Before purge: manifest → object upload → checksum verification → restore verification → approval → purge.
+Keep archive_catalog/manifest metadata live so archived records remain discoverable.
+38. SQLCipher Offline Database Scope
+Local tables mirror only the minimum operational subset: products, aliases, prices, customers, credit profile snapshot, active batches/stock snapshot, invoice drafts, offline invoices, local payments, sync queue, device configuration and pending receipts.
+Do not replicate unnecessary historical financial data to the device.
+SQLCipher key is held through platform secure storage; never hard-code it.
+Local data must include schema version and migration state.
+Local purge follows device lifecycle policy after server acknowledgement where possible.
+39. Recommended Local Tables
+local_products, local_product_aliases, local_prices, local_customers, local_credit_snapshots, local_batches, local_stock_balances, local_invoices, local_invoice_lines, local_tenders, local_batch_allocations, local_sync_transactions, local_sync_conflicts, local_device_state, local_receipt_jobs.
+Local schemas may differ physically from PostgreSQL but must preserve the fields required for deterministic synchronization and audit.
+40. Data Types & Serialization Rules
+Go must not use float32/float64 for money or precision-sensitive weight/quantity calculations.
+API JSON should serialize decimal values in a deterministic representation; string-decimal transport is acceptable and often safest.
+Flutter should use Decimal/fixed-precision representations rather than double for financial calculations.
+All IDs are strings in JSON when UUIDs are used.
+TIMESTAMPTZ is serialized as RFC 3339 with offset/UTC.
+Nullability in OpenAPI must exactly match PostgreSQL/business semantics.
+Scale/precision validation occurs at API boundary and DB constraint level where possible.
+41. Soft Delete Rules
+Products, customers, suppliers, price lists, aliases and devices may be deactivated.
+Finalized invoices, posted payments, posted stock movements, journal entries and ledger entries are never physically deleted by ordinary application actions.
+Corrections use reversal/adjustment records.
+Archive/purge is a separate privileged process governed by retention policy.
+42. Seed / Reference Data
+System permissions and role templates.
+Standard UOMs: kg, g, bag, tonne and configurable local units.
+Default customer tiers.
+Default tender types.
+Default stock movement types.
+Default invoice/payment states.
+Default notification purposes.
+Tax profiles must be approved/configured rather than blindly seeded with assumptions.
+43. Migration Strategy
+Create extensions and base reference tables.
+Create tenants/configuration.
+Create identity/RBAC.
+Create product/UOM/tax/pricing.
+Create customer/supplier.
+Create locations/procurement.
+Create inventory/batch.
+Create sales/payment/ledger/journal.
+Create notifications/compliance/archive/audit.
+Enable RLS after tables and trusted policies are validated.
+Create indexes concurrently where appropriate for production.
+Run integrity checks.
+Seed approved reference data.
+Run migration tests against empty and representative datasets.
+44. Database Migration Rules
+Every migration has a unique ordered version.
+Backward-compatible expand/contract approach for live deployments.
+Avoid long blocking locks during business hours.
+Large data backfills are asynchronous/batched.
+No destructive migration without explicit backup and rollback plan.
+Schema changes must update ERD and API contracts.
+45. Backup & Restore
+Automated encrypted backups.
+Point-in-time recovery where available.
+Separate backup credentials/storage.
+Restore tests at scheduled intervals.
+Validate row counts, checksums, key balances and sample invoice/ledger traces after restore.
+R2 archive objects are not a replacement for primary DB backups.
+46. Security
+Least-privilege PostgreSQL roles.
+No superuser from application.
+No BYPASSRLS.
+TLS in transit.
+Encryption at rest where infrastructure supports it.
+Secrets through secret manager/environment, never source.
+Audit privileged operations.
+Restrict raw JSONB payload access when it may contain personal or provider-sensitive data.
+Rotate credentials and provider keys.
+47. Performance Requirements
+48. Reporting Views / Materializations
+daily_sales_summary, stock_on_hand_summary, customer_balance_summary, supplier_balance_summary, expiry_risk_summary, payment_reconciliation_summary, eod_summary may be views/materialized projections.
+Derived reports must be traceable to source events.
+Never mutate source ledgers to fix a report; fix the underlying event/reversal.
+49. Reconciliation Queries
+Stock: sum stock movements vs stock_balances.
+Customer: sum customer ledger vs credit profile balance projection.
+Supplier: sum supplier ledger vs payable projection.
+Invoice: lines + taxes + tenders + ledger + stock allocations.
+Journal: total debits vs credits.
+Payment: provider events vs internal payments vs invoice allocations.
+Archive: manifest counts/checksums vs source selection.
+50. Example End-to-End Sale Trace
+sales_invoices created/finalized.
+sales_invoice_lines created.
+invoice_tax_lines created.
+invoice_batch_allocations created for FIFO/FEFO batches.
+stock_movements created as negative issue events.
+tender/payment records created.
+If credit: customer_ledger_entries created.
+Journal entry and balanced journal lines created.
+Outbox/integration event created.
+Invoice committed.
+Printer/WhatsApp notification executes asynchronously.
+Audit record records finalization.
+51. Example GRN Trace
+Purchase order selected.
+goods_receipts and lines created.
+Gross/tare/net validation performed.
+Batch created/linked.
+Stock receipt movement posted.
+Supplier payable journal/ledger posted.
+GRN finalized.
+Audit recorded.
+Outbox event can trigger inventory/reorder/report updates.
+52. Example Contra Trace
+Customer and credit balance validated.
+Contra transaction drafted.
+Product quantity and valuation captured.
+Approval if required.
+Stock receipt movement posted.
+Customer receivable reduction ledger entry posted.
+Balanced journal posted.
+Contra finalized and audit recorded.
+53. RLS Test Matrix
+54. Database Acceptance Criteria
+☐ All tenant-owned tables have tenant_id and RLS.
+☐ Critical parent-child relationships prevent cross-tenant references.
+☐ All money/weight/quantity columns use approved numeric precision.
+☐ Posted financial and inventory events cannot be silently deleted.
+☐ Invoice finalization is atomic.
+☐ Duplicate offline transaction cannot post twice.
+☐ Duplicate payment webhook cannot post twice.
+☐ Stock allocation is concurrency safe.
+☐ Batch traceability is complete from GRN to sale/return.
+☐ Customer and supplier ledgers reconcile.
+☐ Journal entries balance.
+☐ Archive manifests are verifiable and restorable.
+☐ Database backup restore is tested.
+☐ Migration suite runs successfully on clean and representative databases.
+55. Final Physical Schema Catalogue
+56. Final Design Principle
+The database is not a collection of CRUD tables. It is the financial, inventory and audit backbone of the business. Product masters describe what can be sold; stock movements describe what physically happened; invoices describe what was sold; payments describe how it was settled; customer/supplier ledgers describe who owes whom; journals describe the accounting effect; sync records describe how offline actions reached the authority; audit records describe who changed what; archive manifests describe how historical evidence is preserved.
+This model is the authoritative database baseline for the next documents: Complete API Specification, Go Backend Technical Architecture, Flutter Architecture, Offline Synchronization Specification, Inventory & Batch Engine Specification, Accounting & Khata Specification and POS/Billing Engine Specification.
+Component | Baseline
+Database | PostgreSQL 16+ recommended; exact production version pinned
+Primary IDs | UUID
+Money | NUMERIC(12,2) minimum
+Weight | NUMERIC(12,3)
+Quantity | NUMERIC(12,3)
+UOM factor | NUMERIC(12,6)
+Tax rate | NUMERIC(7,4)
+Timestamps | TIMESTAMPTZ
+Local device DB | SQLCipher-backed SQLite
+API | Go
+Client | Flutter
+Archive | Cloudflare R2 / S3-compatible object storage
+Cache/queue | Redis optional
+Migrations | Version-controlled SQL migration framework
+Column | Type | Required | Purpose
+id | uuid | YES | Primary identifier
+tenant_id | uuid | YES on tenant-owned tables | Tenant isolation
+created_at | timestamptz | YES | Server creation time
+updated_at | timestamptz | YES | Server modification time
+created_by_user_id | uuid | Usually | Human actor
+updated_by_user_id | uuid | Usually | Last human actor
+device_id | uuid | Where applicable | Originating device
+version | bigint | Where mutable | Optimistic concurrency
+is_active | boolean | Master data | Soft activation/deactivation
+deleted_at | timestamptz | Only where approved | Soft deletion; never for finalized financial events
+Column | Type | Null | Constraint / Rule
+id | uuid | NO | PK
+legal_name | varchar(200) | NO | 
+trade_name | varchar(200) | YES | 
+gstin | varchar(15) | YES | Unique per tenant scope; validated format
+fssai_license_no | varchar(100) | YES | Store only when applicable
+phone | varchar(30) | YES | 
+email | varchar(254) | YES | 
+address_line1 | varchar(250) | NO | 
+address_line2 | varchar(250) | YES | 
+city | varchar(100) | NO | 
+district | varchar(100) | YES | 
+state_code | varchar(10) | NO | Controlled master
+postal_code | varchar(20) | YES | 
+country_code | char(2) | NO | Default IN
+currency_code | char(3) | NO | Default INR
+timezone | varchar(64) | NO | Default Asia/Kolkata
+status | varchar(30) | NO | ACTIVE/SUSPENDED/CLOSED
+created_at | timestamptz | NO | 
+updated_at | timestamptz | NO | 
+Field | Type | Rule
+id | uuid | PK
+tenant_id | uuid | FK + RLS
+label | varchar(20) | e.g. FY2026-27
+start_date | date | NO
+end_date | date | NO
+status | varchar(20) | OPEN/CLOSED
+created_at | timestamptz | NO
+closed_at | timestamptz | YES
+Field | Type | Rule
+id | uuid | PK
+tenant_id | uuid | RLS
+sku | varchar(80) | Unique tenant
+name | varchar(250) | NO
+local_name_ta | varchar(250) | YES
+category_id | uuid | FK
+brand_id | uuid | FK
+default_sale_uom_id | uuid | FK
+base_inventory_uom_id | uuid | FK
+hsn_code | varchar(20) | YES
+tax_profile_id | uuid | FK
+reorder_level | numeric(12,3) | YES
+reorder_target | numeric(12,3) | YES
+batch_required | boolean | NO
+expiry_required | boolean | NO
+active | boolean | NO
+created_at | timestamptz | NO
+updated_at | timestamptz | NO
+Field | Type | Rule
+id | uuid | PK
+tenant_id | uuid | RLS
+movement_time | timestamptz | Server time
+product_id | uuid | FK
+batch_id | uuid | FK nullable
+location_id | uuid | FK
+uom_id | uuid | FK
+quantity | numeric(12,3) | Positive magnitude
+signed_quantity | numeric(12,3) | Positive receipt / negative issue
+movement_type | varchar(40) | Controlled
+source_type | varchar(40) | Invoice/GRN/Return/etc.
+source_id | uuid | Nullable
+source_line_id | uuid | Nullable
+unit_cost | numeric(12,2) | Nullable
+reason_code | varchar(50) | Nullable
+device_id | uuid | Nullable
+created_by_user_id | uuid | Nullable
+created_at | timestamptz | NO
+Field | Type | Rule
+id | uuid | PK
+tenant_id | uuid | RLS
+financial_year_id | uuid | FK
+invoice_number | varchar(60) | Unique tenant + FY + series
+invoice_date | timestamptz | NO
+customer_id | uuid | Nullable for walk-in
+customer_name_snapshot | varchar(250) | Snapshot
+customer_gstin_snapshot | varchar(15) | Snapshot nullable
+place_of_supply | varchar(10) | Snapshot
+subtotal | numeric(12,2) | 
+discount_total | numeric(12,2) | 
+taxable_total | numeric(12,2) | 
+tax_total | numeric(12,2) | 
+rounding_amount | numeric(12,2) | 
+grand_total | numeric(12,2) | 
+payment_status | varchar(30) | UNPAID/PARTIAL/PAID/CREDIT/REFUNDED/etc.
+status | varchar(30) | DRAFT/FINALIZED/CANCELLED
+source | varchar(20) | ONLINE/OFFLINE
+client_transaction_id | uuid | Idempotency
+device_id | uuid | Origin
+created_at | timestamptz | 
+finalized_at | timestamptz | 
+cancelled_at | timestamptz | 
+Table / Access pattern | Index
+All tenant tables | (tenant_id, id) where useful
+Products search | tenant_id + sku; tenant_id + active; normalized name/alias search index
+Barcodes | UNIQUE(tenant_id, barcode)
+Customers | tenant_id + customer_code; tenant_id + phone
+Suppliers | tenant_id + supplier_code; tenant_id + gstin
+Batches | tenant_id + product_id + status + expiry_date
+Stock movements | tenant_id + product_id + movement_time; tenant_id + batch_id + movement_time; source reference
+Invoices | tenant_id + invoice_date; tenant_id + customer_id + invoice_date; UNIQUE tenant/FY/series/number
+Invoice lines | tenant_id + invoice_id
+Payments | tenant_id + status + created_at; provider + provider_payment_id
+Webhook events | UNIQUE(provider,event_id)
+Customer ledger | tenant_id + customer_id + entry_date
+Supplier ledger | tenant_id + supplier_id + entry_date
+Sync | UNIQUE(tenant_id,device_id,client_transaction_id); tenant/device/local_sequence
+Audit | tenant_id + entity_type + entity_id + created_at
+Expiry | tenant_id + status + expiry_date
+Operation | Target / Principle
+POS local lookup | Sub-second perceived response
+Invoice posting | Target < 1 second server transaction under normal load, excluding external providers
+Stock allocation | Indexed and lock-safe
+Customer statement | Paginated; indexed by tenant/customer/date
+Expiry scan | Indexed by tenant/status/expiry
+EOD | Prefer pre-aggregated/indexed events; avoid full-table scans
+Exports | Asynchronous for large ranges
+Archive | Batch/partition-based; never block POS
+Test | Expected
+Tenant A SELECT without context | 0 rows / denied
+Tenant A SELECT with A context | A rows only
+Tenant A INSERT with B tenant_id | Denied
+Tenant A UPDATE B row | Denied
+Tenant A DELETE B row | Denied
+Application role attempts BYPASSRLS | Not permitted
+Missing tenant context | Fail closed
+Admin service path | Only explicitly authorized scope
+Domain | Tables
+Tenant | tenants, tenant_settings, financial_years, document_series, tenant_features
+Identity | users, roles, permissions, role_permissions, user_roles, devices, device_sessions
+Product | categories, brands, products, product_barcodes, product_aliases, uoms, uom_conversions, product_uoms
+Pricing/Tax | customer_tiers, price_lists, price_list_items, tax_profiles
+Customer | customers, customer_addresses, customer_credit_profiles, customer_ledger_entries
+Supplier | suppliers, supplier_contacts, supplier_bank_accounts, supplier_ledger_entries
+Location | inventory_locations
+Procurement | purchase_orders, purchase_order_lines, goods_receipts, goods_receipt_lines
+Inventory | batches, stock_movements, stock_balances, stock_counts, stock_count_lines, stock_adjustments
+Sales | sales_invoices, sales_invoice_lines, invoice_tax_lines, invoice_batch_allocations, sales_returns, sales_return_lines
+Payments | payment_intents, payments, payment_allocations, payment_webhook_events, refunds, refund_allocations
+Accounting | journal_entries, journal_lines, chart_of_accounts (if enabled)
+Contra | contra_transactions, contra_lines
+Cash/EOD | cash_sessions, cash_movements, eod_sessions
+Messaging | message_templates, notification_jobs, message_deliveries
+Sync | sync_transactions, sync_conflicts, sync_cursors
+Compliance | compliance_requests, compliance_responses, compliance_documents, export_jobs
+Archive | archive_jobs, archive_manifests, archive_objects, archive_restore_tests
+Audit/Files | audit_logs, attachments, integration_events, system_jobs

@@ -1,0 +1,758 @@
+Andipatti Animal Feed System
+Document 16 — Complete Reports & Dashboard Architecture / Specification v1.0
+Implementation-ready reporting, analytics, dashboard, export, reconciliation and operational intelligence specification for the animal-feed retail/wholesale system. Covers owner, manager, cashier, accounts, inventory, procurement, compliance and audit reporting. No sprint planning.
+Authoritative principle: reports are derived from PostgreSQL transactional data and approved projections; they never become an alternate source of financial or inventory truth.
+1. Purpose, Scope, Objectives & Non-Goals
+1.1 Purpose
+Define a complete reporting layer that gives operators accurate, tenant-isolated, traceable and performant visibility into sales, inventory, procurement, customers, Khata, payments, accounting, GST/compliance, hardware, synchronization and EOD.
+1.2 Objectives
+Provide fast operational dashboards for daily shop decisions.
+Provide detailed drill-down reports with reproducible filters.
+Reconcile sales, payments, inventory and accounting.
+Support Tamil/English labels and localized display formatting.
+Support asynchronous large exports without blocking transactional workloads.
+Protect PII and sensitive financial information through RBAC and audit.
+Make every report traceable to an authoritative record and reporting period.
+1.3 Non-Goals
+This document does not redefine accounting or tax rules from Documents 07 and 11.
+Reports do not authorize financial or inventory mutations.
+Predictive analytics are optional extensions; deterministic operational reports are mandatory.
+2. Reporting Principles
+PostgreSQL transactional data is authoritative.
+Tenant isolation applies to every query, view, materialized view and export.
+Financial totals use exact decimal calculations consistent with the transaction engine.
+Every report states its period, timezone and filter context.
+Closed/locked financial periods remain reproducible.
+Reports distinguish posted/finalized data from drafts, pending and failed records.
+Cancelled, returned and reversed records follow explicit inclusion rules.
+Large reports run asynchronously.
+Exports are permission-controlled and audited.
+Dashboard summaries must reconcile with drill-down totals.
+3. Reporting Architecture
+Reporting queries must use read-optimized views/indexes where appropriate but preserve authoritative reconciliation paths.
+4. Report Security & Tenant Isolation
+Every report request is tenant-scoped from authenticated context.
+Go authorization is applied before query execution.
+PostgreSQL RLS remains mandatory for tenant-owned reporting sources.
+Support/auditor cross-tenant views require explicit scoped access.
+Export URLs are short-lived and resource-authorized.
+Report files are private and stored under server-generated object keys.
+PII fields are minimized or masked according to role.
+Every sensitive export is audited with actor, tenant, filters, period and file reference.
+5. Reporting Period & Timezone Rules
+Store authoritative timestamps consistently, preferably UTC, with tenant/shop timezone for presentation.
+Daily reports use tenant-local calendar dates.
+Financial-year reports use configured financial-year boundaries.
+Month-end and GST reports use explicit period start/end.
+Avoid client-device clock as authoritative period source.
+Period filters include inclusive start and exclusive end semantics internally to avoid boundary duplication.
+6. Global Dashboard
+6.1 KPI Cards
+6.2 Dashboard Rules
+Each KPI has a tooltip/detail definition.
+Clicking a KPI opens a filtered drill-down report.
+Unavailable/stale data is labeled.
+Offline dashboard data is clearly identified as local/stale where applicable.
+7. Owner Dashboard
+Sales today/this week/this month.
+Payment mix.
+Khata outstanding and overdue.
+Top products/categories.
+Gross margin and margin by category.
+Low stock and expiry exposure.
+Supplier payable exposure.
+EOD variance.
+Pending payment reconciliation.
+Compliance exceptions.
+Security/device alerts.
+Owner dashboard is read-heavy; sensitive administrative actions remain in controlled settings rather than dashboard widgets.
+8. Manager Dashboard
+Today sales versus configurable comparison period.
+Top/bottom products.
+Stock/reorder list.
+Expiry alerts.
+Open POs and pending GRNs.
+Customer credit alerts.
+Payment exceptions.
+Cash/EOD status.
+Operational hardware/sync health.
+9. Cashier Dashboard / Quick View
+Current shift/session.
+Today transaction count.
+Current cash summary where permitted.
+Pending/failed sync count.
+Payment pending indicator.
+Printer/scale status.
+Shortcuts to New Sale, Held Carts and Recent Invoices.
+10. Accounts Dashboard
+Receivables/Khata outstanding.
+Overdue aging.
+Collections today.
+Cash/UPI/bank reconciliation.
+Supplier payables.
+Refunds pending.
+EOD variance.
+Unapplied payments.
+Journal/reconciliation exceptions.
+11. Inventory Dashboard
+Total saleable stock.
+Stock by category/product/location.
+Low-stock/reorder alerts.
+Near-expiry batches.
+Expired/held/rejected quantity.
+Loose stock versus sealed stock.
+Recent stock adjustments.
+Stock count variance.
+Inventory value and aging.
+12. Procurement Dashboard
+Open POs.
+Partially received POs.
+Pending GRNs.
+Supplier spend.
+Purchase price trends.
+Outstanding payables.
+Supplier delivery performance.
+Tare/receipt exceptions.
+13. Compliance Dashboard
+Taxable/tax-exempt sales summary.
+CGST/SGST/IGST totals.
+GST period status.
+E-invoice pending/failed/unknown.
+E-way bill pending/failed/unknown.
+Credit/debit note summary.
+Export jobs.
+Compliance exceptions requiring action.
+Legal/reporting applicability must follow current authoritative requirements; dashboard labels must not imply filing compliance solely because an internal export was generated.
+14. Sales Reports
+15. Sales Calculation Rules
+Default sales reports include finalized sales only.
+Draft/held invoices are excluded from realized sales.
+Cancelled invoices are excluded from net sales according to the approved accounting policy.
+Returns are shown separately and incorporated into net metrics according to report definition.
+Taxes are separated from net-of-tax revenue where applicable.
+Discounts are separately measurable.
+All totals reconcile to invoice lines and tax snapshots.
+16. Product Performance Report
+Product quantity sold.
+Revenue.
+Discount amount.
+Tax amount.
+Cost basis.
+Gross margin and margin percentage.
+Average selling price.
+Sales by UOM.
+Sales by customer tier.
+Batch/expiry performance where useful.
+Margin calculations must use the costing method defined by the inventory/accounting architecture; report users must not infer cost from selling price.
+17. Customer & Khata Reports
+Aging buckets are configurable, e.g. 0–30, 31–60, 61–90, 90+ days.
+Cycle/grace dates are configuration-driven.
+Statements can be generated for a customer and date range.
+Sensitive customer data is role-controlled.
+18. Supplier & Procurement Reports
+Purchase summary by supplier.
+Purchase detail by PO/GRN.
+Supplier payable aging.
+Supplier payment report.
+Purchase price variance.
+PO fulfillment/partial receipt report.
+GRN tare exception report.
+Supplier product mix.
+19. Inventory Reports
+20. Stock Movement Report
+GRN receipt.
+Sale issue.
+Return receipt.
+Transfer out/in.
+Contra/buy-back receipt.
+Damage/shrinkage.
+Expiry write-off.
+Stock count adjustment.
+Opening balance/import.
+Manual authorized adjustment.
+Every movement links to its source document where applicable. The report must support drill-down to source transaction and audit information.
+21. Batch & Expiry Report
+Product/batch.
+Manufacture date.
+Expiry date.
+Received date.
+Original quantity.
+Current quantity.
+Reserved quantity where applicable.
+Saleable/held/rejected/expired status.
+Days to expiry.
+Location.
+Expiry warning window is configurable. The report must distinguish 'near expiry' from 'expired' and must not silently treat one as the other.
+22. Inventory Valuation & Margin
+Show valuation method/configuration used.
+Show total quantity and value.
+Show cost basis by batch/product where permitted.
+Show revenue and cost side by side.
+Show gross margin amount and percentage.
+Flag missing/invalid cost data instead of silently assuming zero.
+Reconcile valuation to inventory ledger.
+23. Payment Reports
+Client-generated 'Paid' flags are never used as authoritative report state.
+Payment reports use server-verified payment state.
+Unknown outcomes remain visible until reconciled.
+24. Payment Reconciliation Dashboard
+Internal payment count/amount.
+Provider payment count/amount.
+Matched.
+Missing provider event.
+Missing internal allocation.
+Amount mismatch.
+Duplicate event.
+Refund mismatch.
+Manual-review queue.
+Every exception should link to payment intent, provider reference, invoice and audit evidence where available.
+25. Accounting Reports
+Journal entries.
+Journal lines.
+Trial-balance-style summary where implemented.
+Receivables.
+Payables.
+Cash movements.
+EOD reconciliation.
+Credit notes/debit notes.
+Refunds.
+Tax accounts.
+Accounting reports must reconcile to posted journal entries and should not independently recalculate accounting state using UI-level assumptions.
+26. EOD Reports
+EOD report records operator/session identity.
+Variance reason and approval are included where required.
+Finalized EOD remains auditable.
+27. GST & Tax Reports
+Taxable sales by rate/profile.
+CGST/SGST/IGST summary.
+HSN/product summary.
+Customer GSTIN transaction summary where applicable.
+Credit/debit note tax impact.
+Tax period summary.
+Export/reconciliation report.
+E-invoice/e-way status exception report.
+Exact statutory report formats, thresholds and filing fields must follow current authoritative requirements at implementation and release time.
+28. GST Export Architecture
+User selects authorized period/filters.
+Backend validates period and permission.
+Query executes against authoritative finalized data.
+Reconciliation checks run.
+Export job is created.
+Worker generates file.
+File is stored privately.
+Checksum/metadata is recorded.
+User receives short-lived authorized download.
+Export event is audited.
+29. Export Formats
+CSV/XLSX exports must preserve decimal values without accidental binary floating-point conversion.
+Large exports should stream/chunk where practical.
+PDF reports should include tenant/business identity, period and generation timestamp.
+Exports must not contain hidden unrelated tenant data.
+30. Report Filters
+Date/time period.
+Financial year.
+Product/category/brand.
+Customer/customer tier.
+Supplier.
+Payment method/status.
+Invoice/payment state.
+Batch/location.
+User/operator/device.
+Tax profile/HSN.
+EOD/session.
+Search term.
+Filters must be validated server-side and bounded to prevent expensive/unbounded queries.
+31. Drill-Down Model
+Dashboard KPI → summary report.
+Summary row → detail report.
+Detail row → source document.
+Source document → related payment/stock/journal records.
+Sensitive audit view → permission-controlled audit event.
+Drill-down preserves the tenant, date and filter context unless the user deliberately changes it.
+32. Report APIs
+GET /api/v1/reports/dashboard
+GET /api/v1/reports/sales/summary
+GET /api/v1/reports/sales/detail
+GET /api/v1/reports/products
+GET /api/v1/reports/customers
+GET /api/v1/reports/khata/aging
+GET /api/v1/reports/suppliers
+GET /api/v1/reports/inventory
+GET /api/v1/reports/inventory/expiry
+GET /api/v1/reports/inventory/valuation
+GET /api/v1/reports/payments
+GET /api/v1/reports/payments/reconciliation
+GET /api/v1/reports/accounting
+GET /api/v1/reports/eod
+GET /api/v1/reports/gst
+POST /api/v1/reports/exports
+GET /api/v1/reports/exports/{id}
+GET /api/v1/reports/exports/{id}/download
+33. Report API Contract Rules
+Every report request is authenticated and tenant-authorized.
+Pagination is mandatory for large detail endpoints.
+Sort fields are allowlisted.
+Filter fields are allowlisted.
+Default date ranges are bounded.
+Large exports are asynchronous.
+Response includes report definition/version where reproducibility matters.
+Errors use the standard API envelope.
+Report generation requests support idempotency where duplicate jobs are undesirable.
+34. Report Data Model
+Recommended report/export entities include report_definitions, report_runs, export_jobs, export_objects and report_access/audit metadata. Existing Documents 01–02 already provide export_jobs/audit/storage patterns; this document extends their reporting semantics without creating a competing financial ledger.
+35. Reporting Views
+vw_sales_invoice_summary
+vw_sales_product_summary
+vw_customer_ledger_summary
+vw_inventory_current
+vw_inventory_batch_status
+vw_inventory_movements
+vw_supplier_payables
+vw_payment_reconciliation
+vw_eod_summary
+vw_tax_summary
+Views must enforce tenant context through their source tables/RLS and must not embed bypass mechanisms.
+36. Materialized Aggregates
+Use only when query volume/data volume justifies them.
+Refresh strategy must be explicit.
+Display freshness timestamp.
+Do not use stale aggregates for authoritative financial decisions.
+Provide reconciliation queries against transactional data.
+37. KPI Definitions & Versioning
+KPI definitions should have a version so historical dashboards can be interpreted correctly after business-definition changes.
+38. Sales Trend Analytics
+Daily/weekly/monthly trend.
+Comparison to prior equivalent period.
+Transaction count trend.
+Average invoice value.
+Units/weight sold.
+Payment mix trend.
+Customer-tier contribution.
+Comparison periods must account for the tenant's local timezone and explicitly label partial periods.
+39. Product Analytics
+Top products by revenue.
+Top products by quantity/weight.
+Slow-moving products.
+Stock days/velocity where data quality supports it.
+Margin contribution.
+Expiry exposure.
+Price/tier performance.
+40. Customer Analytics
+Active customers.
+New customers.
+Repeat purchase rate.
+Sales by tier.
+Average purchase.
+Khata exposure.
+Collection behavior.
+Overdue trend.
+Customer analytics must be privacy-controlled and should avoid unnecessary profiling beyond legitimate business purposes.
+41. Supplier Analytics
+Spend by supplier.
+Purchase price trend.
+Delivery/receipt timeliness.
+Partial receipt rate.
+GRN exception rate.
+Outstanding payable.
+Product coverage.
+42. Operational Analytics
+Transactions per hour/day.
+Average billing duration where safely measurable.
+Payment pending duration.
+Sync failure rate.
+Printer failure rate.
+Scale disconnect/error rate.
+Worker job failure rate.
+API error/latency trend.
+Operational analytics should avoid recording unnecessary customer-identifying information.
+43. Alerts & Exception Reports
+Priority is configurable but security, financial and inventory integrity exceptions should receive prominent treatment.
+44. Scheduled Reports
+Daily sales summary.
+Daily EOD summary.
+Daily expiry/low-stock alert.
+Khata overdue summary.
+Supplier payable summary.
+Payment reconciliation exceptions.
+Monthly tax summary/export readiness.
+Operational health summary.
+Scheduled reports are tenant-scoped and delivered only to authorized recipients. Delivery channels and frequency are configurable.
+45. Report Delivery
+In-app notification.
+Secure download.
+Optional email/WhatsApp where separately configured and authorized.
+Never send sensitive reports to an unverified destination.
+Large reports are generated asynchronously.
+Temporary files expire according to retention policy.
+46. Performance Requirements
+Final latency targets must be established from measured production workload; avoid arbitrary targets that encourage unsafe caching or stale financial reporting.
+47. Query Safety
+Use parameterized SQL.
+Allowlist sort/filter fields.
+Bound date ranges and page sizes.
+Reject unbounded export requests where policy requires.
+Use statement/query timeouts for expensive reporting.
+Do not hold financial write transactions open while generating reports.
+Use read replicas only when consistency requirements are explicitly satisfied.
+48. Reporting Consistency
+Dashboard and detail report must use compatible inclusion rules.
+A finalized invoice appears consistently across sales/payment/accounting reports after projection rules complete.
+Pending/unknown payment is not counted as verified collection.
+Returns and credit notes follow documented net-sales definitions.
+Inventory reports reconcile to stock movements.
+Khata reports reconcile to customer ledger.
+49. Reconciliation Reports
+Sales invoice total vs payment allocation total.
+Payment total vs provider reconciliation.
+Sales inventory issue vs stock movement.
+Purchase/GRN vs supplier payable.
+Khata statement vs customer ledger.
+Journal debits vs credits.
+EOD expected vs physical cash.
+GST export totals vs finalized invoice tax data.
+Inventory balance vs movement ledger.
+50. Report Auditability
+Record report definition/version.
+Record exact filters and period.
+Record actor and tenant.
+Record generation time and timezone.
+Record source schema/report version where necessary.
+Record export checksum.
+Record download event for sensitive reports.
+Retain evidence according to report/financial/legal retention policy.
+51. Offline Reporting
+Offline dashboards may show locally cached summaries.
+Every offline metric is labeled with last synchronized timestamp.
+Do not present stale local totals as authoritative current financial totals.
+Large exports require server connectivity unless an explicit secure local export is supported.
+Sync completion should update dashboard freshness.
+52. Report UI Standards
+Every report has title, period, filters, generated/freshness timestamp and definition/help.
+Tables support sorting/filtering where appropriate.
+Charts have accessible textual/tabular alternatives.
+Currency and UOM are explicit.
+Empty states distinguish no data from unavailable data.
+Error states include safe retry/reference information.
+Exports are separate from destructive actions.
+53. Report Table Columns — Minimum
+54. Export Security
+Require export permission.
+Apply tenant/resource authorization at generation and download.
+Use short-lived signed URLs.
+Store exports privately.
+Audit creation/download.
+Expire temporary exports.
+Do not include internal cost/margin in customer-facing exports unless authorized.
+Protect GST/PII-heavy exports more strongly.
+55. Report Failure Handling
+56. Report Testing Strategy
+Unit test KPI calculations.
+Integration test SQL/report views.
+RLS test every report.
+Authorization test every report/export.
+Reconcile summary vs detail.
+Test financial-year and timezone boundaries.
+Test returns/refunds/cancellations.
+Test large datasets and query timeouts.
+Test export decimal precision.
+Test CSV/XLSX/PDF generation.
+Test signed URL authorization/expiry.
+Test offline freshness indicators.
+57. Boundary & Accuracy Test Cases
+Period starts/ends at midnight.
+Invoice exactly at period boundary.
+Financial-year transition.
+Month with DST changes where relevant to selected presentation timezone.
+Leap day.
+Zero sales day.
+Large decimal totals.
+Large inventory quantity.
+Tax rounding boundary.
+Return on same day versus later period.
+Payment received after invoice period.
+EOD session spanning midnight according to configured business policy.
+58. Dashboard Reconciliation Acceptance
+Select a dashboard period.
+Record KPI values.
+Open each KPI's drill-down.
+Aggregate drill-down using the same inclusion definition.
+Verify totals match.
+Repeat with returns, refunds, pending payments and multiple tenders.
+Repeat across tenant boundaries.
+Repeat at financial-year boundary.
+59. Performance & Load Testing
+Concurrent dashboard requests.
+Concurrent sales detail queries.
+Large inventory history.
+Large Khata ledger.
+Large GST export.
+Concurrent export jobs.
+WebSocket/event-driven dashboard refresh where implemented.
+Database connection pool saturation.
+Report query timeout behavior.
+60. Observability
+Track report execution duration.
+Track query timeout count.
+Track export queue depth.
+Track export success/failure.
+Track download events for sensitive exports.
+Track stale materialized views.
+Track dashboard API latency/errors.
+Track reconciliation exception counts.
+61. Data Retention
+Report definitions may be retained as long-lived configuration.
+Temporary export objects expire according to policy.
+Financial/statutory reports follow applicable retention rules.
+Audit records follow security/audit retention policy.
+Do not delete authoritative transactions merely because a report is archived.
+62. Report Versioning
+Version report definitions when formulas/inclusion rules change.
+Expose definition version in export metadata.
+Historical reports must be interpretable.
+Do not silently change the meaning of an existing KPI without versioning/change control.
+63. Role-Based Report Access
+64. Report API Security Checklist
+Authentication.
+Tenant derivation from session.
+Go authorization.
+PostgreSQL RLS.
+Allowlisted filters.
+Bounded pagination.
+Rate limiting.
+Query timeout.
+Audit for sensitive export.
+Signed URL expiration.
+No secrets in output.
+No cross-tenant joins.
+65. Report & Dashboard End-to-End Scenarios
+Owner opens today's dashboard → sales KPI → detail → invoice.
+Manager sees low stock → product → batch → expiry.
+Accounts opens Khata aging → customer → ledger → receipt.
+Accounts opens payment reconciliation → mismatch → payment intent → provider reference.
+Compliance opens GST period → tax summary → export → download audit.
+Owner opens EOD → session → cash movements → variance.
+Inventory opens stock valuation → product → batch cost.
+Offline device displays cached dashboard → reconnect → freshness updates.
+Large export → queued → worker → R2 → signed download → audit.
+66. Security Acceptance Criteria
+Tenant A cannot obtain tenant B report data by changing IDs/filters.
+RLS blocks cross-tenant reporting queries.
+Unauthorized roles cannot generate or download restricted reports.
+Expired signed export URLs cannot be used.
+Export files contain only requested tenant/period data.
+Sensitive report downloads are audited.
+No secrets or unnecessary PII appear in logs.
+Provider/payment reports use verified state.
+Offline dashboards identify stale data.
+67. Financial & Inventory Acceptance Criteria
+Sales report reconciles to finalized invoices.
+Payment report reconciles to authoritative payment records.
+Inventory report reconciles to stock balances/movements.
+Khata report reconciles to customer ledger.
+Supplier report reconciles to payables/GRN.
+EOD report reconciles to cash movements.
+GST report reconciles to invoice tax snapshots.
+Returns/refunds are correctly represented.
+68. Mapping to Documents 01–15
+69. Implementation Checklist
+Dashboard KPI definitions approved.
+Report catalog implemented.
+Tenant/RLS report security verified.
+Role-based report permissions implemented.
+Report views created and indexed.
+Financial-period/timezone handling verified.
+Sales reports implemented.
+Customer/Khata reports implemented.
+Supplier/procurement reports implemented.
+Inventory/batch/expiry reports implemented.
+Payment/reconciliation reports implemented.
+Accounting/EOD reports implemented.
+GST/compliance reports implemented.
+Async export worker implemented.
+Private R2 export storage implemented.
+Signed URL authorization implemented.
+Report audit logging implemented.
+Offline freshness indicators implemented.
+Reconciliation tests implemented.
+Performance/load tests implemented.
+70. Non-Negotiable Reporting Rules
+Reports never bypass tenant isolation or RLS.
+Reports never become a second financial ledger.
+Unverified payment is never reported as verified collection.
+Draft transactions are not reported as finalized sales.
+Large exports never block transactional writes unnecessarily.
+Sensitive exports require permission and audit.
+Stale offline metrics must be labeled.
+Summary dashboards must reconcile with drill-down reports.
+Tax reports must use immutable invoice tax snapshots and current approved reporting rules.
+Report formulas must be versioned when their meaning changes.
+71. Definition of Done — Reports & Dashboard
+All mandatory report definitions are implemented.
+Dashboard KPIs reconcile to detail reports.
+RLS and RBAC tests pass.
+Financial, payment, inventory and Khata reconciliation passes.
+GST/compliance reports pass current required validation.
+Large exports run asynchronously.
+Export files are private, scoped and audited.
+Offline dashboards clearly identify freshness.
+Performance is validated with representative data volumes.
+Critical report UI passes accessibility and responsive tests.
+Report definitions are versioned and documented.
+Observability and alerting cover report failures and export queues.
+72. Final Reporting Architecture Summary
+The reporting system is a secure read layer over authoritative business data: fast dashboards serve daily decisions; detailed reports provide traceability; reconciliation reports prove consistency between invoices, payments, inventory, Khata, accounting and compliance; asynchronous exports prevent heavy workloads from blocking POS transactions; RLS/RBAC protect tenant and role boundaries; and versioned definitions keep historical metrics interpretable.
+73. Important Production Note
+Final statutory report layouts, GST fields, provider reconciliation formats, retention periods and legal reporting obligations must be validated against current authoritative requirements. Report performance must be tested using realistic production-scale data, and any aggregate/materialized view must have an explicit freshness and reconciliation policy.
+Layer | Responsibility
+Transactional DB | Authoritative invoices, payments, inventory, ledgers
+Reporting views | Consistent reusable read models
+Materialized aggregates | Optional high-volume summaries
+Report service | Filters, authorization, query execution
+Export worker | CSV/XLSX/PDF/JSON generation
+Dashboard API | Small, fast KPI payloads
+Object storage | Private temporary export/archive files
+Flutter UI | Charts, tables, drill-down and status
+KPI | Definition
+Today Sales | Finalized sales in tenant-local business day
+Transactions | Finalized invoices/transactions in selected period
+Cash | Relevant cash sales/movements
+UPI | Verified UPI collections
+Khata Outstanding | Authoritative customer receivable balance
+Stock Value | Configured inventory valuation basis
+Low Stock | Items below reorder policy
+Expiry Risk | Batches within configured warning window
+Gross Margin | Revenue less configured cost basis
+EOD Status | Open/variance/finalized state
+Report | Key metrics
+Sales Summary | Gross sales, discounts, tax, net sales
+Sales Detail | Invoice/line/customer/product/tender
+Hourly Sales | Transaction count and net sales by hour
+Daily Sales | Daily totals and comparisons
+Product Sales | Quantity, revenue, discount, tax
+Category Sales | Revenue/quantity/margin
+Customer Sales | Customer purchases and balances
+Payment Mix | Cash/UPI/bank/Khata
+Return Report | Returns/refunds/credit notes
+Void/Cancellation | Cancelled/voided documents and reasons
+Report | Key fields
+Customer Ledger | Date, reference, debit, credit, balance
+Khata Aging | Current, overdue buckets, total
+Collection Report | Receipt date, amount, method, allocator
+Customer Sales | Invoice count, net sales, returns
+Credit Exposure | Limit, utilized, available
+Overdue Customers | Customer, balance, age, last payment
+Collection Cycle | Configured cycle/reminder/grace status
+Report | Purpose
+Current Stock | Saleable quantity by product/UOM/location
+Batch Stock | Batch-level quantity/status
+Stock Movement | Every authoritative movement
+Stock Ledger | Opening + receipts - issues + adjustments
+Low Stock | Below reorder point
+Expiry | Expiry risk and blocked stock
+Stock Count | Expected vs counted vs variance
+Adjustment | Authorized corrections/shrinkage
+Transfers | Source/destination and status
+Inventory Valuation | Quantity × configured cost basis
+Report | Coverage
+Payment Summary | Verified collections by method
+UPI Detail | Intent/payment/provider references
+Pending Payments | Pending/unknown/expired
+Reconciliation | Provider vs internal state
+Refunds | Refund requests/results
+Overpayments | Payments exceeding allocated amount
+Cash Collections | Cash tender by session/day
+Bank Collections | Bank tender by reference
+Metric | Definition
+Opening Cash | Session opening amount
+Cash Sales | Cash tender from finalized transactions
+Cash Payouts | Authorized cash outflows
+Other Cash Movements | Configured cash movements
+Expected Cash | Opening + inflows - outflows
+Physical Cash | Operator counted amount
+Variance | Physical - expected
+Status | Open/counting/variance/finalized
+Format | Use
+CSV | Large/tabular data interchange
+XLSX | Business analysis
+PDF | Human-readable statements/reports
+JSON | System/archive/integration data where required
+Provider-specific | Current GST/payment/compliance format
+Field | Purpose
+report_id | Stable report definition
+definition_version | Reproducibility
+tenant_id | Isolation
+requested_by | Actor
+filters_json | Exact filter context
+period_start/end | Report period
+timezone | Presentation context
+status | Queued/running/completed/failed/expired
+file_reference | Private object reference
+checksum | Integrity
+created_at/completed_at | Audit/timing
+KPI | Required definition metadata
+Net Sales | Inclusion/exclusion rules
+Gross Margin | Costing basis
+Stock Value | Valuation method
+Outstanding | Ledger state and cutoff
+Overdue | Aging basis
+Verified Payments | Accepted provider/internal state
+Expiry Risk | Configured warning window
+Exception | Priority example
+Payment amount mismatch | Critical
+Webhook signature failure | High
+Cross-tenant authorization denial spike | Critical
+Stock negative/invariant violation | Critical
+Expired stock available for sale | High
+EOD variance | High
+GST export mismatch | High
+Sync conflict | Medium/High
+Printer failure | Operational
+Low stock | Operational
+Report class | Architecture
+Dashboard KPIs | Precomputed/indexed reads where needed
+Daily summaries | Indexed aggregation/materialized views
+Detail lists | Pagination + bounded filters
+Large exports | Async worker + streaming/chunking
+Historical analytics | Partition-aware queries
+Cross-period trends | Aggregate/reporting views
+Report | Minimum columns
+Sales Detail | Invoice, date/time, customer, net, tax, total, payment state
+Inventory | Product, UOM, saleable, reserved, blocked, value
+Batch | Product, batch, expiry, received, quantity, status
+Khata | Customer, debit, credit, balance, age
+Payment | Payment ID, invoice, method, amount, state, provider ref
+EOD | Session, opening, inflows, outflows, expected, physical, variance
+GST | Period, HSN/profile, taxable, CGST, SGST, IGST, total tax
+Failure | Expected behavior
+Query timeout | Fail safely; retry with narrower filters
+Worker failure | Job retry/idempotency
+R2 upload failure | Job remains recoverable; no false completion
+Provider data unavailable | Mark report exception/staleness
+Permission change | Re-check before download
+Expired export | Generate again after authorization
+Partial source data | Clearly label incomplete/unavailable; do not fabricate totals
+Report class | Cashier | Manager | Accounts | Compliance | Owner
+Sales detail | Limited | Yes | Yes | Limited | Yes
+Margin/cost | No | Yes | Yes | No | Yes
+Khata | Limited | Yes | Yes | No | Yes
+Supplier payables | No | Yes | Yes | No | Yes
+GST | No | Limited | Yes | Yes | Yes
+EOD | Own session | Yes | Yes | No | Yes
+Audit/security | No | Limited | Limited | Limited | Yes
+Exports | Limited | Yes | Yes | Yes | Yes
+Document | Reporting dependency
+01 Database & ERD | Authoritative entities, indexes, audit, export jobs
+02 API | Report/export API contracts
+03 Go Backend | Report service, repositories, workers
+04 Flutter | Dashboard/report UI
+05 Offline Sync | Freshness/stale dashboard behavior
+06 Inventory | Stock, batch, valuation, expiry reports
+07 Accounting & Khata | Ledger, EOD, receivable/payable reports
+08 POS | Sales/invoice/return/payment reports
+09 Hardware | Operational hardware reports
+10 Payment/UPI | Payment/reconciliation/refund reports
+11 GST/Compliance | Tax/export/compliance reports
+12 Security | RLS, RBAC, export security, audit
+13 Docker/DevOps | Report workers, scaling, observability
+14 Testing/QA | Report correctness, performance, security tests
+15 UI/UX | Dashboard/report interaction and accessibility

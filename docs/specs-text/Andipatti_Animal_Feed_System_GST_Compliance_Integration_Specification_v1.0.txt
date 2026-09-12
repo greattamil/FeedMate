@@ -1,0 +1,781 @@
+Andipatti Animal Feed System
+Document 11 — Complete GST & Compliance Integration Specification v1.0
+Implementation-ready • GST/tax engine • E-invoice/e-way integrations • Returns • Exports • Audit • Rule-driven compliance
+Document sequence: 11 of 20 | No sprint planning
+Important compliance principle: this specification is software architecture, not legal advice. Tax rates, exemptions, thresholds, forms, schemas, filing deadlines and government API requirements must be maintained as effective-dated configuration and verified against current official rules before production use.
+1. Document Control
+2. Purpose & Scope
+This document defines how the system determines, snapshots, validates, records, exports and integrates GST/compliance information for animal-feed retail/wholesale transactions. It covers product tax configuration, HSN/tax codes, CGST/SGST/IGST handling, tax-inclusive/exclusive prices, invoices, credit/debit adjustments, returns, e-invoice integration where applicable, e-way bill workflows where applicable, GST reports/exports, auditability, compliance jobs and archival.
+Support configuration-driven tax treatment.
+Preserve historical tax snapshots on finalized documents.
+Support intra-state and inter-state tax treatment where applicable.
+Support tax-exempt/zero-rated/non-taxable classifications where configured.
+Support compliance-provider integration without coupling core POS to a single provider.
+Produce reconciliation-ready GST data.
+Never hardcode current legal thresholds or rates into application logic.
+3. Non-Goals
+The application does not decide legal applicability from outdated assumptions.
+It does not replace a tax professional or government portal.
+It does not silently alter historical invoices when tax masters change.
+It does not treat an API provider response as valid without authentication, validation and traceability.
+It does not delete compliance evidence during ordinary archival.
+4. Compliance Architecture Principles
+Tax determination is a versioned domain service.
+Product tax configuration is effective-dated.
+Finalized documents store the exact tax snapshot used.
+Tax calculations use decimal arithmetic.
+Government/provider integrations are adapters behind stable interfaces.
+External calls are asynchronous where they do not need to block transaction finalization.
+Compliance documents and responses are immutable evidence records.
+All compliance requests are idempotent.
+Every adjustment links to its source document.
+Reports are reproducible from authoritative transaction data.
+Rule changes are versioned and tested before activation.
+5. Compliance Domain Model
+6. Tax Master Data
+A tax profile must be validated for internal consistency. For example, a profile intended for an intra-state split must not simultaneously produce an unrelated IGST calculation for the same taxable line.
+7. HSN / Product Tax Classification
+Product master stores HSN/tax classification reference as configured.
+Classification changes are effective-dated.
+Historical invoices retain the HSN/tax snapshot used at finalization.
+Missing HSN for a transaction requiring it is a configurable validation error.
+Product archival does not remove historical HSN data.
+Bulk imports require validation and approval before activation.
+The system should distinguish between a product's master HSN value and the finalized invoice's HSN snapshot.
+8. Place of Supply & Tax Type
+Determine seller/tenant registration state from tenant configuration.
+Determine customer/transaction state from validated customer/address/transaction data where required.
+Apply configured place-of-supply logic.
+Determine intra-state versus inter-state treatment only through the tax rules engine.
+Do not infer tax treatment from a free-text address.
+Business exceptions require explicit tax-rule configuration and audit.
+The exact legal place-of-supply rule depends on transaction facts and applicable law; the software therefore models the rule rather than hardcoding a simplistic state comparison for every scenario.
+9. Tax Calculation
+Line:
+gross = quantity × unit_price
+discount = approved line/invoice allocation
+taxable_value = applicable_tax_base(gross, discount, adjustments)
+
+If tax-exclusive:
+tax = taxable_value × rate
+
+If tax-inclusive:
+taxable_value = reverse_calculate_tax(inclusive_amount, rate)
+
+Tax components:
+CGST + SGST + IGST + CESS/other configured components
+
+Invoice tax = sum of applicable tax lines
+
+All calculations use decimal arithmetic.
+Tax calculation strategy is explicit and versioned.
+Rounding strategy is configured and consistent with accounting/export.
+Do not double-tax an amount.
+Discount treatment follows the configured tax rule.
+Rounding differences are explicitly represented where needed.
+10. Tax-Inclusive Pricing
+Store whether price is tax-inclusive or tax-exclusive.
+For inclusive prices, reverse-calculate taxable base and tax using the configured rate/rounding policy.
+Displayed unit price must remain understandable to cashier/customer.
+Final invoice stores both price basis and resulting tax values.
+Changing a product's tax-inclusion setting does not rewrite old invoices.
+11. GST Components
+The table describes software behavior, not a legal determination. Actual rates/classifications must be maintained from current authoritative sources.
+12. Invoice Tax Snapshot
+Finalized invoice stores tax profile/version.
+Each line stores HSN/tax classification snapshot where applicable.
+Tax lines store component type, rate, taxable base and tax amount.
+Place-of-supply/tax treatment snapshot is retained.
+Tax-inclusive/exclusive basis is retained.
+Rounding adjustment is retained.
+Future tax-master changes cannot alter the historical snapshot.
+13. Invoice Numbering & Financial Year
+Invoice series is tenant + financial year + document type scoped.
+Compliance references are linked to invoice ID and authoritative invoice number.
+Offline provisional IDs are never treated as the only final compliance document identifier.
+Document numbering remains unique and auditable.
+Series configuration is effective-dated and controlled.
+14. GST Invoice Minimum Data Model
+15. GSTIN Validation
+GSTIN format validation is a first-line input check, not proof of registration status.
+Where a verified GSTIN lookup provider/API is used, store verification status, timestamp and source.
+Do not block all transactions solely because external validation is unavailable unless policy requires it.
+Historical customer GSTIN snapshots remain associated with finalized invoices.
+Changes to customer GSTIN require audit.
+16. Customer Tax Identity
+The system must not infer legal B2B/B2C treatment solely from a customer name or phone number.
+17. E-Invoice Architecture
+Where e-invoicing is legally applicable to the tenant/transaction, integrate through the currently authorized government/ASP/GSP interface.
+Determine applicability using effective-dated tenant/transaction configuration and current compliance rules.
+Validate mandatory invoice fields.
+Create idempotent e-invoice request.
+Submit through provider adapter.
+Validate response and authenticity.
+Store IRN/acknowledgement/status and required signed/encoded artifacts.
+Link compliance document to internal invoice.
+Expose status to authorized users.
+Handle cancellation/update only through supported official workflow and time/rule constraints.
+Reconcile provider records with internal invoices.
+The exact applicability threshold, schema, API version, cancellation window and required fields must be externally maintained and revalidated before production deployment.
+18. E-Invoice State Machine
+19. E-Invoice Idempotency
+Internal compliance request has a unique idempotency key.
+Provider request uses a stable merchant/document reference where supported.
+Timeout after submission triggers lookup/reconciliation before resubmission.
+Duplicate successful provider responses do not create duplicate internal compliance documents.
+IRN is unique and retained as a compliance reference.
+Do not create a second internal invoice because an e-invoice request timed out.
+20. E-Invoice Failure Handling
+21. E-Way Bill Architecture
+E-way bill applicability is rule-driven and must use current applicable law and transaction facts. The software must not hardcode a single universal monetary threshold.
+Capture transport/destination details where required.
+Capture document/invoice reference.
+Capture transporter/vehicle/transport mode information when applicable.
+Calculate/validate required values.
+Submit through configured authorized integration.
+Store EWB number, validity/status and response.
+Support update/cancellation only when legally/provider-supported.
+Reconcile e-way status with invoice.
+Thresholds, exemptions, distance/transport rules and validity periods are maintained as effective-dated compliance rules.
+22. E-Way Bill State Machine
+23. Transport Data
+24. Returns, Credit Notes & Tax Reversal
+Sales returns reference the original invoice.
+Tax reversal is calculated from original tax snapshot and returned quantities/values.
+Credit note numbering follows controlled financial-year series.
+Credit note tax components must reconcile with the original supply treatment.
+Refund/payment effects are separate but linked.
+Historical invoice remains immutable.
+Return quantity and value cannot exceed remaining eligible balance.
+Validate original invoice.
+Validate returnable quantity/value.
+Calculate return taxable value.
+Calculate tax reversal.
+Create return and credit note records.
+Create inventory movement if applicable.
+Post accounting reversal.
+Update refund/customer credit.
+Create compliance adjustment/export data.
+25. Debit Notes / Adjustments
+Support only through an explicit controlled document type.
+Reference original invoice/transaction where applicable.
+Capture reason and supporting documentation.
+Calculate tax components using applicable adjustment rules.
+Post accounting and compliance entries atomically.
+Do not use generic invoice edits to implement debit-note behavior.
+26. Cancellation & Correction
+Draft invoices can be cancelled before finalization.
+Finalized invoices cannot be edited.
+Official e-invoice/e-way cancellation workflows follow current provider/legal constraints.
+Tax correction uses return/credit/debit/reversal workflows.
+Every correction links back to the original document.
+Cancellation reason is mandatory where applicable.
+27. GST Export Engine
+The export engine produces normalized data sets for accounting/tax review and filing workflows. Exact filing schema is versioned and must be updated when official requirements change.
+28. Export Job Architecture
+User selects period/filters.
+System creates export_job.
+Snapshot reporting parameters.
+Run asynchronously in worker.
+Read authoritative transaction data.
+Validate integrity.
+Generate CSV/XLSX/JSON or other configured format.
+Create checksum/manifest where required.
+Store result securely.
+Record generation status and source version.
+Provide controlled download to authorized role.
+Large exports must not block API request threads.
+Exports are reproducible from stored parameters and source versions.
+Failed jobs can be retried safely.
+29. GST Period Lock
+Finance/admin may lock a tax period after review.
+Locked periods prevent unauthorized modification of tax-relevant master data and transactions.
+Corrections after lock use adjustment documents in an open period according to configured policy.
+Period lock/unlock is audited.
+Exports generated from locked periods are retained.
+30. Tax Master Governance
+Create new tax profile/version.
+Validate rate/components and effective dates.
+Review affected products.
+Test representative invoices.
+Approve by authorized role.
+Activate at effective time.
+Preserve previous version for historical transactions.
+Monitor tax calculation errors after activation.
+Do not update an active tax profile in place if that would alter historical semantics; create a new effective-dated version.
+31. Compliance Rules Engine
+Rule input:
+tenant profile
+transaction date
+seller registration state/status
+customer status/state/GSTIN
+product tax classification
+transaction type
+document value
+transport facts
+current rule version
+
+Rule output:
+tax treatment
+tax profile
+e-invoice applicability
+e-way applicability
+required fields
+validation rules
+export classification
+
+Rule outputs must include a rule/version reference so decisions can be audited later.
+32. Configuration Examples
+Examples are placeholders; no legal rate/threshold should be promoted to production without current verification.
+33. API Mapping
+Exact routes/schema remain governed by Document 02.
+34. Database Mapping
+35. Go Backend Mapping
+TaxService: tax determination/calculation.
+ComplianceRuleService: applicability and rule versions.
+GSTINService: validation adapter.
+EInvoiceService: request/status/cancel/reconciliation orchestration.
+EWayService: applicability/request/status/cancel.
+ComplianceProvider adapters: provider-specific integration.
+ExportService: asynchronous report generation.
+ComplianceReconciliationService: internal/external comparison.
+AuditService: master-data and compliance evidence audit.
+OutboxService: notifications/events.
+36. Flutter Mapping
+Tax summary presentation on quote/invoice.
+Customer GSTIN capture/validation UI.
+Compliance status badges for authorized users.
+E-invoice/e-way reference display.
+Export request/status UI.
+Validation error display.
+Offline restrictions for compliance-dependent operations.
+Receipt rendering using finalized tax snapshot.
+37. Offline Compliance Policy
+Cached tax configuration can support permitted offline sales according to effective-date policy.
+Offline transactions store tax rule/profile version used locally.
+Government API calls cannot be assumed available offline.
+E-invoice/e-way generation requiring online provider access remains pending/restricted.
+Upon reconnect, server revalidates tax/compliance applicability.
+Conflicts are explicit; no silent tax rewriting.
+If legal workflow requires real-time compliance before supply, tenant policy must block final release when compliance cannot be obtained.
+38. Tax Snapshot Reconciliation
+Compare local/offline tax profile version with server-effective version.
+Recalculate only for reconciliation analysis unless business/legal workflow explicitly requires correction.
+Never silently change a finalized invoice's tax snapshot.
+Any correction creates controlled adjustment documents.
+39. Webhook Security
+Receive provider callback over HTTPS.
+Validate signature/authentication.
+Check replay/timestamp controls when available.
+Deduplicate event ID.
+Verify merchant/tenant mapping.
+Verify document/reference identifiers.
+Validate returned compliance status.
+Persist evidence.
+Apply idempotent state transition.
+Emit audit/outbox event.
+Invalid callbacks are rejected and monitored.
+40. Compliance Document Evidence
+41. Reconciliation
+Internal finalized invoice count vs compliance-generated count.
+Internal taxable/tax totals vs exported totals.
+Invoice vs IRN mapping.
+Invoice vs EWB mapping.
+Credit note vs return mapping.
+Compliance provider response vs internal status.
+Period totals vs accounting totals.
+Export totals vs source ledger.
+Generate reconciliation dataset.
+Identify matched records.
+Identify missing/excess/mismatched records.
+Auto-resolve safe idempotent cases.
+Create manual-review cases.
+Record resolution evidence.
+42. Compliance Exceptions
+43. Security & Access
+Tax master changes require authorized role.
+Compliance submissions require configured integration credentials stored server-side.
+Government/provider secrets never reside in Flutter.
+RLS applies to tenant-owned compliance data.
+Export access is role-controlled.
+Downloaded compliance files are protected and expire according to policy.
+Audit records are append-oriented.
+Sensitive provider payloads are minimized/redacted in logs.
+44. Role Matrix
+45. Tax & Compliance Audit
+Record tax profile create/update/activation/retirement.
+Record HSN/classification changes.
+Record GSTIN validation actions/results.
+Record e-invoice/e-way requests and status transitions.
+Record cancellations and corrections.
+Record period locks/unlocks.
+Record export generation.
+Record reconciliation resolution.
+Record manual compliance overrides with reason and authorization.
+46. Performance Targets
+47. Testing Strategy
+47.1 Unit tests
+Tax-inclusive/exclusive calculations.
+CGST/SGST/IGST selection.
+Tax rounding.
+Discount taxable-base behavior.
+Effective-dated tax profiles.
+HSN validation.
+Rule applicability.
+E-invoice/e-way required-field validation.
+GST export grouping.
+Period-lock rules.
+47.2 Integration tests
+Invoice → tax snapshot → accounting.
+Return → tax reversal → credit note.
+E-invoice request → provider response.
+E-invoice duplicate callback.
+E-way request → response.
+Provider timeout → lookup.
+Compliance export → reconciliation.
+RLS tenant isolation.
+47.3 Compliance contract tests
+Provider request schema.
+Signature verification.
+Reference mapping.
+Amount/tax total consistency.
+Error mapping.
+Version compatibility.
+Sandbox examples where available.
+47.4 Regression tests
+Tax master change does not alter historical invoice.
+Financial-year boundary.
+Offline sale with old/new tax profile.
+Inter-state/intra-state scenarios.
+Returns after tax configuration change.
+Archived invoice remains tax-reproducible.
+48. Security/Chaos Tests
+Invalid compliance signature.
+Replay callback.
+Cross-tenant compliance reference.
+Provider timeout after successful submission.
+Database failure during compliance state update.
+Worker crash after provider response.
+Duplicate e-invoice request.
+Duplicate e-way request.
+Export worker restart.
+Corrupt settlement/compliance import.
+Period lock race with transaction creation.
+49. GST Reports & Dashboards
+Taxable sales by period.
+CGST/SGST/IGST/cess totals.
+B2B/B2C summary.
+HSN summary.
+Credit/debit note summary.
+Exempt/zero-rated summary.
+E-invoice pending/failed/generated.
+E-way pending/failed/generated/expired.
+GST export status.
+Tax master changes.
+Reconciliation exceptions.
+Period lock status.
+50. Period-End Workflow
+Confirm financial period.
+Verify tax master versions.
+Run invoice/return integrity checks.
+Run tax-total reconciliation.
+Run e-invoice reconciliation.
+Run e-way reconciliation where applicable.
+Generate GST exports.
+Review exceptions.
+Resolve or document unresolved exceptions.
+Lock period.
+Archive approved reports/evidence according to retention policy.
+51. GST Export Integrity Checks
+Invoice number uniqueness.
+Taxable value = sum of eligible lines.
+Tax total = sum of tax lines.
+CGST/SGST/IGST mutually consistent with transaction tax treatment.
+Credit notes linked to source.
+Cancelled/voided documents excluded according to reporting rules.
+Duplicate IRN/EWB references detected.
+Period dates use tenant timezone consistently.
+Grand totals reconcile to accounting source reports.
+52. Financial-Year Boundary
+Tax documents use correct financial year.
+Document series switches according to configured financial-year policy.
+Exports can be generated across boundaries only with explicit date filters.
+Previous period lock remains independent from next period activation.
+Compliance references retain original financial-year/document context.
+53. Import & Master Data Governance
+Tax/HSN master imports are schema-validated.
+Duplicate codes detected.
+Effective-date overlaps rejected unless explicitly versioned.
+Rates must pass sanity checks.
+Imported changes enter review/approval state where configured.
+Bulk changes produce audit summary.
+Rollback requires compensating configuration version, not silent history mutation.
+54. Archival & Retention
+Compliance documents are part of the financial audit chain.
+Archive manifests include document IDs, hashes/checksums and retention class.
+Archived invoices retain links to tax, IRN/EWB, returns and payments.
+R2 is object/archive storage, not the only backup.
+Archive deletion follows approved retention policy and legal requirements.
+Restore testing verifies tax/compliance traceability.
+55. Docker/DevOps
+Go API container handles synchronous tax validation and compliance commands.
+Worker container handles exports, retries, reconciliation and notifications.
+PostgreSQL remains authoritative.
+Redis is optional for queues/caching but not financial authority.
+Compliance provider credentials are injected securely.
+Sandbox/provider adapters are configurable by environment.
+CI runs tax-rule and integration contract tests.
+Provider-specific certificates/keys are managed outside source code.
+56. Configuration & Feature Flags
+enable_gstin_validation
+enable_einvoice
+enable_eway
+require_einvoice_before_release
+require_eway_before_dispatch
+tax_rounding_mode
+tax_inclusive_pricing_policy
+period_lock_enabled
+export_formats
+provider_environment
+provider_api_version
+compliance_retry_policy
+Feature flags control workflow availability; they must not be used to bypass legal/accounting controls.
+57. Change Management
+Every tax rule change has effective date and source/reference.
+Every provider schema/API version change is tracked.
+Test cases accompany rule changes.
+Historical documents retain prior rule versions.
+Production activation requires approval.
+Emergency changes require documented rollback/compensating plan.
+58. End-to-End Scenarios
+58.1 Standard taxable sale
+Product selected.
+Effective tax profile resolved.
+Tax calculated.
+Invoice finalized with tax snapshot.
+Accounting posts tax liability.
+Compliance record/export includes same values.
+58.2 Intra-state sale
+Seller/customer transaction facts resolved.
+Rule engine selects applicable intra-state treatment.
+CGST/SGST components calculated.
+Invoice stores component snapshot.
+GST export groups amounts correctly.
+58.3 Inter-state sale
+Transaction facts indicate applicable inter-state treatment.
+Rule engine selects IGST where appropriate.
+Invoice stores tax snapshot.
+Export/report uses same snapshot.
+58.4 E-invoice required
+Applicability rule returns REQUIRED.
+Mandatory data validated.
+Provider intent/request created idempotently.
+Provider response verified.
+IRN/evidence stored.
+Invoice/compliance status updated.
+58.5 E-invoice provider timeout
+Submission attempt times out.
+Request becomes UNKNOWN/PENDING.
+System looks up using stable reference.
+Existing IRN/status is recovered if provider accepted.
+No duplicate invoice/e-invoice is created.
+58.6 E-way bill
+Rule engine determines applicability.
+Transport fields validated.
+Provider request submitted.
+EWB reference/status stored.
+Dispatch workflow observes configured release policy.
+58.7 Return
+Original invoice selected.
+Returnable quantity validated.
+Tax reversal calculated from original snapshot.
+Credit note created.
+Inventory/accounting/refund handled by dependent engines.
+GST export captures adjustment.
+58.8 Tax master change
+New effective-dated tax profile created.
+Future invoices use new profile.
+Old invoices retain old snapshot.
+Reports remain reproducible.
+58.9 Offline sale
+Cached approved tax version used if policy permits.
+Transaction stores rule/profile version.
+On reconnect server revalidates.
+Any conflict becomes explicit reconciliation/adjustment.
+59. Error Catalogue
+60. Non-Negotiable Compliance Rules
+Never hardcode tax rates or legal thresholds that are expected to change.
+Never rewrite historical tax snapshots when masters change.
+Never use floating-point arithmetic for tax or money.
+Never create a second e-invoice merely because the first request timed out.
+Never trust an unsigned/unverified compliance callback.
+Never treat provider timeout as automatic failure or success.
+Never delete compliance evidence merely because a document is archived.
+Never allow tax master changes to bypass effective dating and audit.
+Never finalize a tax-sensitive transaction without required tax configuration.
+Never allow period lock to be bypassed by ordinary cashier operations.
+Never let offline cached tax data silently override authoritative server policy.
+Never edit finalized invoices to correct tax; use controlled adjustment documents.
+Never use a single hardcoded e-way applicability threshold as the universal rule.
+Never expose government/provider credentials in Flutter or logs.
+Never allow cross-tenant access to compliance documents or exports.
+61. Acceptance Criteria
+Tax profiles are effective-dated and auditable.
+GST calculations use decimal arithmetic and deterministic rounding.
+CGST/SGST/IGST treatment is configuration/rule-driven.
+Tax-inclusive and tax-exclusive pricing is supported.
+Finalized invoices retain complete tax snapshots.
+Historical invoices remain unchanged after tax-master changes.
+GSTIN validation supports format checks and optional authoritative lookup.
+E-invoice workflow is idempotent and provider-adapter based.
+E-way workflow is rule-driven and configurable.
+Provider timeouts are reconciled without duplicate submissions.
+Compliance webhooks are authenticated and idempotent.
+Returns create traceable tax reversals/credit notes.
+GST exports reconcile to authoritative invoices/accounting.
+Period lock prevents unauthorized tax-period changes.
+Compliance evidence is retained and archivable.
+Offline tax behavior is explicit and tested.
+RLS protects tenant compliance data.
+All compliance-sensitive actions are audited.
+All end-to-end, concurrency and failure scenarios pass.
+62. Implementation Checklist
+Implement tax profile schema/versioning.
+Implement tax rule engine.
+Implement decimal tax calculator.
+Implement HSN/tax classification governance.
+Implement GSTIN validation.
+Implement place-of-supply rule boundary.
+Implement tax snapshotting.
+Implement e-invoice provider interface.
+Implement e-way provider interface.
+Implement signed webhook verification.
+Implement compliance idempotency.
+Implement compliance state machines.
+Implement return/credit-note tax reversal.
+Implement GST export jobs.
+Implement reconciliation engine.
+Implement period lock.
+Implement audit trail.
+Implement compliance dashboards.
+Implement offline tax reconciliation.
+Implement Docker worker/API deployment.
+Implement sandbox/contract tests.
+Verify current production legal/provider configuration before go-live.
+63. Definition of Done
+Tax engine is deterministic and independently tested.
+Historical tax snapshots are immutable.
+GST exports reconcile with accounting.
+E-invoice/e-way adapters have provider contract tests.
+Webhook authentication and replay protection pass.
+Duplicate submission tests pass.
+Provider timeout recovery is demonstrated.
+Returns and credit notes correctly reverse tax/accounting.
+Period locking and authorization are enforced.
+Offline tax reconciliation works.
+Compliance evidence can be restored from archive.
+Observability and reconciliation dashboards exist.
+Docker deployment is reproducible.
+No P0 tax/compliance/data-integrity defect remains.
+64. Dependency & Change Control
+This document depends on Documents 01–10 and is normative for tax/compliance behavior used by Documents 12–20. Government rules, schemas, thresholds, tax rates, forms and provider APIs are external change points. Each production configuration must identify its source, effective date, verification date and responsible approver.
+End of Document 11 — Complete GST & Compliance Integration Specification v1.0.
+Item | Specification
+Document ID | AAF-GST-011
+Version | 1.0
+Status | Implementation Baseline
+Dependencies | Documents 01–10
+Primary owners | Finance, Compliance, Backend, QA, Operations
+Authoritative transaction DB | PostgreSQL
+External authority | Applicable government portals/APIs and authorized providers
+Deployment | Go API/workers containerized with Docker
+Entity | Purpose
+tax_profiles | Tax treatment/rate/split configuration.
+products | HSN/tax classification reference.
+sales_invoices | Finalized invoice tax snapshot.
+sales_invoice_lines | Line taxable values and tax context.
+invoice_tax_lines | CGST/SGST/IGST/other tax breakdown.
+sales_returns | Return source and quantities.
+compliance_requests | External compliance operation request.
+compliance_responses | Normalized external response/status.
+compliance_documents | IRN/e-way/other compliance evidence.
+export_jobs | GST/report export generation.
+audit_logs | Tax/compliance changes and actions.
+archive_manifests | Retention/archival traceability.
+Field | Requirement
+tax_profile_id | Unique tenant-scoped profile.
+name/code | Human/admin identifier.
+tax_type | GST/EXEMPT/ZERO_RATED/NON_GST/OTHER configured category.
+rate | NUMERIC(7,4).
+cgst_rate | Effective when applicable.
+sgst_rate | Effective when applicable.
+igst_rate | Effective when applicable.
+cess_rate | Optional configured component.
+effective_from/to | Mandatory effective dating.
+place_of_supply_rule | Configured rule reference.
+inclusive/exclusive | Price tax treatment.
+hsn_code | Product/tax classification reference where applicable.
+status | ACTIVE/INACTIVE/RETIRED.
+Scenario | Typical system behavior
+Applicable intra-state supply | Calculate configured CGST + SGST components.
+Applicable inter-state supply | Calculate configured IGST component.
+Exempt/non-taxable | Tax = 0 with explicit classification/reason.
+Zero-rated | Tax treatment configured separately from ordinary 0% assumptions.
+Cess/other component | Only when configured and applicable.
+Area | Data
+Supplier | Legal/shop identity, GST registration details where applicable.
+Customer | Name/address and GSTIN where applicable/available.
+Invoice | Number, date/time, financial year, supply type.
+Lines | Product description, HSN/classification, UOM, quantity, rate, discount, taxable value.
+Tax | CGST/SGST/IGST/cess or configured components.
+Totals | Taxable total, tax total, rounding, grand total.
+Payment | Tender/reference where configured.
+Compliance | IRN/e-way reference/status where applicable.
+Audit | Created/finalized actor/device/request identifiers.
+Customer state | Requirement
+Unregistered/Walk-In | Use configured B2C treatment.
+Registered customer | Capture GSTIN when required and validated by configured rules.
+Inter-state registered customer | Apply configured supply/tax logic.
+Special tax treatment | Require explicit customer/tax configuration and audit.
+State | Meaning
+NOT_REQUIRED | Rule engine says e-invoice is not applicable.
+REQUIRED | Transaction requires e-invoice processing.
+PENDING | Request created/awaiting provider response.
+GENERATED | Provider returned valid IRN/acknowledgement.
+FAILED | Submission failed validation/provider request.
+CANCEL_PENDING | Cancellation request in progress.
+CANCELLED | Provider confirms cancellation.
+RECONCILIATION_REQUIRED | Internal/provider states disagree.
+Failure | Behavior
+Validation failure | Do not submit; show field-level correction.
+Provider timeout | Mark UNKNOWN/PENDING; lookup before retry.
+Duplicate submission | Resolve against provider reference/IRN.
+Invalid authentication | Reject and alert admin.
+Provider outage | Queue/retry according to policy; do not invent IRN.
+Internal invoice finalized but e-invoice pending | Retain invoice and compliance-pending state if legally/workflow permissible; alert responsible role.
+E-invoice generation required before invoice release | Tenant policy may block release, but the rule must be explicit and tested.
+State | Meaning
+NOT_REQUIRED | Rule engine says not applicable.
+REQUIRED | Applicable and awaiting creation.
+PENDING | Submission in progress.
+GENERATED | Valid EWB reference received.
+FAILED | Provider validation/request failure.
+CANCEL_PENDING | Cancellation requested.
+CANCELLED | Confirmed cancelled.
+EXPIRED | Validity ended according to provider/rule.
+RECONCILIATION_REQUIRED | Internal/provider mismatch.
+Field | Rule
+Transport mode | Configured enumerated value.
+Vehicle number | Validated format where applicable.
+Transporter ID | Captured when required.
+Transporter name | Captured where required.
+Distance | Decimal/integer according to current provider schema.
+Origin/destination | Structured address/state data.
+Dispatch date | Server/audited timestamp.
+Document reference | Invoice/related document.
+Export | Purpose
+Sales register | Invoice/line/tax data.
+B2B sales | Registered customer transactions.
+B2C sales | Consumer transactions.
+Credit/debit notes | Adjustments and reversals.
+HSN summary | Quantity/value/tax by HSN/classification.
+Tax summary | CGST/SGST/IGST/cess totals.
+Exempt/zero-rated summary | Configured non-taxable classifications.
+E-invoice register | IRN/ack/status reconciliation.
+E-way register | EWB reference/status/reconciliation.
+Payment reconciliation | Optional finance cross-check.
+Setting | Example starting configuration
+Tax profile | Feed tax treatment configured per approved master.
+Customer GST requirement | Required for applicable registered-customer flows.
+E-invoice | Applicability enabled by tenant/rule configuration.
+E-way bill | Applicability determined by current rule engine.
+Period close | Finance-controlled.
+Export timezone | Tenant timezone.
+Capability | Representative endpoint
+Tax profiles | GET/POST /api/v1/tax/profiles
+Tax calculation | POST /api/v1/tax/calculate
+GSTIN validation | POST /api/v1/compliance/gstin/validate
+E-invoice create | POST /api/v1/compliance/einvoice
+E-invoice status | GET /api/v1/compliance/einvoice/{id}
+E-way create | POST /api/v1/compliance/eway
+E-way status | GET /api/v1/compliance/eway/{id}
+Compliance webhook | POST /api/v1/compliance/webhooks/{provider}
+GST export | POST /api/v1/compliance/exports
+Export status | GET /api/v1/compliance/exports/{id}
+Reconciliation | GET/POST /api/v1/compliance/reconciliation
+Concern | Entities
+Tax configuration | tax_profiles; products
+Invoice tax snapshot | sales_invoices; sales_invoice_lines; invoice_tax_lines
+Returns | sales_returns; sales_return_lines
+Compliance request | compliance_requests
+Compliance response | compliance_responses
+Compliance evidence | compliance_documents
+Exports | export_jobs
+Audit | audit_logs
+Archival | archive_manifests; archive_objects
+Evidence | Examples
+Request metadata | Request ID, timestamp, provider, document reference.
+Response metadata | Provider response ID, status, timestamp.
+Government reference | IRN, acknowledgement, EWB number, etc. where applicable.
+Payload hash | Checksum for integrity where appropriate.
+Artifacts | Signed/encoded response or generated document when legally/operationally required.
+Rule version | Applicability/tax rule version used.
+Actor | System/user/device initiating action.
+Code | Meaning
+GST_MASTER_INVALID | Tax profile invalid/inconsistent.
+HSN_REQUIRED | Required HSN/classification missing.
+GSTIN_INVALID_FORMAT | GSTIN fails format validation.
+GSTIN_UNVERIFIED | External validation unavailable/not confirmed.
+TAX_RULE_NOT_FOUND | No effective rule.
+TAX_CALCULATION_ERROR | Calculation validation failed.
+EINVOICE_REQUIRED | E-invoice needed before configured release.
+EINVOICE_PROVIDER_ERROR | Provider/API failure.
+EINVOICE_VALIDATION_ERROR | Mandatory data invalid.
+IRN_NOT_FOUND | Expected provider reference unavailable.
+EWAY_REQUIRED | E-way workflow required.
+EWAY_VALIDATION_ERROR | Transport/compliance data invalid.
+COMPLIANCE_SIGNATURE_INVALID | Callback authenticity failed.
+COMPLIANCE_REPLAY | Duplicate/replayed callback.
+COMPLIANCE_STATE_MISMATCH | Internal/external state differs.
+PERIOD_LOCKED | Operation not allowed in locked period.
+EXPORT_VALIDATION_FAILED | GST export failed integrity checks.
+Operation | Cashier | Senior | Manager/Owner | Finance/Admin
+View tax on invoice | ✓ | ✓ | ✓ | ✓
+Edit tax master | — | — | ✓ | ✓
+GSTIN validation | Configured | ✓ | ✓ | ✓
+Generate e-invoice | System/Configured | System/Configured | ✓ | ✓
+Cancel compliance document | — | — | ✓ | ✓
+Generate GST export | — | — | ✓ | ✓
+Period lock | — | — | ✓ | ✓
+Reconciliation resolution | — | — | ✓ | ✓
+View compliance evidence | Limited | ✓ | ✓ | ✓
+Operation | Target
+Tax calculation | p95 < 100 ms for normal invoice.
+GSTIN format validation | < 50 ms local validation.
+External GSTIN lookup | Provider-dependent; bounded timeout.
+E-invoice/e-way API | Async/timeout bounded; must not block unnecessarily.
+Compliance webhook acknowledgement | p95 < 500 ms where feasible.
+GST export | Async for large periods.
+Reconciliation | Async and scalable.
+Code | Meaning
+TAX_PROFILE_NOT_FOUND | No effective tax profile.
+TAX_PROFILE_EXPIRED | Configured profile not effective.
+TAX_RATE_INVALID | Invalid rate/component configuration.
+TAX_COMPONENT_CONFLICT | CGST/SGST/IGST configuration inconsistent.
+HSN_INVALID | HSN/classification invalid.
+PLACE_OF_SUPPLY_UNRESOLVED | Required transaction facts missing.
+GSTIN_FORMAT_INVALID | GSTIN format invalid.
+GSTIN_LOOKUP_FAILED | External validation failed/unavailable.
+EINVOICE_NOT_APPLICABLE | Workflow called when not required/enabled.
+EINVOICE_REQUIRED_FIELDS_MISSING | Mandatory data absent.
+EINVOICE_SUBMISSION_FAILED | Provider rejected request.
+EINVOICE_TIMEOUT | Outcome unknown.
+EWAY_REQUIRED_FIELDS_MISSING | Transport/compliance data absent.
+EWAY_SUBMISSION_FAILED | Provider rejected request.
+COMPLIANCE_AUTH_FAILED | Provider authentication failed.
+COMPLIANCE_SIGNATURE_INVALID | Callback signature invalid.
+COMPLIANCE_DUPLICATE_EVENT | Callback already processed.
+COMPLIANCE_REFERENCE_MISMATCH | Provider/internal reference mismatch.
+PERIOD_LOCKED | Tax period is locked.
+EXPORT_FAILED | Export generation failed.
+RECONCILIATION_REQUIRED | Internal/external mismatch.

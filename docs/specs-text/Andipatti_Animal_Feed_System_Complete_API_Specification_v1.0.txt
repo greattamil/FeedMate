@@ -1,0 +1,570 @@
+ANDIPATTI ANIMAL FEED SYSTEM
+COMPLETE API SPECIFICATION
+Version 1.0 • Go REST API + WebSocket + Offline Sync + Webhooks
+This document is the implementation-level API contract following the Complete Database & ERD Specification v1.0 and Final Master PRD v1.2. It defines authentication, authorization, tenant isolation, request/response conventions, endpoints, validation, idempotency, synchronization, payments, hardware events, notifications, compliance, reporting and operational APIs.
+Tax/HSN, e-way-bill, payment-provider and WhatsApp behavior must remain configuration/provider driven and must be validated against current applicable rules before production.
+1. API Architecture
+Base URL: /api/v1.
+Transport: HTTPS/TLS for REST; WSS for WebSocket.
+Content type: application/json unless an endpoint explicitly accepts multipart/form-data or file download.
+PostgreSQL is authoritative; API is the only normal write boundary.
+Go services must enforce tenant authorization before database access and establish trusted PostgreSQL tenant context for RLS.
+External APIs are isolated behind provider adapters.
+Large reports/exports are asynchronous jobs.
+Financial writes use DB transactions and outbox events.
+2. Standard Headers
+The server generates a correlation ID if X-Request-ID is absent. Never trust tenant_id supplied in a request body as authorization context.
+3. Authentication
+3.1 Login request/response
+POST /api/v1/auth/login
+Request: {identifier, password, device_id, device_fingerprint}
+Response: {access_token, refresh_token, expires_in, user, tenant, permissions, device}
+Security: rate limiting, lockout policy, generic failure messages, audit logging.
+3.2 Token rules
+Short-lived access tokens.
+Refresh tokens rotated and revocable.
+Device/session can be independently revoked.
+Do not store access tokens in plaintext local DB.
+4. Authorization & RBAC
+Every protected endpoint maps to one or more permission codes. Example: invoice.create, invoice.finalize, invoice.cancel, stock.adjust, credit.override, payment.refund, eod.close, archive.purge.
+403 when authenticated but not authorized.
+401 when authentication is absent/invalid.
+Authorization checks are server-side; UI hiding is not security.
+Tenant is derived from trusted identity/session and device registration.
+5. Standard Error Contract
+{
+  "error": {
+    "code": "BUSINESS_RULE_VIOLATION",
+    "message": "Human-readable safe message",
+    "details": [],
+    "retryable": false,
+    "request_id": "uuid"
+  }
+}
+6. Pagination, Filtering & Sorting
+Collection endpoints use limit, cursor, sort and filter parameters. Cursor pagination is preferred for high-volume data.
+Response pattern: {data:[...], page:{next_cursor, has_more}, request_id}. Never expose unbounded collections.
+Default limit 25/50 according to endpoint.
+Maximum limit configured globally.
+Date filters use ISO/RFC3339 or YYYY-MM-DD where the endpoint is date-based.
+All queries are tenant scoped.
+7. Tenant & Settings APIs
+8. Users, Roles & Devices
+9. Product APIs
+Search supports q, barcode, sku, language, alias, active and cursor. Exact barcode/SKU has highest priority. Fuzzy/phonetic matching is bounded and indexed.
+10. UOM APIs
+Conversion results use decimal-safe values. The API must return factor, source UOM, target UOM and effective rule used.
+11. Tax & Pricing APIs
+Tax profiles must be validated/approved according to tenant policy. Historical invoices store snapshots.
+12. Customer APIs
+Credit check response includes current outstanding, available limit, proposed credit, post-transaction balance, whether approval is required and applicable policy.
+13. Supplier APIs
+14. Procurement / PO APIs
+PO lines include product, UOM, quantity, unit cost, discount, tax profile and expected delivery. Approval is permission-controlled.
+15. GRN APIs
+Validation must calculate gross/tare/net, verify tare threshold, batch/expiry, UOM, cost, supplier and quality status. Over-threshold tare requires correction or authorized override.
+16. Inventory APIs
+Stock queries support location, product, batch, status and UOM. Posted movement records are immutable; corrections are reversal/adjustment operations.
+17. POS Cart & Quote APIs
+Cart is a convenience object; the finalized invoice is authoritative. A quote must never reserve stock unless explicitly configured.
+18. Invoice APIs
+Finalization is atomic and idempotent. An invoice response includes invoice ID, invoice number, totals, taxes, payment status, batch allocations and print/delivery status references.
+19. Invoice Finalization Request
+POST /pos/carts/{id}/finalize
+{
+  "customer_id": "uuid|null",
+  "tenders": [
+    {"method":"CASH","amount":"1000.00"},
+    {"method":"UPI","amount":"500.00","payment_intent_id":"uuid"},
+    {"method":"CREDIT","amount":"1500.00"}
+  ],
+  "notes": "optional"
+}
+Rules:
+- tender sum equals grand total;
+- credit is validated against limit;
+- stock allocation is validated;
+- tax snapshot is generated;
+- idempotency key is mandatory;
+- all financial/stock records commit atomically.
+Use strings for decimal JSON values where client/platform precision could otherwise be unsafe.
+20. Returns & Refund APIs
+21. Khata / Receipts / Contra APIs
+Receipt and contra posting are atomic with ledger/journal effects. Contra valuation must use approved pricing/authorization.
+22. Payment APIs
+Webhook endpoint must verify provider signature, event ID uniqueness and payload integrity before financial processing. Provider credentials are never accepted from clients.
+23. Payment Webhook Processing
+Receive request and capture provider event ID.
+Verify signature/authentication.
+Check provider + event ID uniqueness.
+Validate amount/currency/reference.
+Locate internal payment intent.
+Lock/validate relevant transaction state.
+Apply state transition idempotently.
+Create ledger/journal effects only once.
+Create outbox event.
+Return provider-required success response.
+Retry transient internal failures safely.
+24. Device / Hardware APIs
+Actual Bluetooth/USB/serial communication normally occurs on-device. The API stores device configuration, diagnostics and audit events rather than attempting to directly control local hardware.
+25. Receipt Delivery / WhatsApp APIs
+WhatsApp receipt delivery is asynchronous. A printer failure can trigger a UI fallback action, but the delivery itself does not alter invoice financial state.
+26. Khata Collection Grace Period APIs
+The collection engine must deduplicate by tenant + customer + cycle + template version. Grace periods suppress messages without changing receivable due dates.
+27. EOD APIs
+EOD close records opening cash, cash sales, refunds, payouts, expected cash, actual cash and variance. Reopen requires privileged approval and audit.
+28. Compliance APIs
+Eligibility and required fields are determined by current applicable rules/configuration. Provider responses must be stored with request/response references and status.
+29. Reports APIs
+All report filters are tenant-scoped and RBAC-controlled. Large exports return a job ID.
+30. Offline Sync APIs
+30.1 Push envelope
+{
+  "device_id":"uuid",
+  "transactions":[{
+    "client_transaction_id":"uuid",
+    "local_sequence":1234,
+    "entity_type":"SALES_INVOICE",
+    "operation_type":"CREATE",
+    "payload_version":1,
+    "payload_hash":"sha256...",
+    "payload":{}
+  }]
+}
+Server validates device ownership and tenant context.
+Each transaction is independently idempotent.
+Response contains ACCEPTED, DUPLICATE, CONFLICT or REJECTED per transaction.
+Batch upload is not one giant transaction if doing so would make retry/diagnostics unsafe; each financial transaction remains atomic.
+31. Sync Conflict Semantics
+Last-write-wins is prohibited for financial and inventory events.
+32. WebSocket API
+WSS /api/v1/ws
+WebSocket is supplementary; REST/database remains authoritative.
+Clients reconnect with backoff.
+Events include event_id, type, aggregate_id, tenant context implicitly, sequence/timestamp and payload version.
+Duplicate events are safe to process.
+33. Outbox / Event Delivery
+Within the same DB transaction as the business event, insert an integration_events/outbox row. A worker publishes it after commit. External delivery is retryable with exponential backoff and dead-letter handling.
+No external API call inside a long-held DB transaction.
+Events have unique IDs.
+Consumers must be idempotent.
+Failed events remain observable and replayable by authorized operators.
+34. API Validation Rules
+UUID syntax validated.
+Tenant identity never accepted as a trust boundary from client input.
+Decimal strings validated for scale and range.
+Dates/timestamps validated and normalized.
+Enum/status values validated.
+Referenced records must belong to the same tenant.
+Inactive/deactivated products cannot be newly sold.
+Expired/quarantined batches cannot be allocated to ordinary sales.
+Invoice tender total must equal invoice grand total.
+Credit tender must pass credit check.
+GRN net weight cannot be negative.
+Tare threshold must be enforced.
+Finalized documents cannot be mutated through generic PATCH.
+35. Idempotency Contract
+Required on: invoice finalization, payment intent creation, receipt posting, contra posting, return posting, refunds, stock adjustments, EOD close, compliance submissions and sync push.
+Header: Idempotency-Key.
+Server stores operation result with tenant + operation + key.
+Same key + same payload returns original result.
+Same key + materially different payload returns 409 IDEMPOTENCY_CONFLICT.
+Retention must cover realistic client retry windows and offline synchronization windows.
+36. Rate Limits
+Exact values are load-tested and configurable; do not hard-code production assumptions.
+37. API Security
+TLS only in production.
+JWT/session validation.
+RBAC + RLS.
+Rate limiting.
+Input validation.
+Request size limits.
+Audit privileged writes.
+Secrets never in responses.
+Provider webhook verification.
+Sensitive endpoints require recent authentication/step-up approval where configured.
+Do not log passwords, tokens, payment credentials or sensitive personal payloads.
+38. API Versioning
+URI version /api/v1.
+Breaking changes require new major API version.
+Additive response fields should be backward compatible.
+Clients advertise app version.
+Server maintains a compatibility matrix for supported Flutter versions.
+Deprecated endpoints return documented deprecation metadata before removal.
+39. File APIs
+Object storage is preferred for large files. Uploads require MIME/size/checksum validation. Access is tenant/RBAC controlled.
+40. Archive APIs
+Purge is never automatic merely because data is older than 365 days and paid. It requires policy eligibility, successful archive verification and privileged authorization.
+41. Health & Operations APIs
+Health endpoints must not expose secrets or internal infrastructure details publicly.
+42. API Audit Requirements
+Every privileged write records actor, device, request ID, entity, before/after where appropriate and reason.
+Authentication events are audited.
+Payment webhooks record provider event ID and verification result.
+Sync conflicts/resolutions are audited.
+Archive/purge actions are audited.
+43. Representative API Schemas
+43.1 Product
+{
+  "id":"uuid",
+  "sku":"FEED-001",
+  "name":"...",
+  "local_name_ta":"...",
+  "base_inventory_uom":"kg",
+  "default_sale_uom":"bag",
+  "batch_required":true,
+  "expiry_required":true,
+  "tax_profile_id":"uuid",
+  "active":true
+}
+43.2 Invoice result
+{
+  "id":"uuid",
+  "invoice_number":"INV-...",
+  "status":"FINALIZED",
+  "subtotal":"...",
+  "discount_total":"...",
+  "taxable_total":"...",
+  "tax_total":"...",
+  "rounding_amount":"...",
+  "grand_total":"...",
+  "payment_status":"PARTIAL",
+  "tenders":[],
+  "batch_allocations":[],
+  "receipt":{"print_status":"PENDING","whatsapp_status":"NOT_REQUESTED"},
+  "request_id":"uuid"
+}
+44. Business Error Catalogue
+45. API Acceptance Criteria
+☐ Every protected endpoint enforces authentication and permission.
+☐ Every tenant-owned query is tenant-scoped and protected by PostgreSQL RLS.
+☐ Cross-tenant object IDs cannot be used to read/write another tenant.
+☐ All material writes are idempotent.
+☐ Invoice finalization is atomic.
+☐ Payment webhook processing is authenticated and idempotent.
+☐ Offline sync supports accepted/duplicate/conflict/rejected states.
+☐ Financial and inventory conflicts never use silent last-write-wins.
+☐ Decimal values survive request/response without precision loss.
+☐ Finalized documents cannot be edited through generic endpoints.
+☐ GRN tare validation is enforced server-side.
+☐ Large reports/exports are asynchronous.
+☐ Audit and correlation IDs are present.
+☐ API errors use one documented envelope.
+☐ OpenAPI specification matches implemented routes and schemas.
+46. API Route Catalogue — Master
+The following route groups constitute the baseline implementation surface and must be maintained in OpenAPI and automated contract tests:
+/auth/*
+/tenant/*
+/financial-years/*
+/document-series/*
+/users/*
+/roles/*
+/permissions/*
+/devices/*
+/products/*
+/uoms/*
+/uom-conversions/*
+/tax-profiles/*
+/price-lists/*
+/pricing/*
+/customers/*
+/khata/*
+/suppliers/*
+/purchase-orders/*
+/goods-receipts/*
+/inventory/*
+/pos/*
+/invoices/*
+/sales-returns/*
+/payments/*
+/refunds/*
+/contra-transactions/*
+/eod/*
+/collections/*
+/notifications/*
+/message-templates/*
+/compliance/*
+/reports/*
+/sync/*
+/files/*
+/archive/*
+/health/*
+/ops/*
+47. Final API Design Principle
+The API must make invalid financial and inventory states difficult or impossible to create. The client is a user interface and offline execution environment; the Go API is the authoritative business-rule boundary; PostgreSQL/RLS is the final data-isolation boundary. Every externally visible side effect is asynchronous/idempotent where possible, and every material business event is traceable through invoice, stock, payment, ledger, journal, sync and audit identifiers.
+Header | Required | Purpose
+Authorization | Protected endpoints | Bearer access token
+X-Request-ID | Recommended | Client correlation identifier
+Idempotency-Key | Required on material writes | Duplicate prevention
+X-Device-ID | Required for device operations | Registered device identity
+X-App-Version | Recommended | Compatibility/telemetry
+Content-Type | Write requests | application/json
+Endpoint | Method | Purpose
+/auth/login | POST | Authenticate user/device
+/auth/refresh | POST | Rotate/refresh access token
+/auth/logout | POST | Revoke session/refresh token
+/auth/password/change | POST | Change password
+/auth/password/reset/request | POST | Request reset
+/auth/password/reset/confirm | POST | Complete reset
+/auth/me | GET | Current user/session
+HTTP | Typical codes
+400 | INVALID_REQUEST, INVALID_FORMAT
+401 | AUTH_REQUIRED, TOKEN_INVALID
+403 | FORBIDDEN, TENANT_ACCESS_DENIED
+404 | NOT_FOUND
+409 | CONFLICT, IDEMPOTENCY_CONFLICT, STOCK_CONFLICT
+422 | VALIDATION_ERROR, BUSINESS_RULE_VIOLATION
+429 | RATE_LIMITED
+500 | INTERNAL_ERROR
+502/503 | DEPENDENCY_ERROR, SERVICE_UNAVAILABLE
+Method | Path | Permission
+GET | /tenant | tenant.read
+PUT | /tenant | tenant.update
+GET | /tenant/settings | settings.read
+PATCH | /tenant/settings | settings.update
+GET | /tenant/features | settings.read
+PATCH | /tenant/features | settings.update
+GET | /financial-years | settings.read
+POST | /financial-years | settings.update
+POST | /financial-years/{id}/close | financial_year.close
+GET | /document-series | settings.read
+PUT | /document-series/{id} | settings.update
+Method | Path | Purpose
+GET/POST | /users | List/create users
+GET/PATCH | /users/{id} | View/update user
+POST | /users/{id}/disable | Disable user
+GET/POST | /roles | List/create roles
+PATCH | /roles/{id} | Update role
+GET | /permissions | List permissions
+PUT | /users/{id}/roles | Assign roles
+GET/POST | /devices | Register/list devices
+GET | /devices/{id} | Device details
+POST | /devices/{id}/deactivate | Deactivate device
+POST | /devices/{id}/rotate-credentials | Rotate device credentials
+POST | /devices/{id}/diagnostics | Run diagnostic request
+Method | Path | Purpose
+GET/POST | /products | List/create products
+GET/PATCH | /products/{id} | View/update product
+POST | /products/{id}/deactivate | Deactivate
+GET/POST | /products/{id}/barcodes | Barcode management
+DELETE | /products/{id}/barcodes/{barcode_id} | Deactivate barcode
+GET/POST | /products/{id}/aliases | Tamil/phonetic aliases
+PATCH | /products/{id}/aliases/{alias_id} | Update alias
+GET | /products/search | POS search
+POST | /products/import | Async import
+GET | /products/import-jobs/{id} | Import status
+Method | Path | Purpose
+GET/POST | /uoms | List/create UOMs
+PATCH | /uoms/{id} | Update/deactivate
+GET/POST | /uom-conversions | List/create conversions
+PATCH | /uom-conversions/{id} | Effective-date conversion
+GET/POST | /products/{id}/uoms | Product UOM mappings
+POST | /uom/convert | Validate/calculates conversion
+Method | Path | Purpose
+GET/POST | /tax-profiles | List/create tax profiles
+PATCH | /tax-profiles/{id} | Update effective-dated profile
+GET/POST | /price-lists | List/create price lists
+GET/PATCH | /price-lists/{id} | Manage price list
+POST | /price-lists/{id}/items/bulk | Bulk price update
+POST | /pricing/quote | Calculate price before checkout
+Method | Path | Purpose
+GET/POST | /customers | List/create
+GET/PATCH | /customers/{id} | View/update
+POST | /customers/{id}/deactivate | Deactivate
+GET/POST | /customers/{id}/addresses | Addresses
+GET | /customers/{id}/ledger | Khata ledger
+GET | /customers/{id}/statement | Statement
+GET | /customers/{id}/credit | Credit profile
+PATCH | /customers/{id}/credit | Update credit policy
+POST | /customers/{id}/credit/check | Pre-sale credit validation
+Method | Path | Purpose
+GET/POST | /suppliers | List/create
+GET/PATCH | /suppliers/{id} | View/update
+POST | /suppliers/{id}/deactivate | Deactivate
+GET | /suppliers/{id}/ledger | Payable ledger
+GET | /suppliers/{id}/statement | Supplier statement
+Method | Path | Purpose
+GET | /purchase-orders | List
+POST | /purchase-orders | Create
+GET | /purchase-orders/{id} | Detail
+PATCH | /purchase-orders/{id} | Edit while draft
+POST | /purchase-orders/{id}/approve | Approve
+POST | /purchase-orders/{id}/send | Send/export
+POST | /purchase-orders/{id}/cancel | Cancel
+GET | /purchase-orders/{id}/pdf | Generate/download PDF
+POST | /purchase-orders/{id}/receive | Start GRN
+Method | Path | Purpose
+GET | /goods-receipts | List
+POST | /goods-receipts | Create draft
+GET | /goods-receipts/{id} | Detail
+PATCH | /goods-receipts/{id} | Edit draft
+POST | /goods-receipts/{id}/validate | Run GRN validation
+POST | /goods-receipts/{id}/post | Post stock/payable
+POST | /goods-receipts/{id}/reverse | Reverse posted GRN
+Method | Path | Purpose
+GET | /inventory/stock | Current stock
+GET | /inventory/batches | Batch list
+GET | /inventory/batches/{id} | Batch detail
+GET | /inventory/movements | Stock movement ledger
+POST | /inventory/adjustments | Create adjustment
+POST | /inventory/counts | Create count session
+POST | /inventory/counts/{id}/lines | Add count
+POST | /inventory/counts/{id}/post | Post count variance
+GET | /inventory/expiry | Expiry/near-expiry
+GET | /inventory/traceability/{product_id} | Batch traceability
+Method | Path | Purpose
+POST | /pos/carts | Create cart
+GET | /pos/carts/{id} | Cart
+POST | /pos/carts/{id}/lines | Add line
+PATCH | /pos/carts/{id}/lines/{line_id} | Change line
+DELETE | /pos/carts/{id}/lines/{line_id} | Remove line
+POST | /pos/carts/{id}/weigh | Apply measured weight
+POST | /pos/carts/{id}/price | Recalculate price
+POST | /pos/carts/{id}/validate | Validate stock/tax/credit
+POST | /pos/carts/{id}/finalize | Finalize invoice
+Method | Path | Purpose
+GET | /invoices | List
+GET | /invoices/{id} | Detail
+POST | /invoices/{id}/reprint | Reprint
+POST | /invoices/{id}/cancel | Cancel
+POST | /invoices/{id}/return | Create return
+GET | /invoices/{id}/ledger-trace | Trace stock/payment/journal events
+GET | /invoices/{id}/receipt | Receipt representation
+Method | Path | Purpose
+POST | /sales-returns | Create return
+GET | /sales-returns/{id} | Detail
+POST | /sales-returns/{id}/validate | Validate
+POST | /sales-returns/{id}/post | Post return
+POST | /sales-returns/{id}/cancel | Cancel draft
+POST | /refunds | Request refund
+GET | /refunds/{id} | Refund status
+POST | /refunds/{id}/approve | Approve where required
+Method | Path | Purpose
+GET | /khata/receivables | Outstanding customers
+POST | /khata/receipts | Record customer receipt
+GET | /khata/receipts/{id} | Receipt
+POST | /khata/receipts/{id}/reverse | Reverse
+POST | /contra-transactions | Create buy-back/contra
+GET | /contra-transactions/{id} | Detail
+POST | /contra-transactions/{id}/approve | Approve
+POST | /contra-transactions/{id}/post | Post inventory + ledger
+POST | /contra-transactions/{id}/reverse | Reverse
+Method | Path | Purpose
+POST | /payments/intents | Create payment intent
+GET | /payments/intents/{id} | Status
+POST | /payments/webhooks/{provider} | Provider webhook
+GET | /payments | List/search
+GET | /payments/{id} | Detail
+POST | /payments/{id}/reconcile | Reconcile
+POST | /payments/{id}/refund | Refund
+GET | /payments/reconciliation | Mismatch report
+Method | Path | Purpose
+GET | /devices/{id}/hardware | Hardware configuration
+PUT | /devices/{id}/hardware | Update configuration
+POST | /devices/{id}/hardware/printer/test | Printer diagnostic
+POST | /devices/{id}/hardware/scale/test | Scale diagnostic
+POST | /devices/{id}/hardware/barcode/test | Scanner diagnostic
+POST | /devices/{id}/events | Device event
+Method | Path | Purpose
+POST | /invoices/{id}/receipt/whatsapp | Queue receipt
+POST | /notifications/collection/run | Run approved collection job
+GET | /notifications/jobs/{id} | Job status
+GET | /notifications/deliveries/{id} | Delivery status
+GET/POST | /message-templates | Templates
+PATCH | /message-templates/{id} | Update template
+Method | Path | Purpose
+GET | /collections/settings | Read schedule
+PATCH | /collections/settings | Configure cycle/grace
+POST | /collections/pause-dates | Create local payout-delay pause
+DELETE | /collections/pause-dates/{id} | Remove pause
+POST | /collections/preview | Preview recipients
+POST | /collections/run | Execute approved job
+Method | Path | Purpose
+POST | /eod/open | Open cash session
+GET | /eod/current | Current session
+POST | /eod/cash-movement | Record payout/expense/deposit
+POST | /eod/calculate | Calculate expected cash
+POST | /eod/close | Close session
+POST | /eod/{id}/reopen | Reopen with permission
+GET | /eod/{id}/report | EOD report
+Method | Path | Purpose
+POST | /compliance/e-way-bills | Create request
+GET | /compliance/e-way-bills/{id} | Status
+POST | /compliance/e-way-bills/{id}/cancel | Cancel where applicable
+POST | /compliance/exports/gst | Generate export
+GET | /compliance/exports/{id} | Export status/download
+GET | /compliance/documents/{id} | Document
+Method | Path | Purpose
+GET | /reports/sales | Sales
+GET | /reports/stock | Stock
+GET | /reports/expiry | Expiry
+GET | /reports/customer-aging | Receivables
+GET | /reports/supplier-aging | Payables
+GET | /reports/payment-reconciliation | Payments
+GET | /reports/eod | EOD
+GET | /reports/tax | Tax
+GET | /reports/audit | Audit
+POST | /reports/export | Async export
+Method | Path | Purpose
+POST | /sync/push | Upload transaction envelopes
+GET | /sync/pull | Retrieve authoritative changes
+POST | /sync/ack | Acknowledge server changes
+GET | /sync/status | Device sync status
+GET | /sync/conflicts | List conflicts
+POST | /sync/conflicts/{id}/resolve | Resolve conflict
+Conflict | Response
+Duplicate client transaction | Return original authoritative result
+Stale mutable master update | CONFLICT; client must refresh
+Offline sale exceeds stock | CONFLICT/REJECT according to policy; no silent negative stock
+Offline credit exceeds limit | REJECT or approval workflow according to offline policy
+Duplicate payment webhook | DUPLICATE; no side effect
+Device deactivated | REJECT all new writes
+Event | Direction | Purpose
+payment.updated | Server→POS | Trusted payment state change
+invoice.status | Server→POS | Invoice processing state
+notification.status | Server→POS | Receipt/message delivery
+sync.conflict | Server→device | Conflict notification
+device.command | Server→device | Approved operational command
+system.alert | Server→device | Expiry/stock/system alert
+Category | Suggested baseline
+Login | 5 failed attempts/minute/device/IP with lockout policy
+Search | High but bounded; e.g. 30–60/min/user depending load
+Writes | Configured per user/device
+Webhooks | Provider-specific, protected by signature and queue
+Exports | Low/concurrent-job limits
+Admin operations | Strict
+Method | Path | Purpose
+POST | /files/presign | Get authorized upload reference
+POST | /files/complete | Confirm upload/checksum
+GET | /files/{id} | Metadata/access
+DELETE | /files/{id} | Delete only non-retained unreferenced file
+Method | Path | Purpose
+POST | /archive/jobs | Create archive job
+GET | /archive/jobs/{id} | Status
+POST | /archive/jobs/{id}/verify | Verify manifest/checksum
+POST | /archive/jobs/{id}/restore-test | Run restore verification
+POST | /archive/jobs/{id}/purge | Privileged retention purge
+GET | /archive/manifests | List manifests
+GET | /archive/manifests/{id} | Manifest
+Method | Path | Purpose
+GET | /health/live | Process liveness
+GET | /health/ready | Dependency readiness
+GET | /health/version | Build/version
+GET | /ops/jobs | Job status (privileged)
+GET | /ops/integrations | Integration health (privileged)
+GET | /ops/sync/devices | Sync health (privileged)
+Code | Meaning
+STOCK_INSUFFICIENT | Not enough sellable stock
+BATCH_EXPIRED | Selected batch expired
+BATCH_QUARANTINED | Batch unavailable
+CREDIT_LIMIT_EXCEEDED | Credit requires approval
+TENDER_MISMATCH | Tender total differs
+TARE_EXCEEDS_LIMIT | GRN tare exceeds configured maximum
+INVALID_UOM_CONVERSION | No valid conversion
+INVOICE_FINALIZED | Document immutable
+PAYMENT_STATE_CONFLICT | Invalid payment transition
+DUPLICATE_WEBHOOK | Already processed
+SYNC_CONFLICT | Offline change conflicts
+DEVICE_DEACTIVATED | Device no longer authorized
+FINANCIAL_YEAR_CLOSED | Posting period closed
+RLS_CONTEXT_MISSING | Trusted tenant context unavailable

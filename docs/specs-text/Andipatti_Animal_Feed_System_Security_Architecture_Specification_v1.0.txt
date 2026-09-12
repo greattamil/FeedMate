@@ -1,0 +1,614 @@
+Andipatti Animal Feed System
+Document 12 — Complete Security Architecture & Security Specification v1.0
+Implementation-ready security baseline for the Flutter application, Go backend, PostgreSQL, offline SQLCipher database, Docker platform, integrations, hardware, payments, GST/compliance, WhatsApp, object storage, synchronization, accounting and operational tooling.
+Status: Final architecture baseline | Scope: Production security | Planning style: No sprint planning
+1. Purpose, Scope, Objectives & Non-Goals
+1.1 Purpose
+Define the security architecture, controls, implementation rules, operational procedures and acceptance criteria required to protect tenant data, customer/supplier information, inventory, invoices, Khata balances, payments, GST/compliance records, devices, integrations and administrative functions.
+1.2 Scope
+Flutter mobile/POS client, local SQLCipher database and device storage.
+Go REST/WebSocket API, workers, scheduled jobs and integration adapters.
+PostgreSQL authoritative database, RLS policies, migrations, backups and replicas.
+Optional Redis, queues, Cloudflare R2/object storage and archive subsystem.
+Barcode scanner, weighing scale, ESC/POS printer, cash drawer and customer display.
+UPI/payment providers, WhatsApp Cloud API, GST/e-invoice/e-way bill providers and related webhooks.
+Docker images, Compose/deployment infrastructure, CI/CD, observability and operational access.
+1.3 Security Objectives
+Prevent cross-tenant access under every API, database, job, export and file path.
+Prevent unauthorized financial, inventory, tax, payment and master-data mutations.
+Protect credentials, tokens, encryption keys, PII and payment-related secrets.
+Preserve integrity and traceability of financial and inventory records.
+Detect, contain and recover from credential compromise, device loss, fraud and infrastructure incidents.
+Maintain security without breaking offline POS operation or legitimate hardware workflows.
+1.4 Non-Goals
+This document does not replace applicable law, tax rules, payment-provider requirements, contractual security requirements or professional penetration testing.
+Exact GST/e-invoice/e-way thresholds and provider-specific security requirements must be verified against current authoritative requirements before production.
+No security control authorizes bypassing accounting, compliance or business approvals.
+2. Security Architecture & Principles
+Zero-trust between client, API, database, worker, integration provider and storage boundaries.
+PostgreSQL is authoritative for financial and inventory state; client state is untrusted.
+Defense in depth: Go authorization plus PostgreSQL RLS plus object/file authorization.
+Least privilege for users, services, database roles, containers, cloud credentials and CI/CD.
+Deny by default; explicit permission is required for privileged actions.
+Immutable financial history: corrections use reversals, returns, credit notes or adjustment workflows.
+All external callbacks are untrusted until authenticated, authorized, validated and made idempotent.
+All sensitive operations are attributable to a user/device/session and auditable.
+Secrets never belong in Flutter source, client configuration, Git, images or logs.
+Offline capability is bounded by policy; offline data never becomes an alternate authoritative ledger.
+Security controls must fail closed for authorization and fail safely for hardware/output failures.
+Security events are append-oriented and protected against ordinary application-user modification.
+3. Trust Boundaries & Threat Model
+3.1 Threat Catalogue
+Cross-tenant data disclosure or mutation.
+Stolen password, PIN, refresh token, device token or API credential.
+Session fixation, replay, token theft and concurrent-session abuse.
+SQL injection, broken object-level authorization, mass assignment and insecure direct object references.
+Webhook spoofing, replay, duplicate payment notification and amount manipulation.
+Offline transaction replay, local database theft or malicious modification.
+Fraudulent discounts, Khata overrides, refunds, stock adjustments or contra transactions.
+Compromised/rooted device extracting local data or credentials.
+Malicious or oversized file upload.
+Container escape, vulnerable image, exposed management port or leaked secret.
+Supply-chain compromise, dependency vulnerability or poisoned build artifact.
+Log/backup/archive leakage of PII or credentials.
+Denial of service, brute force and resource exhaustion.
+Lost/stolen POS device and unauthorized printer/scale access.
+4. Multi-Tenant Isolation
+Every tenant-owned table MUST contain tenant_id and use PostgreSQL Row-Level Security. Application-layer tenant checks are mandatory as a second boundary; RLS is not optional even if the Go code appears correct.
+Set tenant context only from a validated authenticated session/device identity; never accept an arbitrary tenant_id from the client as authority.
+Use transaction-local PostgreSQL tenant context, such as a validated application setting, for RLS policies.
+Composite foreign keys should include tenant_id where cross-tenant references could otherwise be possible.
+Unique constraints for tenant-owned business identifiers should normally be tenant-scoped.
+Background jobs must carry explicit tenant context and must never iterate tenants using an unrestricted service connection.
+Exports, reports, attachments, archives and signed URLs must re-check tenant authorization.
+Support staff access must use explicit, time-bounded, audited support grants; no permanent superuser access for normal support.
+Database owners/superusers and migration roles must be separated from application runtime roles.
+4.1 RLS Requirements
+ENABLE ROW LEVEL SECURITY on every tenant-owned table.
+FORCE ROW LEVEL SECURITY where appropriate so table owners cannot accidentally bypass policies.
+Separate SELECT/INSERT/UPDATE/DELETE policies when different conditions are required.
+Test both positive and negative tenant cases for every security-sensitive table.
+Include RLS regression tests in CI.
+5. Identity, Authentication & Sessions
+5.1 Authentication
+Use short-lived access tokens and rotating refresh tokens or secure server sessions.
+Access tokens must be audience-, issuer-, subject- and expiry-validated.
+Refresh tokens are single-use/rotated where practical; token reuse triggers session revocation.
+Bind sessions to a registered device and tenant context.
+Re-authentication is required for high-risk actions such as owner PIN changes, exports, refunds above policy thresholds, security settings and device revocation.
+Never log access tokens, refresh tokens, passwords or PINs.
+5.2 Session Controls
+5.3 Password & PIN Policy
+Passwords must be long enough to resist guessing; reject commonly breached passwords where feasible.
+Store passwords only with a modern adaptive password hash such as Argon2id or an equivalently approved algorithm.
+Never store plaintext passwords or reversible password encryption.
+Owner approval PINs must be hashed, rate-limited and protected separately from ordinary passwords.
+PIN entry must have retry limits, escalating delay/temporary lockout and audit events.
+Do not use a single shared owner PIN for all staff; approval must identify the approving user.
+Do not place PINs in source code, environment defaults, seed fixtures or client configuration.
+6. RBAC, Authorization & Approval Controls
+6.1 Roles
+Owner: full business/security administration, subject to re-authentication and audit.
+Admin/Manager: operational administration within assigned permissions.
+Cashier: POS, payments and permitted customer operations.
+Inventory/Procurement: purchasing, GRN, stock operations within policy.
+Accounts: Khata, receipts, reconciliation and accounting operations.
+Compliance: GST/e-invoice/e-way/export operations.
+Support/Auditor: read-only or time-bound scoped access; no ordinary financial mutation.
+System service roles: narrowly scoped non-human identities.
+6.2 Authorization Rules
+Authorize action + resource + tenant + state, not merely route access.
+Check object ownership before returning or mutating an object.
+Finalized invoices cannot be edited through generic PATCH.
+Refunds, stock adjustments, high discounts, credit overrides, master-data changes and security operations require explicit permissions.
+Server recalculates prices, taxes, totals, available stock and credit exposure.
+Never trust hidden UI controls as authorization.
+6.3 Approval Workflow
+Sensitive overrides must record requesting user, approving user, reason, affected resource, before/after values, timestamp, device/session and correlation ID. Approval must not be satisfied by the same untrusted client field that requests the privileged action.
+7. API Security
+HTTPS only; redirect or reject plaintext HTTP at the edge.
+WSS only for WebSocket connections.
+Validate Authorization, X-Request-ID, Idempotency-Key, X-Device-ID, X-App-Version and Content-Type according to endpoint policy.
+Reject malformed, duplicate, overlong or invalid header values.
+Apply endpoint-specific request body and upload size limits.
+Use strict JSON schemas and reject unknown sensitive fields where mass assignment could occur.
+Use parameterized SQL or sqlc-generated queries; never concatenate SQL from request values.
+Validate enum values, numeric ranges, decimal precision, dates, IDs and state transitions.
+Apply rate limits per IP/device/user/tenant and endpoint risk.
+Use brute-force protection on login, PIN, OTP and webhook endpoints.
+Return safe errors; never expose stack traces, SQL, secrets or internal topology.
+Use consistent correlation IDs for security investigation.
+7.1 CORS / CSRF
+For native Flutter API access, do not enable broad browser CORS unnecessarily.
+If browser administration is introduced, allow only explicit trusted origins and methods.
+Use CSRF protection for cookie-authenticated browser mutation endpoints.
+Bearer-token APIs that are not cookie-authenticated do not rely on CORS as a security boundary.
+8. Idempotency, Replay & State Integrity
+Require Idempotency-Key for financial creation/mutation endpoints where duplicate submission could cause financial or inventory impact.
+Persist idempotency records with tenant, actor, endpoint, key, request fingerprint, result and expiry.
+A reused key with a different request fingerprint must be rejected.
+Webhook events require provider event ID uniqueness and signature verification.
+Offline transaction envelopes require unique transaction IDs, device IDs, sequence/nonce data and server-side deduplication.
+Do not accept client timestamps as proof of event order; server receipt time and authoritative sequence/state rules apply.
+State transitions must be explicit and validated against current server state.
+9. Payment & UPI Security
+Payment provider secrets, signing keys and credentials are server-side only.
+Flutter may receive a payment intent identifier and displayable QR/payment information but cannot mark a transaction paid authoritatively.
+Verify webhook signature, provider event ID, amount, currency, merchant/tenant context and expected payment intent state.
+Protect webhook endpoints with provider-supported signature validation, timestamp tolerance and replay prevention.
+Never treat a client redirect, screenshot or user assertion as payment proof.
+Use reconciliation jobs to resolve unknown/pending outcomes.
+Refunds require authorization, idempotency and linkage to the original payment/invoice.
+Store only the minimum payment data needed; do not store unnecessary sensitive payment credentials.
+Separate provider credentials by environment and preferably by tenant/provider account.
+10. GST, E-Invoice, E-Way & Compliance Security
+Government/provider credentials must be stored server-side in a secret manager or encrypted secret store.
+Do not embed GST/e-invoice/e-way credentials in Flutter.
+Compliance requests must be tenant-scoped, authorized and auditable.
+Persist request/response references and required evidence without exposing credentials in logs.
+Validate provider responses before changing invoice/compliance state.
+Use idempotency for submissions and explicit handling of timeout/unknown states.
+Protect GST exports because they can contain customer identity, tax and transaction information.
+Apply current legal retention and access requirements; configuration must not hardcode obsolete thresholds.
+11. WhatsApp & Messaging Security
+WhatsApp Cloud API credentials/tokens are server-side only.
+Templates and destination numbers must be tenant-authorized.
+Receipt sending is an asynchronous side effect and must never roll back a finalized financial transaction.
+Do not include unnecessary PII or credentials in messages.
+Message logs should store delivery metadata, not unnecessary message content.
+Prevent tenant A from using tenant B's messaging credentials or customer data.
+Apply opt-in/consent and provider policy requirements where applicable.
+12. Local / Offline Security
+12.1 SQLCipher
+Use SQLCipher-encrypted SQLite for local business data.
+Encryption keys must be generated per installation/device and stored using platform secure storage/keychain/keystore mechanisms.
+Never derive a database key solely from a predictable device property, PIN or app constant.
+Do not log SQLCipher keys or expose them through diagnostics.
+Clear or invalidate the local key on device decommission/revocation according to the recovery policy.
+12.2 Offline Transaction Security
+Each transaction envelope has device ID, transaction ID, monotonic local sequence where available, schema version, payload hash and integrity/signature metadata.
+Server verifies authenticated device identity, tenant, authorization, envelope integrity, replay status and supported schema.
+Financial and inventory conflicts are reconciled using business rules; never use blind last-write-wins.
+Offline price/tax/master-data snapshots must carry effective version metadata and expiry/refresh policy.
+Offline credit/payment policies must be explicitly configurable and conservative.
+Limit retained local history to what is operationally necessary.
+12.3 Lost/Stolen Device
+Owner/admin revokes the device/session.
+Server rejects future synchronization and API access.
+Invalidate device-bound credentials.
+Recover/replace device using controlled provisioning.
+If local key destruction is not guaranteed, treat the device as potentially exposed and rotate affected credentials.
+Record incident and device-revocation audit trail.
+13. Flutter / Mobile Application Security
+Use Android/iOS secure storage APIs for secrets and device credentials.
+Disable debug logging and verbose diagnostics in release builds.
+Do not ship server secrets, provider secrets or privileged API credentials.
+Use release signing and protected signing credentials.
+Use platform secure configuration, minimum supported OS versions and current dependency versions.
+Consider screenshot/recents protection for sensitive screens where appropriate, balancing POS usability.
+Avoid copying sensitive values to clipboard; clear temporary clipboard data where feasible.
+Validate deep links and allowlist supported routes/hosts; never accept arbitrary privileged actions from a deep link.
+If WebViews are used, disable unnecessary JavaScript/file access and allowlist navigation.
+Do not rely on certificate pinning as the sole transport security control; design operational rotation and failure recovery before enabling it.
+Detect rooted/jailbroken/high-risk environments according to policy and restrict sensitive operations when required.
+Do not claim a client-side root check provides absolute security.
+14. Hardware Security Boundary
+Barcode scanners, scales, printers and customer displays are input/output peripherals, not authoritative financial actors.
+A scale reading must pass protocol validation, stability, range and product/UOM checks.
+A scanner payload is treated as untrusted text.
+Hardware cannot directly write invoice, payment, stock or accounting records.
+Printer failure must never roll back a finalized invoice.
+Pair hardware to a registered device and tenant; prevent unauthorized device reassignment.
+Serial/Bluetooth/BLE payloads must be bounded and parsed defensively.
+Provide diagnostics without exposing secrets or PII.
+15. File Uploads, Reports & Exports
+Allowlist file types and validate actual content, not only filename extension.
+Enforce maximum file size, decompression limits and filename/path normalization.
+Generate server-side object keys; never use raw user filenames as storage paths.
+Scan uploads for malware where required by the deployment threat model.
+Store uploaded files privately; use short-lived, scoped signed URLs for authorized retrieval.
+Re-check tenant/resource authorization before issuing a signed URL.
+Prevent path traversal and object-key confusion.
+Reports and GST exports are tenant-scoped and must be generated asynchronously for large datasets.
+Export access must be permission-controlled and audited.
+Sensitive exported files require defined retention and automatic expiry/deletion where policy permits.
+16. Cloudflare R2 / Object Storage Security
+Buckets/objects must be private by default.
+Use least-privilege R2 credentials per environment and workload.
+Prefer short-lived or narrowly scoped signed URLs for downloads.
+Do not expose bucket credentials to Flutter.
+Object metadata must not contain secrets.
+Archive manifests should contain checksums, tenant identity, period, schema/version and object references.
+Verify checksums during archive/restore validation.
+R2 is object storage, not the sole backup strategy.
+17. Encryption, Key Management & Secrets
+17.1 Key Rotation
+Maintain key version identifiers so rotation can occur without ambiguity.
+Rotate provider/API secrets according to provider policy and immediately after suspected compromise.
+Rotate encryption keys according to risk, architecture and operational capability.
+Use dual-key transition windows where required for safe rotation.
+Record key lifecycle events without logging key material.
+17.2 Secret Handling Rules
+No secrets in source control, .env files committed to repositories, Dockerfiles, images, logs, crash reports or screenshots.
+Development secrets must be separate from production.
+CI/CD obtains secrets at runtime from a protected secret mechanism.
+Production secrets are accessible only to the service that needs them.
+18. Data Classification, Privacy & Retention
+Collect the minimum PII required for business operations.
+Mask phone numbers and identity information in operational logs and support screens where practical.
+Define retention by record type, law, accounting need and business policy.
+Deletion must not destroy records required for financial/legal retention; use controlled archival/redaction where appropriate.
+Customer-facing exports must exclude unrelated tenants/customers.
+19. Logging, Audit & Security Events
+19.1 Logging Rules
+Use structured JSON logs with timestamp, severity, service, tenant reference where safe, actor reference, device reference, request/correlation ID and event type.
+Never log passwords, PINs, access/refresh tokens, provider secrets, SQLCipher keys or full payment secrets.
+Redact authorization headers, cookies and sensitive request fields.
+Avoid full customer records in logs.
+Keep application logs separate from security audit events.
+19.2 Audit Event Model
+Security-sensitive audit records should be append-oriented, tamper-evident and access-controlled. A useful event includes event_id, tenant_id, actor_id, device_id, session_id, action, resource_type, resource_id, outcome, reason, before/after summary where appropriate, request_id, source IP metadata where legally/operationally appropriate, timestamp and schema version.
+19.3 Security Event Types
+login.success, login.failure, password.reset, pin.failure, pin.lockout
+session.created, session.revoked, refresh.reuse_detected
+device.registered, device.revoked, device.risk_detected
+authorization.denied, tenant.access_denied, rls.denied
+privileged.approval_requested, privileged.approval_granted, privileged.action_completed
+payment.webhook_invalid, payment.replay_detected, payment.state_mismatch
+sync.replay_detected, sync.integrity_failure, sync.authorization_failure
+file.upload_rejected, export.created, export.downloaded
+secret.rotated, security.configuration_changed
+archive.created, archive.restored, archive.restore_failed
+20. PostgreSQL Security Hardening
+Use separate migration/admin and runtime roles.
+Runtime role receives only required SELECT/INSERT/UPDATE/DELETE/EXECUTE permissions.
+Disable unnecessary extensions and network exposure.
+Use TLS for database connections where supported/required.
+Restrict database network access to approved application/worker networks.
+Use strong credentials or identity-based authentication where available.
+Review pg_hba/access rules regularly.
+Enable audit/security logging appropriate to the deployment.
+Protect backups and WAL/archive streams.
+Do not run the application as a PostgreSQL superuser.
+21. Redis, Queue & Worker Security
+Redis must be private to trusted application networks and authenticated where supported.
+Never expose Redis directly to the public internet.
+Workers must use dedicated least-privilege credentials.
+Queue payloads must avoid unnecessary PII and secrets.
+Jobs must be tenant-scoped and idempotent.
+Dead-letter queues require controlled access and retention policy.
+A compromised job must not gain broad database privileges.
+22. Docker & Container Security
+Use minimal, pinned base images where practical.
+Run containers as non-root users.
+Drop unnecessary Linux capabilities.
+Use read-only root filesystems where compatible; provide explicit writable volumes only where needed.
+Do not mount the Docker socket into application containers.
+Separate networks for public edge, application, database and management traffic.
+Expose only required ports.
+Use resource limits to reduce denial-of-service impact.
+Use health checks that do not leak secrets.
+Scan images for vulnerabilities before release.
+Generate and retain an SBOM for release artifacts.
+Sign release images/artifacts where the registry/toolchain supports it.
+Pin dependencies and base image digests for controlled production releases.
+Do not bake secrets into images or Compose files.
+23. Network Segmentation
+Internet-facing reverse proxy/API edge is isolated from database and internal services.
+PostgreSQL is not publicly reachable.
+Redis is not publicly reachable.
+Workers access only the APIs/databases/providers they require.
+Administrative interfaces are isolated and protected by VPN/private networking or equivalent controls where possible.
+Outbound internet access should be restricted for workloads that do not need arbitrary destinations.
+24. CI/CD & Software Supply-Chain Security
+Protect main/release branches and require reviewed changes.
+Use automated SAST, dependency scanning, secret scanning, container scanning and IaC scanning.
+Generate SBOMs and retain them with release metadata.
+Pin or constrain dependency versions and review dependency updates.
+Build production artifacts in controlled runners.
+Use signed commits/artifacts where organizationally feasible.
+Separate build, test and production deployment credentials.
+Production deployment requires explicit authorization and auditable identity.
+Flutter Android/iOS signing keys are stored in protected signing infrastructure, never repositories.
+Verify artifact provenance before deployment.
+24.1 Required Security Gates
+No detected hardcoded production secret.
+No critical/high exploitable dependency vulnerability without approved exception.
+No failing RLS security test.
+No failing authorization matrix test.
+No unsigned/untrusted production artifact where signing is mandated.
+No known critical container finding.
+No failed migration security/integrity test.
+25. Vulnerability Management
+Security exceptions require owner, scope, justification, compensating control, expiry date and approval.
+Re-test after remediation.
+Track dependencies and OS/container base-image updates continuously.
+26. Security Monitoring & Alerts
+Alert on repeated login/PIN failures and account/device lockouts.
+Alert on unusual privilege escalation, mass exports, repeated authorization failures and cross-tenant access attempts.
+Alert on webhook signature failures/replay attempts and payment-state anomalies.
+Alert on unusual refund/discount/stock-adjustment patterns where practical.
+Alert on disabled security controls, unexpected admin role changes and secret rotation failures.
+Alert on database authentication failures and unexpected public exposure.
+Provide SIEM-compatible structured event output without requiring a specific SIEM vendor.
+27. Incident Response
+27.1 Incident Severity
+27.2 Response Lifecycle
+Detect and record the event with correlation identifiers.
+Triage scope, affected tenants, systems, credentials and data.
+Contain: revoke sessions/devices/keys, block indicators, isolate systems as required.
+Preserve evidence and audit records.
+Eradicate root cause and patch/rotate affected components.
+Recover from trusted artifacts/backups and validate integrity.
+Reconcile financial/inventory/compliance state.
+Notify required internal/external parties according to applicable obligations.
+Complete post-incident review and update controls/tests.
+27.3 Credential Compromise
+Immediately revoke affected sessions/tokens.
+Rotate compromised provider/API/database credentials.
+Review recent audit activity using the credential's scope.
+Check for unauthorized payments, exports, stock adjustments or master-data changes.
+Restore least privilege and validate service health.
+27.4 Device Theft/Loss
+Revoke device/session immediately.
+Rotate device-bound credentials.
+Assess local-data exposure.
+Review sync/API activity after the last trusted device contact.
+Provision replacement device through controlled registration.
+28. Security Runbooks
+Compromised admin account.
+Compromised payment provider credential.
+Invalid/replayed payment webhook.
+Lost/stolen POS device.
+Cross-tenant authorization incident.
+Database credential compromise.
+R2 credential/object exposure.
+Malicious file upload.
+Container vulnerability emergency patch.
+Secret accidentally committed to source control.
+Offline replay/integrity failure.
+Suspicious refund/discount/stock-adjustment activity.
+Backup restore after security incident.
+29. Security Testing Strategy
+30. Authorization Matrix — Minimum Test Set
+31. Secure Error Catalogue
+AUTH_REQUIRED — authentication missing/invalid.
+SESSION_REVOKED — session/device no longer valid.
+FORBIDDEN — authenticated but not authorized.
+TENANT_ACCESS_DENIED — resource belongs to another tenant or context.
+RLS_DENIED — database isolation rejected the operation; internal details are not returned.
+RATE_LIMITED — retry later without revealing security thresholds unnecessarily.
+VALIDATION_FAILED — safe field-level validation errors.
+IDEMPOTENCY_CONFLICT — key reused with a different request.
+REPLAY_DETECTED — duplicate or stale security-sensitive event.
+SIGNATURE_INVALID — webhook/integrity verification failed.
+STATE_CONFLICT — current server state does not permit requested transition.
+DEVICE_REVOKED — device must be re-registered.
+SECURITY_POLICY_BLOCKED — operation blocked by security policy.
+32. Security for Accounting, Inventory & POS
+Finalized invoices, posted journals, stock movements and payment records are immutable except through authorized reversal/return/adjustment flows.
+Client totals are informational; server recomputes financial values.
+Inventory availability and allocation are authoritative on PostgreSQL.
+Khata balance is derived from authoritative ledger entries, not client display values.
+Owner approvals cannot be forged through client-side flags.
+Every sensitive financial mutation carries actor/device/request correlation.
+Printer or scale failure cannot create an unauthorized financial rollback.
+33. Security for Archival, Backup & Restore
+Backups are encrypted and access-controlled separately from production credentials.
+Archive jobs verify eligibility, tenant ownership, checksums and retention policy.
+Do not delete records solely because they are old or fully paid.
+R2 archive data is not the only recovery copy.
+Restore tests must verify database integrity, tenant isolation, object checksums and application compatibility.
+Restored environments must not accidentally send real payment/WhatsApp/compliance side effects; production credentials remain isolated.
+34. Operational Access & Break-Glass
+Production access is individual, authenticated and auditable; no shared admin accounts.
+Use MFA for privileged operational access where supported.
+Break-glass access is exceptional, time-bounded, approved and logged.
+Break-glass credentials are stored securely and rotated after use.
+Support access must be scoped to tenant/resource/time and revoked automatically when possible.
+Database direct modification of financial data is prohibited except controlled emergency procedures with full audit and reconciliation.
+35. Secure Configuration Baseline
+36. End-to-End Security Scenarios
+36.1 Cross-Tenant Attack
+A user changes a resource ID in an API request. Go authorization rejects the tenant mismatch; PostgreSQL RLS independently prevents access. The event is logged as authorization/tenant access failure without leaking the target tenant's data.
+36.2 Fraudulent Payment Callback
+An attacker sends a forged webhook. Signature validation fails, event is not applied, the event is recorded for security monitoring, and no invoice/payment state changes.
+36.3 Duplicate Offline Sale
+A device retries a finalized transaction after a timeout. The transaction ID/idempotency key is recognized; the original authoritative result is returned rather than creating another invoice or stock movement.
+36.4 Lost Device
+Owner revokes the device. Subsequent API/sync requests fail. Replacement provisioning creates a new device identity. Security logs preserve the revocation and subsequent blocked attempts.
+36.5 Privileged Discount
+Cashier requests a discount outside policy. Server requires an authorized approval. The approving user and reason are recorded; the client cannot self-approve by setting an approval flag.
+36.6 Malicious Upload
+An uploaded file has a deceptive extension and oversized payload. Content/type and size validation reject it before private object storage. The rejection is audited without storing the malicious content unnecessarily.
+36.7 Payment Provider Timeout
+Payment result becomes unknown. POS does not infer success. Server reconciliation checks the provider and transitions the payment safely. Invoice/payment state remains consistent throughout.
+36.8 Rooted Device
+Risk policy identifies a high-risk device. The application restricts configured sensitive operations and informs the operator. Server-side authorization remains authoritative regardless of client checks.
+37. API / DB / Go / Flutter Security Responsibilities
+38. Mapping to Documents 01–11
+39. Security Implementation Checklist
+Tenant-owned tables identified and RLS enabled.
+RLS negative/positive tests automated.
+Go authorization middleware and resource-level checks implemented.
+Password/PIN hashing and lockout controls implemented.
+Access/refresh session lifecycle implemented.
+Device registration/revocation implemented.
+Secure storage/SQLCipher implemented.
+Offline envelope integrity/replay controls implemented.
+Idempotency implemented for financial writes.
+Rate limiting and brute-force controls enabled.
+Webhook signature/replay verification implemented.
+Payment secrets server-only.
+GST/e-invoice/e-way credentials server-only.
+WhatsApp credentials server-only.
+R2 private with scoped access.
+Sensitive logging redaction verified.
+Append-oriented audit/security events implemented.
+File upload validation implemented.
+Docker containers non-root and least privilege.
+Images scanned and SBOM generated.
+CI/CD secret/SAST/dependency/container/IaC checks enabled.
+Production artifacts protected/signed where applicable.
+Database runtime role is not superuser.
+Redis/database are not public.
+Backups encrypted and restore-tested.
+Incident runbooks prepared.
+Security monitoring/alerts configured.
+Penetration testing completed before production.
+Security exceptions documented and time-bounded.
+40. Non-Negotiable Security Rules
+PostgreSQL RLS is mandatory for every tenant-owned table.
+Go authorization is mandatory in addition to RLS.
+Client-provided tenant identity, payment status, invoice totals, tax totals or stock authority is never trusted.
+Passwords, PINs, tokens, SQLCipher keys and provider secrets are never logged or committed.
+Payment webhooks must be cryptographically verified and idempotent.
+Financial and inventory operations must be atomic and idempotent.
+No last-write-wins conflict policy for financial or inventory state.
+Hardware cannot directly mutate authoritative financial state.
+Production containers run with least privilege and non-root identities.
+Backups and archives are encrypted and access-controlled; R2 is not the sole backup.
+Privileged actions are attributable to a specific user and approval where required.
+Security controls must be tested continuously, not only implemented once.
+41. Security Acceptance Criteria
+A user from tenant A cannot read or mutate any tenant B resource through API, report, file, archive, job or database access.
+RLS tests pass for all tenant-owned tables.
+Unauthorized role/action combinations are rejected server-side.
+Stolen/expired/revoked sessions are rejected.
+Repeated PIN/login failures trigger configured protection.
+Replayed payment webhooks cannot change state.
+Duplicate financial requests do not duplicate invoices, payments, stock movements or journal entries.
+Tampered offline envelopes are rejected.
+Revoked devices cannot synchronize.
+No production secret appears in source, image, client binary configuration or logs.
+Sensitive exports require permission and are audited.
+Malicious/oversized file uploads are rejected.
+Production database and Redis are not publicly exposed.
+Containers run non-root with unnecessary capabilities removed.
+Release images have vulnerability-scan and SBOM evidence.
+Backup restore tests preserve tenant isolation and integrity.
+Penetration testing covers API, mobile and infrastructure.
+Incident runbooks are executable by authorized operators.
+All critical/high findings are remediated or explicitly risk-accepted before production.
+42. Definition of Done — Security
+Threat model reviewed and updated for actual deployment.
+All controls in this specification mapped to implementation tickets/code/configuration or documented exception.
+RLS and authorization test matrix passes.
+Security-sensitive endpoints have rate limits and abuse controls.
+Secrets are externalized and rotation procedure tested.
+SQLCipher key lifecycle and device revocation tested.
+Payment/GST/WhatsApp integrations pass signature and credential-isolation tests.
+Docker/CI/CD security gates pass.
+Backup/restore and archive security tests pass.
+Security logs are redacted and auditable.
+Incident response procedures and contacts are documented operationally.
+Penetration/security assessment findings are closed or approved with time-bounded exceptions.
+Production release artifact is traceable to reviewed source and security checks.
+43. Final Security Architecture Summary
+The secure operating model is: Flutter is an untrusted but security-hardened client; SQLCipher protects bounded offline data; device identity and session credentials authorize access; Go is the business-rule and authorization boundary; PostgreSQL is authoritative and enforces tenant isolation through mandatory RLS; financial and inventory state is atomic, idempotent and auditable; integrations are isolated behind server-side adapters; webhooks are cryptographically verified; R2 is private and scoped; Docker workloads are least-privilege and non-root; CI/CD verifies dependencies, secrets, containers and artifacts; and security operations continuously monitor, audit, test and recover the system.
+44. Important Production Note
+This specification is an engineering security baseline. Before production, validate the final deployment against current applicable Indian privacy, tax, payment, telecommunications/messaging, accounting, contractual and hosting requirements, plus the security requirements of each selected payment, WhatsApp, GST/e-invoice/e-way and infrastructure provider. Provider credentials, cryptographic algorithms, retention periods, legal obligations and exact thresholds must follow the current authoritative requirements at deployment time.
+Boundary | Untrusted/partially trusted input | Required controls
+Flutter → API | All client fields, device clock, payment state, prices | TLS, auth, authorization, schema validation, server recalculation, idempotency
+Flutter local DB | Local filesystem, rooted device, malware, backups | SQLCipher, secure key storage, device policy, minimal retention
+API → PostgreSQL | Application-generated queries/tenant context | Parameterized SQL, RLS, restricted DB role, transaction-scoped tenant context
+Provider → webhook | Internet callback, replay, spoofing | Signature verification, timestamp/nonce checks, idempotency, amount/state validation
+API → R2 | Object names, metadata, download requests | Private bucket, scoped credentials, signed URLs, content validation
+Hardware → POS | Scanned text, serial/BLE payloads, weight readings | Protocol validation, bounds/stability checks, hardware isolation
+Admin/ops → production | Human privileged action | MFA, RBAC, approval, session controls, audit, break-glass process
+CI/CD → runtime | Build artifacts and dependencies | Protected branches, signing, SBOM, scanning, provenance, least privilege
+Control | Baseline
+Idle timeout | Configurable; shorter for privileged screens
+Absolute lifetime | Configurable; privileged sessions shorter
+Refresh rotation | Enabled
+Logout | Revoke current refresh/session credentials
+Password reset | Single-use, short-lived token; invalidate prior sessions when appropriate
+Device revocation | Immediate server rejection of subsequent requests
+Concurrent sessions | Policy-controlled; owner/admin can review/revoke
+Risk event | Force re-authentication/revocation as appropriate
+Asset | Protection
+API traffic | TLS; HTTPS/WSS only
+PostgreSQL | Provider/storage encryption plus application/RLS controls
+SQLCipher | Per-device database encryption key in secure platform storage
+R2 | Private storage with provider-side encryption and scoped credentials
+Backups | Encrypted, access-controlled, separate credentials
+Secrets | Dedicated secret manager/encrypted secret store; never Git
+Passwords | Argon2id/equivalent adaptive hash
+PINs | Strong one-way hash + rate limiting
+Tokens | Short-lived, rotated/revocable; never logs
+Offline envelopes | Authenticated integrity mechanism + replay protection
+Class | Examples | Controls
+Restricted | Passwords, PIN hashes, provider secrets, encryption keys | Strongest access control; never log
+Confidential | Customer contact, Khata, invoices, GST data, supplier data | Tenant isolation, encryption, audit, controlled export
+Internal | Operational metrics, configuration | Authenticated access
+Public | Approved product descriptions, public shop information | No secret data
+Severity | Target handling
+Critical | Immediate triage; isolate/mitigate and emergency remediation
+High | Urgent remediation with documented risk acceptance only when justified
+Medium | Planned remediation within defined security SLA
+Low | Track and remediate according to maintenance policy
+Level | Example
+SEV-1 | Confirmed credential compromise, cross-tenant exposure, payment fraud at scale, production database compromise
+SEV-2 | Single-tenant material security incident, privileged account compromise, significant device fleet issue
+SEV-3 | Contained vulnerability, repeated attack attempts without confirmed impact
+SEV-4 | Low-impact policy/configuration issue
+Test area | Required coverage
+Unit | Hashing, validation, authorization rules, state machines, crypto wrappers
+Integration | API + DB + RLS + transactions + provider adapters
+RLS | Every tenant-owned table; positive/negative tenant tests
+Authorization | Role × action × resource × state matrix
+API security | Injection, mass assignment, IDOR/BOLA, limits, malformed input
+Webhook | Signature, replay, duplicate, amount mismatch, ordering, timeout
+Offline | Replay, tampering, duplicate upload, revoked device, conflict handling
+Mobile | Secure storage, deep links, WebView, debug leakage, rooted-device policy
+Container | Image vulnerabilities, non-root, exposed ports, capabilities
+Supply chain | Dependency/SBOM/secret/signature/provenance checks
+Fuzzing | Serial scale payloads, scanner payloads, JSON/API fields, parsers
+Concurrency | Duplicate finalization, refund races, stock races, approval races
+Penetration | External API, admin surface, mobile and infrastructure
+Backup/restore | Encryption, authorization, integrity and restore-test controls
+Action | Cashier | Inventory | Accounts | Compliance | Admin | Owner
+Create sale | Yes | Optional | Optional | No | Yes | Yes
+Finalize invoice | Yes | No | Optional | No | Yes | Yes
+High discount override | No/approval | No | No | No | Approval | Yes
+Stock adjustment | No | Yes/approval | No | No | Approval | Yes
+Khata credit override | No/approval | No | Yes/approval | No | Approval | Yes
+Refund | Policy | No | Yes/approval | No | Approval | Yes
+GST export | No | No | Read/Generate | Yes | Yes | Yes
+Device revoke | No | No | No | No | Yes | Yes
+Role/security change | No | No | No | No | Limited | Yes
+Area | Required baseline
+Environment separation | Development/test/staging/production isolated
+Production debug | Disabled
+TLS | Enabled for external and required internal connections
+Secrets | External secret management
+Database | Private network, RLS, least-privilege role
+Redis | Private network, authenticated
+R2 | Private objects/bucket
+Containers | Non-root, minimal privileges
+Backups | Encrypted and access-controlled
+CI/CD | Protected credentials and security gates
+Audit | Enabled and protected
+Rate limits | Enabled on auth and sensitive endpoints
+Device lifecycle | Registration + revocation
+Layer | Primary responsibility
+Flutter | Secure UI, secure storage, device identity, bounded offline data, input UX, hardware isolation
+Go API | Authentication, authorization, validation, business rules, idempotency, rate limits, provider verification
+PostgreSQL | Authoritative data, RLS, constraints, transactions, tenant isolation
+Worker | Scoped tenant jobs, idempotent side effects, retries, no broad credentials
+R2 | Private object storage, scoped access, signed retrieval
+Provider adapters | Credential isolation, signature verification, timeout/unknown-state handling
+Observability | Redacted logs, audit/security events, alerting
+CI/CD | Security gates, SBOM, scanning, artifact integrity
+Document | Security dependency
+01 Database & ERD | tenant_id, RLS, constraints, audit, archive and security-event tables
+02 API Specification | auth headers, idempotency, errors, webhook and rate-limit contracts
+03 Go Backend | middleware, authorization, DB roles/RLS context, secrets, jobs, adapters
+04 Flutter | SQLCipher, secure storage, device security, offline integrity
+05 Offline Sync | transaction envelopes, replay protection, device revocation, conflict security
+06 Inventory & Batch | stock integrity, authorization, adjustment/GRN/return controls
+07 Accounting & Khata | financial immutability, approval, receipts, refund and audit controls
+08 POS & Billing | server calculation, privileged discount, finalization and payment trust
+09 Hardware | hardware isolation, safe parsing, device pairing and failure boundaries
+10 Payment & UPI | server-only secrets, signed webhooks, reconciliation and refund controls
+11 GST & Compliance | credential protection, compliance exports, provider verification and audit

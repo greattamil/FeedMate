@@ -1,0 +1,680 @@
+Andipatti Animal Feed System
+Document 04 — Complete Flutter Technical Architecture Specification
+v1.0 — Implementation Baseline
+Aligned with PRD v1.2, Database & ERD v1.0, API Specification v1.0, and Go Backend Technical Architecture v1.0.
+Client baseline: Flutter + Dart, offline-first, SQLCipher SQLite, secure device storage, REST/WebSocket synchronization, and direct hardware integration at the shop edge.
+1. Purpose & Scope
+This document defines the complete Flutter application architecture for Android/tablet/phone shop devices. The application is designed for unreliable connectivity, fast POS operation, Tamil/local-language usage, barcode and weighing hardware, thermal printing, payment status updates, and safe synchronization with the authoritative Go/PostgreSQL backend.
+Flutter is the user interface and offline execution environment, not the authoritative financial database.
+SQLCipher SQLite is the encrypted local operational store.
+PostgreSQL remains authoritative after synchronization.
+Hardware access is isolated behind Flutter platform/adapters.
+Financial workflows use deterministic local transaction envelopes and server reconciliation.
+Every screen must remain usable during temporary network loss where the business process permits.
+2. Architecture Principles
+Offline-first by default for core shop operations.
+Local writes are transactional and immediately visible to the operator.
+All synchronized financial operations carry a stable client transaction ID and idempotency key.
+Never silently overwrite authoritative server state.
+Never use floating-point arithmetic for money, weight, quantity or tax-sensitive calculations.
+Sensitive secrets and SQLCipher keys never live in ordinary SharedPreferences.
+UI widgets do not directly access SQLite, REST, WebSocket, or hardware.
+Business rules are represented in application/domain services and shared with backend contracts through explicit schemas, not copied ad hoc.
+Finalized invoices are immutable; corrections use returns/refunds/reversals.
+Hardware failure never invalidates a committed invoice.
+Every sync failure is visible, actionable and retryable.
+3. Target Flutter Stack
+4. Complete Project Structure
+lib/
+  main.dart
+  bootstrap.dart
+  app/
+    app.dart
+    router.dart
+    theme/
+    localization/
+  core/
+    config/
+    constants/
+    errors/
+    result/
+    logging/
+    security/
+    permissions/
+    connectivity/
+    clock/
+    formatting/
+    decimal/
+    validation/
+  data/
+    local/
+      database/
+      migrations/
+      dao/
+      entities/
+      encryption/
+    remote/
+      api/
+      dto/
+      interceptors/
+    repositories/
+  domain/
+    entities/
+    value_objects/
+    services/
+    usecases/
+    policies/
+  features/
+    auth/
+    dashboard/
+    products/
+    customers/
+    suppliers/
+    procurement/
+    inventory/
+    pos/
+    invoices/
+    returns/
+    payments/
+    khata/
+    contra/
+    accounting/
+    cash_eod/
+    notifications/
+    reports/
+    sync/
+    settings/
+    devices/
+  hardware/
+    barcode/
+    weighing_scale/
+    printer/
+    payment_display/
+  sync/
+    engine/
+    queue/
+    conflict/
+    cursor/
+    transaction_envelope/
+  widgets/
+    common/
+    forms/
+    tables/
+    numeric/
+    tamil_search/
+    status/
+  l10n/
+assets/
+  icons/
+  images/
+  fonts/
+test/
+  unit/
+  widget/
+  integration/
+  golden/
+  sync/
+  hardware/
+  security/
+
+Feature packages should own their presentation/state/use-case-facing code while common infrastructure remains isolated under core/data/domain.
+5. Application Layers
+6. State Management
+Use Riverpod providers/notifiers or an equivalent disciplined state-management architecture.
+Separate ephemeral UI state from durable business state.
+Cart state may be local and session-oriented; finalized invoice state is durable.
+Sync queue state is persisted, not held only in memory.
+Loading/error/success/empty/offline states must be explicit.
+Providers must not perform hidden writes during widget build.
+Dispose stream/subscription resources correctly.
+Do not create one giant global provider containing the whole application.
+7. Navigation & Route Guards
+Public routes: login, device registration/setup, recovery flows.
+Authenticated routes: dashboard, POS, customers, inventory, procurement, reports, settings.
+Permission guards must be evaluated before protected route entry and again before sensitive mutations.
+Unsaved POS cart state must be protected when navigating away.
+Deep links must not bypass tenant/device authorization.
+Logout clears active authenticated session state and sensitive in-memory data.
+8. Authentication & Device Security
+Access tokens are short-lived; refresh/session credentials are stored securely.
+Bind sessions to registered device identity where backend policy requires it.
+Store SQLCipher encryption key only in OS secure storage or a securely derived protected mechanism.
+Do not log access tokens, refresh tokens, PINs or database keys.
+Support device revocation and forced re-authentication.
+Optional device biometric/app lock may protect local access, but it does not replace server authorization.
+Detect unsupported/rooted/jailbroken environments according to tenant policy; do not rely on client detection as the only security boundary.
+On logout/revocation, clear or invalidate sensitive local session material while retaining only policy-approved offline data.
+9. SQLCipher Local Database
+The local database is the operational offline cache/store and must be encrypted at rest.
+Use SQLCipher-compatible SQLite implementation.
+Encryption key is generated/provisioned securely and never hardcoded.
+Run local schema migrations transactionally.
+Use DAOs/repositories rather than raw SQL from UI code.
+Keep local records tenant/device scoped.
+Include server IDs, local IDs, versions, sync status and timestamps where synchronization requires them.
+Persist transaction envelopes separately from ordinary cached master data.
+Protect database backup/export functionality; do not expose raw SQLCipher files casually.
+10. Local Data Categories
+11. Local Transaction Envelope
+Every offline-capable mutation should be represented conceptually as:
+transactionId
+deviceId
+tenantId
+userId
+operationType
+schemaVersion
+clientCreatedAt
+idempotencyKey
+payload
+payloadHash
+status
+attemptCount
+lastAttemptAt
+lastErrorCode
+serverEntityId
+serverVersion
+
+The envelope is immutable after creation except for synchronization metadata.
+Generate transactionId with collision-resistant IDs.
+Use a canonical serialized payload for hashing.
+Never regenerate an idempotency key on retry.
+Retrying the same envelope must produce the same server operation.
+12. Repository Offline-First Strategy
+Repositories decide whether data is read from local SQLCipher, remote API, or both.
+Reads: local-first for low-latency screens; refresh from server when online.
+Writes: local transactional queue for supported offline operations; remote-first only where business policy requires online authorization.
+After server acceptance, reconcile local provisional state with authoritative IDs/versions.
+Do not expose whether a source was local or remote unless the UI needs a freshness/status indicator.
+Repository methods return domain models, not raw DTOs.
+13. Synchronization Engine
+Detect network availability and start a guarded sync cycle.
+Acquire a single-device sync lock to prevent duplicate concurrent cycles.
+Upload pending envelopes in deterministic order.
+Process server response as accepted, duplicate, conflict or rejected.
+Mark accepted envelopes with server identifiers/version.
+Fetch server changes using tenant/device/user-authorized cursor.
+Apply downloads transactionally to local SQLCipher.
+Resolve nonfinancial master-data changes automatically when safe.
+Surface financial/inventory conflicts for explicit resolution.
+Persist cursor only after the corresponding page is successfully applied.
+Release sync lock and update sync status.
+14. Sync Connectivity Rules
+Connectivity status is only a hint; successful authenticated API traffic is the real online test.
+Do not start unlimited retry loops when offline.
+Use exponential backoff with jitter.
+Respect server Retry-After responses.
+Pause sync when authentication is invalid until re-authentication succeeds.
+Do not duplicate uploads after app restart.
+Foreground resume should trigger a guarded sync.
+Manual 'Sync Now' must not create parallel sync workers.
+15. Conflict Resolution
+16. POS Architecture
+POS is optimized for touch, keyboard/scanner and rapid repeated transactions.
+Product search supports barcode, Tamil Unicode, transliteration, aliases and colloquial terms.
+Cart lines store product ID, UOM, quantity, unit price, discount, tax profile and batch allocation metadata as applicable.
+Loose feed quantity is decimal and can be populated by scale reading.
+Pricing tier is resolved from customer selection and effective price configuration.
+Credit/Khata selection triggers local policy checks and server reconciliation.
+Multi-tender supports cash + UPI + Khata subject to business rules.
+Invoice finalization creates one immutable transaction envelope.
+Printing occurs after commit and is independent of financial success.
+17. Tamil Search UX
+Search field accepts Tamil and Latin transliteration.
+Normalize Unicode, punctuation, whitespace and common variants.
+Display alias/product confidence and primary product name.
+Support farmer shorthand without changing the canonical product name.
+Barcode scan bypasses fuzzy search and directly resolves exact barcode.
+Search results should remain fast from the local indexed catalogue.
+Ambiguous fuzzy results require operator confirmation.
+18. Weighing Scale Architecture
+Create a WeighingScaleAdapter interface.
+Adapters may use Bluetooth, USB serial, RS-232 or supported platform bridges.
+Normalize incoming readings into decimal weight + unit + stability flag + timestamp.
+Handle noisy readings with configurable stabilization/debounce.
+Display connection state and last valid reading.
+Allow manual entry only according to permission/policy.
+Record scale source when weight materially affects a transaction.
+Hardware timeout must not freeze the POS UI.
+19. Barcode Scanner Architecture
+Support camera scanning and hardware keyboard-wedge scanners.
+Normalize scanned strings and strip configured control characters.
+Debounce duplicate rapid scans.
+Resolve exact product barcode locally first.
+Unknown barcode produces a clear action: search/register/scan again.
+Never map an unknown barcode to a fuzzy product automatically.
+20. ESC/POS Printer Architecture
+Create a PrinterAdapter interface with discovery, connect, print and status methods.
+Generate ESC/POS bytes in a receipt renderer independent of transport.
+Support USB/Bluetooth/network transports as configured.
+Queue print jobs locally when appropriate.
+Use idempotent print-job IDs to prevent accidental duplicate prints where feasible.
+Printer failure never rolls back an already finalized invoice.
+Offer reprint from the invoice screen.
+Offer one-tap 'Send receipt via WhatsApp' fallback.
+Receipt layout must support Tamil text through compatible printer/font strategy or image/raster rendering where necessary.
+21. Payment & UPI UX
+Create payment intent before presenting dynamic QR where supported.
+Display pending/paid/failed/expired state.
+WebSocket updates are advisory; the app can poll authoritative payment status.
+Do not mark a payment permanently paid from a client callback alone.
+Handle delayed payment confirmation after the POS screen changes.
+Payment cancellation/expiry must be explicit.
+UPI + cash split must reconcile exactly to invoice total.
+Provider transaction IDs are stored for reconciliation.
+22. Khata & Credit UX
+Show available credit, outstanding amount and credit limit before finalization.
+Warn when limit would be exceeded.
+Owner/admin override requires secure PIN and permission.
+Show override reason entry.
+Receipt screen must show amount applied to Khata.
+Customer ledger view distinguishes sales, receipts, contra credits, adjustments and reversals.
+Offline balances display freshness timestamp where applicable.
+23. GRN / Procurement UX
+PO selection or direct receiving according to permission.
+Truck/arrival metadata.
+Bag count and package details.
+Gross/tare/net capture.
+Per-product tare configuration and threshold warning.
+Net weight cannot be negative.
+Excess tare requires correction or authorized override with reason.
+Batch number, manufacture/expiry dates where applicable.
+Finalization creates local transaction and later server reconciliation.
+24. Inventory UX
+Display sealed bags and loose quantity separately when UOM model requires it.
+Batch-aware stock display.
+FIFO/FEFO allocation visibility where operationally useful.
+Expiry/aflatoxin alert badges.
+Stock count workflow requires reason and authorization.
+Stock adjustment screen must show before/after quantity and reason.
+Never permit silent deletion of stock.
+25. Returns & Refund UX
+Select original invoice where available.
+Validate returnable quantity against prior returns.
+Return stock to the correct batch/location according to policy.
+Choose refund mode: cash/UPI/credit/Khata reversal where permitted.
+Finalized return is immutable.
+Refund provider operation is asynchronous and independently reconciled.
+Print/send return receipt after successful internal commit.
+26. EOD / Cash Closure UX
+Open cash session with opening float.
+Record cash movements/payouts.
+Calculate expected cash from authoritative local transaction set.
+Enter physical cash count.
+Show variance prominently.
+Require reason/approval for configured variance threshold.
+Finalize EOD as immutable session result.
+Sync EOD result to server and show reconciliation status.
+27. Reports & Dashboard
+Dashboard cards should distinguish local cached values from fresh server values where relevant.
+Heavy reports use server-side async jobs.
+Offline mode shows only supported cached/operational reports.
+Exports display job progress and final file availability.
+All report filters include tenant scope implicitly.
+28. Notifications & Reminders
+Use local notifications for expiry, collection and operational reminders where permitted.
+Server remains authoritative for scheduled reminders and deduplication.
+Aavin/payment-cycle reminder dates and grace periods are configurable.
+Pause dates and duplicate prevention are supported.
+Notification content is localized.
+29. Localization
+Support Tamil and English from the architecture level.
+Use localization resource files; never scatter user-facing strings through code.
+Numbers, currency, date/time and weights use locale-aware formatting.
+Preserve Tamil Unicode in storage, search and printing.
+Allow tenant-preferred language with user-level override if permitted.
+Do not translate product master values automatically.
+30. Accessibility & Shop Usability
+Large touch targets for POS.
+High-contrast status indicators.
+Keyboard navigation for desktop-like devices where supported.
+Readable numeric typography for weights and totals.
+Clear online/offline/sync state.
+Minimal modal interruptions during rapid sales.
+Confirm destructive/sensitive operations.
+Use vibration/sound feedback for successful scans where device policy allows.
+31. Error & Recovery UX
+32. Networking Layer
+Centralize REST configuration in a typed API client.
+Attach Authorization, X-Request-ID, Idempotency-Key, X-Device-ID, X-App-Version and Content-Type as required by the API.
+Use interceptors for authentication refresh, request IDs and safe logging.
+Map HTTP errors to typed domain/application errors.
+Use bounded timeouts for connect, send and receive.
+Support cancellation for search and report requests.
+Do not retry non-idempotent operations unless protected by idempotency.
+33. API DTO Mapping
+Keep generated/transport DTOs separate from domain entities.
+Validate required fields during decoding.
+Preserve decimal values without converting to binary floating point.
+Preserve unknown server fields where forward compatibility requires it.
+Version offline payload schemas.
+Never serialize internal database implementation details to the API unless contractually required.
+34. Local Database Migration
+Bundle migration scripts with the app version.
+Read current local schema version.
+Apply migrations in a transaction.
+Verify required tables/indexes.
+Only mark schema version after success.
+Retain backward-compatible migration paths for supported upgrade ranges.
+On failure, prevent normal operation rather than opening a partially migrated database.
+Backup/export recovery is controlled and encrypted where supported.
+35. Performance Architecture
+Index local product aliases/barcodes for search.
+Paginate long lists.
+Debounce text search.
+Use isolates/background computation for heavy parsing/export preparation.
+Do not rebuild large widget trees unnecessarily.
+Use const widgets where possible.
+Keep POS interactions responsive under normal catalogue sizes.
+Batch sync operations where API contract permits.
+Avoid loading complete historical ledgers into memory.
+36. Memory & Lifecycle
+Dispose controllers, streams, subscriptions and hardware connections.
+Pause nonessential listeners when screens are backgrounded.
+Do not retain entire invoice/report datasets in long-lived providers.
+Handle Android process death by restoring safe persisted state.
+Persist active POS draft safely enough to recover after unexpected restart.
+37. Offline Security
+Encrypt SQLCipher database.
+Secure encryption key with OS secure storage.
+Limit locally cached PII according to tenant policy.
+Apply local session timeout/app lock.
+Do not trust local authorization as a substitute for server authorization.
+Tag locally generated transactions with device/user identity.
+On device revocation, block synchronization and sensitive operations.
+Provide controlled data wipe for decommissioned devices.
+38. Hardware Permissions
+Request only required Bluetooth/USB/camera permissions.
+Explain permission purpose to the operator.
+Handle denied/restricted permissions without crashing.
+Store paired-device identifiers securely.
+Provide test-connection actions in settings.
+Maintain hardware status independently from business transactions.
+39. WebSocket Client
+Authenticate WebSocket connection.
+Reconnect with exponential backoff.
+Discard stale events using event IDs/versions.
+Never assume an event was received; REST resync remains available.
+Update payment/sync status only after validating tenant/session context.
+Close connection cleanly on logout.
+40. Sync UI
+Persistent small sync indicator: synced/syncing/offline/error.
+Tap opens sync details.
+Show pending count and oldest pending transaction age.
+Show conflict count separately from transient retry failures.
+Allow safe manual retry.
+Do not expose technical stack traces to operators.
+Critical unsynchronized financial transactions should be clearly identifiable.
+41. Security & Privacy UX
+Mask sensitive identifiers where practical.
+Confirm owner/admin actions.
+Do not display secret credentials.
+Warn before clearing local data.
+Show device registration status.
+Provide audit-friendly confirmation for high-risk operations.
+42. App Configuration
+Secrets must not be embedded as permanent client credentials. Provider secrets belong on the backend.
+43. App Flavors / Environments
+Development: local API, test database, verbose diagnostics.
+Staging: production-like integrations and test tenant.
+Production: restricted endpoints, production observability and minimized diagnostics.
+Environment-specific values are injected at build/deploy time.
+Production builds must disable debug-only shortcuts and test payment flows.
+44. Testing Strategy
+45. Mocking & Test Doubles
+Mock Clock, API client, repositories, hardware adapters, secure storage and sync transport.
+Use deterministic IDs/time in unit tests.
+Use fake repositories for widget tests.
+Hardware tests must not require physical equipment in CI.
+Integration tests should use real SQLCipher-compatible database behavior where feasible.
+46. Build & CI/CD
+Flutter format check.
+Static analysis/lint.
+Unit tests.
+Widget/golden tests.
+Integration tests.
+Dependency/security scan.
+Build Android/iOS artifacts for approved branches.
+Verify app version/build number.
+Sign production artifacts only in protected CI.
+Publish artifacts to controlled distribution.
+Run smoke tests against staging.
+Promote production with release approval.
+47. Android Production Packaging
+Use product flavors for dev/staging/prod.
+Use protected signing keys outside source control.
+Configure camera/Bluetooth/USB permissions accurately.
+Configure foreground/background behavior for sync within platform limits.
+Prevent debug logging in production.
+Support shop tablet screen sizes and rotation policy as defined by deployment.
+48. iOS Considerations
+Keep iOS support architecture-ready even if Android is the primary shop device.
+Use Keychain for secrets.
+Respect Bluetooth/camera permissions.
+Keep hardware adapters behind platform interfaces because peripheral support differs by OS.
+Do not assume background execution is unlimited.
+49. App Update & Compatibility
+Backend supports the declared range of app schema versions.
+Local migrations run before normal startup.
+Critical security updates may require minimum app version enforcement from server.
+Offline users should receive a clear upgrade-required state when the backend no longer supports their version.
+Never invalidate an already-finalized local transaction solely because a newer UI version exists.
+50. Crash & Diagnostics
+Capture crash, app version, device model, OS version and non-sensitive diagnostic context.
+Associate errors with request IDs where available.
+Do not capture tokens, SQLCipher keys, PINs or unnecessary PII.
+Provide operator-safe diagnostic export only with authorization.
+Track sync failures separately from app crashes.
+51. Feature Flags
+Flags may control staged features such as new POS layouts, optional hardware support or experimental search.
+Financial correctness must not depend on an unstable client-only feature flag.
+Server can disable incompatible features remotely.
+Every flag has an owner, default, rollout policy and removal plan.
+52. Backup / Recovery of Local State
+Server remains the recovery source for synchronized transactions.
+Unsynchronized transaction envelopes are critical local recovery data.
+Provide safe app restart recovery without exposing the raw database.
+Do not rely on consumer cloud backup for SQLCipher keys unless explicitly designed and tested.
+Decommissioned devices must have a controlled local-data wipe procedure.
+53. Telemetry Events
+App opened/resumed.
+Login/session events.
+POS transaction started/finalized.
+Payment intent created/status changed.
+Printer/scale/scanner connection failures.
+Sync started/completed/conflict/failure.
+Database migration result.
+Crash/exception.
+Telemetry must be privacy-minimized and tenant-aware only where operationally necessary.
+54. Complete Screen Catalogue
+55. Critical User Flows
+Login → device verification → dashboard → POS → scan/search → add item → weigh loose item → customer/tier → payment → finalize → print/WhatsApp → sync.
+Offline POS → local validation → local finalized envelope → receipt → reconnect → upload → authoritative response → local reconciliation.
+PO → truck arrival → GRN → gross/tare/net → batch/expiry → stock posting → supplier payable → sync.
+Customer → Khata sale → credit check → optional owner override → invoice → ledger → collection receipt.
+Farmer buy-back → contra entry → stock receipt → customer credit → ledger reconciliation.
+Payment QR → intent → pending → webhook/server confirmation → WebSocket/poll → paid → invoice reconciliation.
+EOD → cash opening → movements → expected cash → physical count → variance → approval if needed → close → sync.
+56. Non-Negotiable Client Rules
+No financial arithmetic using binary floating point.
+No direct database access from widgets.
+No direct HTTP calls from widgets.
+No secrets in source/assets/logs.
+No local-only permanent authority for payment confirmation.
+No blind overwrite of server financial state.
+No deletion of finalized invoices.
+No automatic fuzzy selection when product identity is ambiguous.
+No printer failure rollback.
+No infinite sync retry loop.
+No parallel duplicate sync cycle for one device.
+No bypass of server permissions.
+No raw SQLCipher export without explicit controlled recovery workflow.
+57. Production Readiness Checklist
+Production API URL and WebSocket URL configured.
+Secure storage verified on supported devices.
+SQLCipher encryption verified.
+Database migrations tested from supported prior versions.
+Offline POS flow tested through app restart.
+Duplicate sync submission tested.
+Payment webhook delay tested.
+Printer disconnected during invoice tested.
+Scale disconnected during loose sale tested.
+RLS/backend authorization contract verified.
+Tamil search and receipt rendering tested.
+Device registration/revocation tested.
+Crash reporting redaction verified.
+Production signing and release keys secured.
+Minimum supported app version policy configured.
+End-to-end staging test passed.
+58. Traceability
+59. Final Architecture Summary
+The Flutter application is an offline-first shop edge application with a clean separation between presentation, application/domain logic, repositories, encrypted local persistence, remote API integration, synchronization and hardware adapters. Core shop workflows continue safely through connectivity interruptions, while PostgreSQL remains the final authority. Local financial operations are represented as immutable transaction envelopes with stable IDs and idempotency. Hardware failures are isolated from financial finalization, and Tamil/local-language search is a first-class capability.
+This document is the implementation baseline for Document 05 — Complete Offline-First & Synchronization Specification.
+Appendix A — Recommended Core Interfaces
+Conceptual interfaces:
+
+abstract class ProductRepository {
+  Future<List<Product>> search(String query);
+  Future<Product?> byBarcode(String barcode);
+}
+
+abstract class SyncEngine {
+  Future<SyncResult> run();
+  Stream<SyncStatus> watchStatus();
+}
+
+abstract class WeighingScaleAdapter {
+  Stream<ScaleReading> readings();
+  Future<void> connect(ScaleConfig config);
+  Future<void> disconnect();
+}
+
+abstract class PrinterAdapter {
+  Future<void> printReceipt(ReceiptDocument document);
+  Future<PrinterStatus> status();
+}
+
+abstract class BarcodeScannerAdapter {
+  Stream<String> scans();
+}
+
+Appendix B — Acceptance Scenarios
+Product can be found offline using Tamil alias and transliteration.
+Barcode scan adds the correct product without network.
+Loose feed sale captures stable decimal scale weight.
+App restart preserves an unfinished POS cart according to policy.
+Offline finalized sale remains visible and prints even with no network.
+Reconnect uploads exactly once and receives authoritative invoice identity.
+Duplicate upload does not create duplicate stock, invoice, payment or ledger entry.
+Printer failure leaves invoice finalized and provides reprint/WhatsApp options.
+Owner PIN override is permission-checked and audited by backend.
+SQLCipher database cannot be opened without the protected key.
+Device revocation prevents further synchronization.
+Server changes are applied using cursor-based synchronization without cross-tenant leakage.
+End of Document 04.
+Area | Baseline
+Framework | Flutter stable channel; version pinned in CI
+Language | Dart
+State management | Riverpod recommended
+Routing | go_router recommended
+Local database | SQLite with SQLCipher encryption
+Networking | Dio or equivalent typed HTTP client
+Serialization | json_serializable/freezed or equivalent
+Secure storage | OS Keychain/Keystore-backed secure storage
+Connectivity | connectivity_plus plus real request health checks
+Barcode | Camera/native scanner adapter
+Scale | Bluetooth/USB/RS-232 platform adapter
+Printer | ESC/POS adapter
+Realtime | WebSocket
+Notifications | Local notification abstraction
+Logging | Structured application logger with redaction
+Crash reporting | Production crash/diagnostic service, configurable
+Build | Dockerized CI where applicable; Android/iOS build runners
+Layer | Responsibility
+Presentation | Screens, widgets, navigation, UI state, validation messages
+Application | Use-case orchestration and user-intent handling
+Domain | Business value objects, policies, local invariants
+Repository | Chooses local vs remote source and synchronization strategy
+Data local | SQLCipher DAOs, local transaction queue, cached masters
+Data remote | REST/WebSocket clients, DTO mapping
+Sync | Outbox upload, cursor download, conflict handling
+Hardware | Scanner, scale, printer and payment-device adapters
+Platform | Android/iOS channels, permissions and OS services
+Category | Offline policy
+Product master | Cached; refreshed from server
+Aliases/barcodes | Cached; searchable offline
+Prices/tax profiles | Cached with effective dates/version
+Customers | Cached according to tenant policy
+Khata balance | Cached with last authoritative version; financial mutations queued
+Inventory | Cached; offline sales subject to configured policy
+POS cart | Local durable session
+Draft invoice | Local
+Finalized local transaction | Immutable envelope pending sync
+Payments | Pending intent/status; provider confirmation remains authoritative
+Reports | Cached snapshots or generated when online
+Sync metadata | Durable and protected
+Audit/outbox | Durable until successfully synchronized
+Conflict | Client behavior
+Duplicate transaction | Mark synchronized using server result
+Payload mismatch for same ID | Show critical conflict; do not overwrite
+Price changed | Use server/effective-date policy; preserve original finalized transaction
+Stock changed | Apply configured offline policy or surface stock conflict
+Customer balance changed | Refresh authoritative ledger/balance; never overwrite
+Product master changed | Merge only non-conflicting fields
+Invoice number conflict | Accept server-controlled document identity
+Payment settled elsewhere | Show authoritative status
+Permission revoked | Reject pending mutation and require re-auth/refresh
+Failure | Required behavior
+Offline | Continue supported workflows; show offline indicator
+Sync conflict | Preserve transaction; show actionable conflict state
+Printer failure | Invoice remains final; retry/reprint/WhatsApp
+Scale disconnected | Show hardware state; allow policy-approved manual path
+Payment timeout | Keep intent pending; allow status refresh
+Session expired | Secure re-auth; preserve safe draft where possible
+Database migration failure | Block app safely and require recovery
+Permission revoked | Block mutation; refresh session
+API 5xx | Retry safely for idempotent operations; don't duplicate writes
+Configuration | Source
+API base URL | Build/deployment configuration
+WebSocket URL | Build/deployment configuration
+Environment | Build flavor
+Feature flags | Server/tenant configuration, cached safely
+Printer settings | Tenant/device configuration
+Scale settings | Tenant/device configuration
+Language | Tenant/user preference
+POS policies | Server-provided tenant configuration
+Logging level | Build/remote operational policy
+Test | Coverage
+Unit | Domain calculations, pricing, UOM, tax, sync policies
+Repository | Local/remote selection and mapping
+SQLCipher integration | Migrations, encryption/open/close, DAO behavior
+Widget | POS, search, cart, Khata, EOD
+Golden | Critical invoice/receipt/status layouts
+Sync integration | Upload/download/conflict/retry
+Hardware | Scanner/scale/printer adapters with mocks
+API contract | Document 02 schemas
+Security | Secure storage, logout, session, permission paths
+End-to-end | Login → POS → payment → invoice → print → sync
+Failure tests | Offline, restart, timeout, duplicate callback, printer failure
+Performance | Search, cart, sync, startup
+Area | Screens
+Auth | Login, device registration, session recovery
+Dashboard | Home, sync status, alerts, daily summary
+POS | Cart, product search, scanner, scale, customer, payment, confirmation
+Invoices | Invoice list, detail, reprint, resend receipt
+Customers | List, create/edit, profile, Khata ledger, receipts
+Suppliers | List, profile, PO history, payable ledger
+Procurement | PO list/create/detail, GRN create/detail
+Inventory | Stock, batch, expiry, counts, adjustments, movement history
+Returns | Return creation, return detail, refund status
+Contra | Buy-back/contra entry and history
+Cash/EOD | Cash session, movements, physical count, closure
+Payments | Payment intents, pending payments, reconciliation
+Reports | Sales, stock, Khata, supplier, tax, EOD, exports
+Notifications | Alerts, reminders, delivery status
+Settings | Tenant, pricing, tax, UOM, devices, hardware, language
+Administration | Users, roles, permissions, audit, feature flags
+Previous document | Flutter implementation
+PRD v1.2 | Offline POS, hardware, Tamil search, Khata, payments, EOD, compliance UX
+Database & ERD v1.0 | Local projections, sync metadata, IDs, decimal precision
+API Specification v1.0 | REST headers, errors, sync, WebSocket, payment/compliance contracts
+Go Backend Architecture v1.0 | Transaction envelopes, outbox, RLS context, provider adapters

@@ -1,0 +1,739 @@
+Andipatti Animal Feed System
+Document 03 — Complete Go Backend Technical Architecture Specification
+v1.0 — Implementation Baseline
+Aligned with PRD v1.2, Database & ERD Specification v1.0, and Complete API Specification v1.0.
+Architecture baseline: Go modular monolith + PostgreSQL + Redis/queue optional + Cloudflare R2 + WebSocket + external integration adapters. Flutter remains the offline-first edge/client.
+1. Document Control & Purpose
+This document defines how the Go backend is structured, coded, tested, secured, deployed, operated, and extended. It is intentionally designed so the first production deployment can remain a modular monolith while individual modules can later be extracted without rewriting domain rules.
+2. Architecture Principles
+PostgreSQL is the authoritative source of transactional truth.
+Go owns business rules, transaction orchestration, authorization, validation, and integration boundaries.
+PostgreSQL Row-Level Security (RLS) is mandatory defense-in-depth for every tenant-owned table.
+No financial or inventory operation may rely on floating-point arithmetic.
+Finalized invoices, payments, stock movements, ledger entries, and accounting entries are immutable; corrections use reversal/return/refund mechanisms.
+Every financial write and external webhook is idempotent.
+Side effects such as WhatsApp, printing-related notifications, webhooks, exports, and archive uploads are asynchronous where possible.
+Offline sync never uses blind last-write-wins for financial or inventory conflicts.
+All timestamps are stored in UTC; tenant/shop timezone is used for business-day and reporting calculations.
+Configuration is environment-driven for infrastructure secrets and database-driven for tenant/business configuration.
+Observability, auditability, and reconciliation are first-class requirements.
+Prefer a simple deployable architecture over premature microservices.
+3. Target Runtime Architecture
+Recommended production topology:
+api container: Go HTTP/WebSocket API.
+worker container: Go background jobs, outbox delivery, notifications, archive, exports, expiry alerts and reconciliation jobs.
+postgres container/service: PostgreSQL; managed PostgreSQL may be used in production.
+redis container/service (optional): cache, rate limiting, distributed coordination and queue support where required.
+object-storage integration: Cloudflare R2 via S3-compatible API.
+reverse-proxy/edge: TLS termination, request filtering and routing.
+monitoring stack: structured logs + metrics + traces; deployment may use managed observability.
+The API and worker should share the same Go module and domain packages initially. They use different entrypoints and process roles.
+4. Go Toolchain & Module Strategy
+Use a currently supported Go release pinned in go.mod and CI; upgrade through controlled dependency-update PRs.
+Use gofmt, goimports, go vet and static analysis in CI.
+Keep one repository and one Go module initially.
+Separate executable entrypoints under cmd/api and cmd/worker.
+Do not place business logic in main.go.
+Pin dependencies and verify go.sum in source control.
+Use semantic application versioning exposed through health/version endpoints.
+5. Complete Repository / Folder Structure
+Recommended structure:
+
+/cmd
+  /api/main.go
+  /worker/main.go
+/internal
+  /app
+  /config
+  /domain
+  /application
+  /repository
+  /infrastructure
+  /transport
+    /http
+    /ws
+  /middleware
+  /auth
+  /tenant
+  /modules
+    /users
+    /products
+    /customers
+    /suppliers
+    /procurement
+    /inventory
+    /sales
+    /payments
+    /returns
+    /contra
+    /accounting
+    /cash
+    /notifications
+    /compliance
+    /reports
+    /sync
+    /archive
+    /files
+    /devices
+    /audit
+  /jobs
+  /events
+  /storage
+  /observability
+  /security
+/pkg
+  /decimal
+  /pagination
+  /apierrors
+  /idempotency
+  /clock
+  /httpx
+/migrations
+/seed
+/openapi
+/scripts
+/deploy
+  /docker
+  /compose
+  /k8s (optional future)
+/tests
+  /integration
+  /contract
+  /load
+/Dockerfile
+/docker-compose.yml
+/go.mod
+/go.sum
+/README.md
+
+Internal packages are preferred for application-specific implementation. Public reusable packages belong in /pkg only when they genuinely need external reuse.
+6. Layered Architecture
+7. Dependency Injection
+Construct dependencies once at process startup.
+Inject interfaces into application services.
+Application services depend on repository/provider interfaces, not concrete infrastructure.
+Use explicit constructors rather than global mutable singletons.
+Keep clock, ID generator and transaction manager injectable for deterministic tests.
+Production wiring belongs in internal/app or equivalent composition root.
+8. Configuration Management
+Secrets must never be committed to source control or stored in Docker images. Production secrets should come from the deployment secret manager/environment injection.
+9. HTTP Middleware Pipeline
+Request ID / correlation ID.
+Trusted proxy handling and request metadata normalization.
+Structured access logging.
+Recovery/panic handling.
+Body-size limit and content-type validation.
+CORS where applicable.
+Authentication/token verification.
+Tenant resolution.
+RLS transaction context preparation.
+RBAC/permission enforcement.
+Rate limiting.
+Idempotency handling for designated endpoints.
+Request validation.
+Handler execution.
+Response logging/metrics.
+Middleware must not assume that tenant_id supplied by a client is trusted. Tenant identity must come from authenticated membership/context and be verified against permitted access.
+10. Authentication & Session Architecture
+Use short-lived access tokens and revocable refresh sessions.
+Hash passwords with a modern password hashing algorithm such as Argon2id or bcrypt with an approved cost.
+Never store plaintext passwords, refresh tokens, provider secrets, or payment secrets.
+Refresh tokens should be rotated and stored as hashes or otherwise protected.
+Support device/session metadata, revocation and suspicious-session auditing.
+Owner/admin PIN for sensitive Khata overrides must be separately protected and audited.
+Device credentials should be revocable independently of a human account.
+11. Multi-Tenant Security & PostgreSQL RLS
+Every tenant-owned table must carry tenant_id either directly or through a strictly controlled relationship. PostgreSQL RLS must be enabled and enforced.
+Create a restricted application DB role that cannot bypass RLS.
+Never run the application as PostgreSQL superuser.
+At transaction start, set a trusted transaction-local tenant context, e.g. app.tenant_id.
+RLS policies compare tenant_id to the transaction context.
+Repository queries still include tenant_id where practical for clarity and index use.
+Cross-tenant administrative operations require a separate controlled path and explicit authorization.
+Test both application authorization and direct SQL/RLS isolation.
+Prevent tenant context leakage across pooled connections by using SET LOCAL within a transaction.
+Example conceptual policy: tenant_id = current_setting('app.tenant_id', true)::uuid. Exact SQL belongs in migrations and must fail closed when tenant context is absent.
+12. PostgreSQL Access & Transaction Manager
+Recommended Go stack: pgx for PostgreSQL connectivity and sqlc for type-safe generated query access.
+Use pgxpool for connection pooling.
+Use a transaction manager abstraction supporting Begin/Commit/Rollback.
+All business writes that change multiple authoritative tables must occur inside one database transaction.
+Set transaction-local tenant context before tenant-owned queries.
+Set appropriate statement/query timeouts.
+Use explicit isolation/locking where concurrency requires it.
+Never hold DB transactions open while waiting for remote APIs.
+13. Decimal, Money & Weight Handling
+Use decimal/numeric-safe Go types for money, weight, quantity, UOM factors and tax calculations.
+Recommended implementation: shopspring/decimal or an equivalent audited decimal package.
+Money: NUMERIC(12,2) minimum.
+Weight and inventory quantity: NUMERIC(12,3).
+UOM conversion factor: NUMERIC(12,6).
+Tax rate: NUMERIC(7,4).
+Never use float32/float64 for persisted financial calculations.
+Round only at explicitly defined business boundaries and record the resulting value.
+14. Domain Module Catalogue
+15. Product Search & Localization Backend
+Normalize Tamil Unicode and whitespace before indexing/search.
+Store aliases for Tamil, transliteration, colloquial terms, abbreviations and farmer shorthand.
+Support exact barcode first, exact normalized alias second, prefix/fuzzy/phonetic search as configured.
+Return ranked results with product, pack/UOM, price tier and stock availability where authorized.
+Do not silently substitute a different product because of fuzzy matching; require user confirmation when confidence is ambiguous.
+API responses must support UTF-8 and preserve Tamil text exactly.
+16. Procurement & GRN Transaction Design
+GRN finalization should atomically validate PO state, received quantities, batch data, tare, stock posting and supplier payable effects.
+Capture gross, tare and net weights as separate values.
+Validate total tare against configured threshold; recommended initial default 5% is configurable and not a hardcoded universal rule.
+Reject negative net weight.
+Permit authorized override only with reason and audit event.
+Create batch records when batch tracking applies.
+Post inventory movements and supplier payable entries in the same authoritative transaction.
+Do not call external APIs from the open transaction.
+17. Inventory Engine
+Inventory is ledger-driven: stock_movements are the audit trail; stock_balances are a performant current-state projection.
+Every movement references tenant, location, product, UOM and relevant batch where required.
+Use row-level locks/advisory mechanisms carefully to serialize competing stock mutations.
+FIFO/FEFO allocation must be deterministic and based on active stock.
+Loose/fraction stock is represented with decimal quantities and UOM conversion rules.
+Prevent stock from becoming negative unless an explicitly configured and authorized policy allows it.
+Stock counts create adjustment records with reason and approval metadata.
+Inventory cost and margin logic must use a documented costing method; do not infer cost from sale price.
+18. POS & Invoice Finalization
+Load/validate cart and customer.
+Resolve customer pricing tier and effective price list.
+Resolve product/UOM and applicable tax profile.
+Read live stock and allocate eligible batches.
+Validate credit limit if Khata is selected.
+Validate payment tender information.
+Calculate lines, discounts, taxes, rounding and grand total using decimal arithmetic.
+Generate financial-year/document-series invoice number atomically.
+Persist invoice, lines, tax lines, batch allocations, stock movements, customer ledger/payment allocations and accounting postings as one transaction.
+Write outbox events after successful commit.
+Return finalized invoice snapshot to client.
+Printer failure must never roll back a finalized invoice. The client may retry printing or send a receipt through WhatsApp asynchronously.
+19. Idempotency Architecture
+Require Idempotency-Key on financial write endpoints and payment/webhook processing.
+Store idempotency key, tenant, endpoint/operation, request fingerprint, status, response and expiry.
+Same key + same request should return the original result.
+Same key + materially different request should return an idempotency conflict.
+Webhook event IDs/provider transaction IDs must be unique.
+Idempotency records must participate in the same transaction as the protected business operation when atomicity is required.
+20. Accounting & Ledger Posting
+Use explicit posting services rather than ad hoc journal inserts in handlers.
+Each financial event maps to a documented accounting template.
+Sales, payment capture, Khata credit, supplier GRN/payable, supplier payment, contra and refunds must have deterministic postings.
+Journal entries are immutable after posting; corrections use reversal entries.
+Every posting references source document/event IDs for traceability.
+Provide reconciliation reports between invoices, payments, customer ledger, stock and accounting.
+21. Khata / Credit Controls
+Credit limit is checked transactionally against current outstanding exposure.
+Owner PIN override requires elevated permission, secure PIN verification and audit trail.
+Receipts reduce outstanding balance through explicit allocation.
+Contra/buy-back creates inventory receipt plus customer credit according to configured valuation rules.
+Grace periods and collection reminders are tenant-configurable.
+Duplicate reminders must be prevented using business keys/idempotency.
+22. Payment Provider Adapter
+Define a provider-neutral interface such as:
+
+CreatePaymentIntent
+GetPaymentStatus
+VerifyWebhook
+HandleWebhook
+RefundPayment
+ReconcilePayment
+
+Provider-specific code lives under infrastructure/integrations/payment/<provider>. Application services consume the interface. Webhooks are signature-verified, persisted, deduplicated, then translated into internal payment events.
+Never trust a client-provided 'paid' flag as authoritative.
+Persist raw webhook metadata only to the extent required for reconciliation and security.
+Do not log secrets, signatures or sensitive payment payloads unnecessarily.
+Support asynchronous confirmation through outbox/WebSocket events.
+23. WebSocket Architecture
+Use authenticated WebSocket sessions bound to tenant and device/user context.
+Maintain a connection registry keyed by tenant/user/device.
+Publish internal events after successful DB commit.
+Events include payment status, sync status, notification status and relevant operational updates.
+Clients must tolerate missed events and resync from REST APIs.
+Never treat WebSocket delivery as the source of truth.
+24. Outbox & Domain Events
+Write an outbox event in the same DB transaction as the business change.
+Worker claims pending events with safe concurrency control.
+Deliver to integration/event consumers.
+Retry transient failures with exponential backoff and jitter.
+Persist attempt count and last error.
+Move permanently failing events to a dead-letter state for operator review.
+Consumers must be idempotent.
+25. Background Jobs
+26. Offline Sync Backend
+Flutter generates a device transaction envelope containing device ID, local transaction ID, operation type, client timestamp, payload, schema version and idempotency information.
+Authenticate device/session before ingestion.
+Validate tenant and user membership.
+Deduplicate by tenant + device + client transaction ID/idempotency key.
+Validate schema and business invariants.
+Apply accepted transactions atomically.
+Return accepted, duplicate, conflict or rejected status with actionable error codes.
+Financial/inventory conflicts must never be resolved by blind last-write-wins.
+Provide sync cursors for incremental server-to-device changes.
+Do not return another tenant's records even if a client manipulates cursor values.
+27. Sync Conflict Policy
+28. Redis / Queue Usage
+Redis is optional and must never be the sole source of transactional truth.
+Suitable uses: short-lived cache, rate limiting, distributed job coordination, ephemeral WebSocket fan-out.
+Do not store authoritative inventory, invoices, payments or ledgers only in Redis.
+If Redis is unavailable, core PostgreSQL transactions should continue unless a specific feature explicitly depends on Redis.
+29. WhatsApp Integration
+Use a provider adapter around WhatsApp Cloud API or approved provider.
+Queue messages after invoice/payment/collection events.
+Store template/version and delivery status.
+Financial state is independent of message delivery.
+Retry transient failures; do not endlessly retry permanent failures.
+Respect tenant opt-in, recipient consent, template requirements and operational limits.
+Never place secrets or unnecessary sensitive data into message logs.
+30. Compliance Integration
+Implement provider-neutral interfaces for e-way bill/GST-related services.
+Applicability and thresholds are configuration/current-rule driven; never hardcode a universal ₹50,000 assumption.
+Store request/response identifiers and compliance documents.
+Use idempotency and provider transaction IDs.
+External failures must not partially commit internal financial state.
+Where compliance submission is asynchronous, persist pending status and provide reconciliation.
+31. File & R2 Storage
+Use S3-compatible SDK/API for Cloudflare R2.
+Store object metadata in PostgreSQL; object storage is not the relational metadata authority.
+Use generated object keys rather than user-supplied paths.
+Validate MIME type, size and extension.
+Generate short-lived signed URLs for controlled access.
+Never expose bucket credentials to Flutter.
+Archive objects should include manifest/checksum metadata.
+32. Archive Architecture
+Retention policy determines eligibility; age + paid status alone is insufficient.
+Archive process creates deterministic JSON/CSV/metadata packages.
+Generate checksum and immutable archive manifest.
+Upload to R2 and verify object existence/checksum.
+Only after successful verification may an eligible hot record be transitioned according to retention policy.
+Prefer PostgreSQL partitioning/cold storage where appropriate before destructive deletion.
+R2 archive is not the only backup; PostgreSQL backups and restore testing remain mandatory.
+33. Error Handling Contract
+All handlers should map internal errors into the API error envelope defined in Document 02.
+Never expose SQL errors, stack traces, secrets or internal identifiers in production responses.
+34. Authorization Matrix
+Permission checks are application-level, while RLS enforces tenant data boundaries.
+35. API Endpoint Implementation Mapping
+36. Concurrency & Locking
+Use SELECT ... FOR UPDATE for rows whose state is being transitioned and whose concurrent modification would be unsafe.
+Lock stock balance rows in a deterministic key order to reduce deadlocks.
+Use unique constraints as the final guard for invoice numbers, idempotency keys and provider IDs.
+Keep transactions short.
+Retry serialization/deadlock errors only for operations known to be safe and idempotent.
+Never use application-memory locks as the sole protection for financial correctness in a multi-instance deployment.
+37. Caching
+Cache only data that can tolerate bounded staleness.
+Suitable candidates: product search metadata, static tenant configuration, permission lookups, reference data.
+Never cache authoritative stock, payment status or customer balance without a clear invalidation/reconciliation design.
+Use versioned/effective-dated configuration where price/tax correctness matters.
+Cache keys must include tenant scope.
+38. Performance Targets
+Targets are engineering baselines and must be validated with production-like load testing.
+39. Observability
+Use structured JSON logs in production.
+Every request has request_id and, where applicable, correlation_id/device_id/tenant_id.
+Never log passwords, tokens, secrets or unnecessary PII.
+Metrics: request rate, latency, errors, DB pool saturation, transaction failures, sync outcomes, queue depth, webhook failures, payment reconciliation gaps, archive failures.
+Distributed traces should cover API → application → DB/external provider boundaries.
+Health endpoints distinguish liveness from readiness.
+Alert on reconciliation failures, growing dead-letter queues, payment mismatch, archive verification failures and database saturation.
+40. Security Controls
+TLS at external boundaries.
+Secure password hashing.
+Short-lived access tokens and refresh rotation.
+RLS for tenant isolation.
+RBAC/permission checks.
+Input validation and output encoding.
+SQL injection prevention through parameterized/generated queries.
+Rate limiting and brute-force protection.
+Secure headers and strict CORS configuration.
+Secret management outside source code.
+Audit sensitive actions.
+Dependency vulnerability scanning.
+Container image scanning and minimal runtime images.
+Database least privilege.
+Regular restore/security testing.
+41. Audit Architecture
+Audit actor, tenant, device, action, entity type/id, timestamp, request ID, before/after summary where appropriate, and reason.
+Audit financial overrides, stock adjustments, refunds, returns, PIN overrides, configuration changes, user/role changes and archive operations.
+Audit logs are append-only from the application perspective.
+Do not put sensitive secrets into audit payloads.
+Audit events should be correlated to source documents.
+42. Docker Architecture
+Development docker-compose should provide API, worker, PostgreSQL and optional Redis. Production may use managed PostgreSQL/R2/Redis while keeping API and worker containerized.
+Use multi-stage Docker builds.
+Compile a static/minimal Go binary.
+Run as non-root.
+Read-only filesystem where feasible.
+Expose only required ports.
+Use health checks.
+Separate development and production configuration.
+Mount no source code in production containers.
+Do not bake secrets into images.
+Use pinned base images and scan them.
+43. Example Docker Compose Topology
+Services:
+- api:8080
+- worker
+- postgres:5432
+- redis:6379 (optional)
+- reverse proxy/edge (optional local service)
+
+Persistent volumes:
+- postgres_data
+- optional redis_data
+
+Production external services:
+- managed PostgreSQL
+- Cloudflare R2
+- managed Redis if needed
+- external payment/WhatsApp/compliance providers
+
+The application must remain functional for core transactional flows if optional Redis is unavailable.
+44. Graceful Shutdown
+Stop accepting new requests.
+Stop WebSocket upgrades.
+Signal workers to stop claiming new jobs.
+Allow in-flight HTTP requests to finish within a timeout.
+Finish or safely release active DB transactions.
+Flush telemetry/log buffers.
+Close Redis/object-storage/provider clients.
+Close PostgreSQL pool.
+Exit with a clear status.
+45. CI/CD Pipeline
+Checkout source.
+Restore/cache Go dependencies.
+gofmt/gofmt check.
+go vet/static analysis.
+Unit tests.
+Integration tests using ephemeral PostgreSQL/Redis where required.
+Contract/OpenAPI tests.
+Security/dependency scan.
+Build API and worker images.
+Container image scan.
+Run migration validation.
+Publish immutable image tags.
+Deploy to staging.
+Run smoke tests.
+Promote to production with approval policy.
+Run post-deploy health/reconciliation checks.
+46. Testing Strategy
+Testcontainers is recommended for integration tests requiring real PostgreSQL/Redis behavior.
+47. Seed & Reference Data
+Create repeatable idempotent seed routines for roles, permissions, default UOMs, customer tiers, tax profile templates and system settings.
+Tenant-specific seed must be explicit and auditable.
+Never seed real customer/supplier financial data into production accidentally.
+Reference data versions should be migration-controlled.
+48. Database Migration Strategy
+Use ordered, versioned SQL migrations.
+Every schema change must be forward-applied and reviewed.
+Prefer additive changes before destructive changes.
+Large migrations must be online-safe or scheduled with explicit operational planning.
+RLS policies, indexes, constraints and functions belong in migrations.
+Migration runner must use a controlled DB role.
+Record migration version in the database.
+49. Feature Flags & Effective Dating
+Use tenant_features/tenant_settings for controlled business feature activation.
+Do not use environment flags for tenant-specific business behavior.
+Price lists, tax profiles, UOM conversions and policy settings should support effective dates where historical correctness requires them.
+Feature flag changes are audited.
+Remove obsolete flags after stable rollout.
+50. Reporting Architecture
+Operational reports may query normalized tables/views.
+Heavy reports should use materialized views, summary tables or async export jobs.
+Reports must always enforce tenant scope.
+Financial reports must reconcile to authoritative postings.
+CSV/XLSX/PDF exports should be asynchronous for large datasets.
+Export jobs should store status, requester, parameters and resulting file metadata.
+51. API Versioning & Compatibility
+Public API prefix remains /api/v1 until a planned breaking version is required.
+Additive fields are preferred.
+Do not silently change meaning of existing fields.
+Mobile clients may remain offline for extended periods; backend must tolerate supported older app versions.
+Schema version is included in offline sync envelopes.
+Deprecations require documented dates and client compatibility policy.
+52. Operational Runbooks
+Database unavailable: stop/queue noncritical work, protect financial operations, restore connectivity, reconcile.
+Payment mismatch: freeze automatic assumption of success, reconcile provider transaction IDs, record adjustment only through approved workflow.
+Queue backlog: inspect worker health, dependency latency and dead letters before scaling.
+RLS incident: immediately restrict access, inspect policies, rotate credentials if needed, audit affected requests.
+Archive failure: keep source data intact, retry upload/verification, never delete before verification.
+WhatsApp outage: preserve delivery jobs and allow invoice completion independent of messaging.
+Redis outage: disable/cache-fallback as designed; PostgreSQL remains authoritative.
+Printer failure: invoice remains finalized; client retries print or sends WhatsApp receipt.
+53. Disaster Recovery Hooks
+Use automated PostgreSQL backups with point-in-time recovery where supported.
+Maintain tested restore procedures.
+Keep archive manifests and checksums.
+Store infrastructure configuration in version control without secrets.
+Document RPO/RTO targets as deployment decisions.
+Run periodic restore tests and reconciliation checks.
+Do not consider R2 archive alone a disaster-recovery strategy.
+54. Implementation Rules — Non-Negotiable
+No business logic in HTTP handlers.
+No direct SQL from handlers.
+No float arithmetic for money/weight/quantity.
+No cross-tenant query without explicit authorized administrative path.
+No PostgreSQL superuser/BYPASSRLS application connection.
+No external API call inside the critical DB transaction.
+No financial state change based solely on a client assertion.
+No generic update endpoint that can mutate finalized financial documents.
+No silent stock adjustment.
+No silent ledger correction.
+No blind last-write-wins for financial/inventory sync.
+No destructive archival before manifest/checksum verification.
+No secret in logs, source code, Docker image or mobile bundle.
+Every financial write must be idempotent.
+Every sensitive override must be auditable.
+55. Production Definition of Done
+Code passes formatting, static analysis and security checks.
+Unit and integration tests pass.
+RLS isolation tests pass for every tenant-owned aggregate.
+API contract tests pass.
+All financial writes have idempotency coverage.
+Concurrency tests cover stock, invoice numbering and credit limits.
+Database migrations tested on a production-like dataset.
+Docker images build reproducibly and run non-root.
+Health/readiness checks work.
+Logs/metrics/traces are visible.
+Backup and restore procedure is validated.
+Archive restore verification is validated.
+Operational runbooks exist.
+Configuration/secrets are externally managed.
+Acceptance criteria from PRD/API/DB documents are traceable to tests.
+56. Traceability to Previous Documents
+57. Final Architecture Summary
+The recommended backend is a production-grade Go modular monolith with strict domain/application/infrastructure separation. PostgreSQL remains the authoritative system of record and RLS provides database-level tenant isolation. Financial and inventory operations are atomic, decimal-safe, idempotent and auditable. Outbox-driven workers isolate external side effects. Flutter handles offline edge operation and hardware control while the backend validates and reconciles authoritative state. Docker provides consistent packaging for development, staging and production, with managed infrastructure used where operationally appropriate.
+This specification is the implementation baseline for Document 04 — Flutter Technical Architecture Specification.
+Appendix A — Recommended Core Interfaces
+Illustrative interfaces (names may be adapted to the codebase):
+
+type TxManager interface {
+    WithinTx(ctx context.Context, fn func(ctx context.Context) error) error
+}
+
+type StockService interface {
+    Allocate(ctx context.Context, req AllocateStockRequest) (AllocationResult, error)
+    PostMovement(ctx context.Context, req StockMovementRequest) error
+}
+
+type SalesService interface {
+    FinalizeInvoice(ctx context.Context, req FinalizeInvoiceRequest) (InvoiceResult, error)
+}
+
+type PaymentProvider interface {
+    CreatePaymentIntent(ctx context.Context, req PaymentRequest) (PaymentIntentResult, error)
+    VerifyWebhook(ctx context.Context, req WebhookRequest) (VerifiedWebhook, error)
+    Refund(ctx context.Context, req RefundRequest) (RefundResult, error)
+}
+
+type ObjectStore interface {
+    Put(ctx context.Context, key string, r io.Reader, meta ObjectMetadata) error
+    Get(ctx context.Context, key string) (io.ReadCloser, error)
+    Delete(ctx context.Context, key string) error
+}
+
+Appendix B — Suggested Build Order Without Sprints
+Create repository/module and Docker build.
+Create configuration, logging, metrics and health.
+Create PostgreSQL migrations, RLS foundation and sqlc generation.
+Create authentication, tenant context and RBAC.
+Create product/UOM/tax/pricing modules.
+Create customer/Khata and supplier modules.
+Create procurement/GRN and inventory engine.
+Create POS/invoice/accounting transaction orchestration.
+Create payments/webhooks and reconciliation.
+Create offline sync.
+Create outbox/workers/notifications.
+Create compliance/files/archive.
+Create reports/exports.
+Complete security, load, failure and restore testing.
+Deploy through Docker-based CI/CD and execute production readiness checklist.
+Appendix C — Key Acceptance Scenarios
+Two tenants using identical product IDs cannot read or mutate each other's data.
+Two POS devices finalizing sales concurrently cannot generate duplicate invoice numbers.
+Two sales competing for the same batch cannot allocate more stock than is available.
+Repeated payment webhook delivery does not create duplicate payment or ledger entries.
+Repeated offline transaction submission returns the original authoritative result.
+Printer failure after invoice commit does not reverse the sale.
+GRN with excessive tare is rejected or requires authorized override with audit.
+Customer credit limit is enforced transactionally.
+Archive upload failure leaves source records untouched.
+Restored archive checksum matches manifest.
+Direct SQL access using an application role cannot bypass tenant RLS.
+All amounts/weights remain exact to configured precision through request → database → response.
+End of Document 03.
+Item | Specification
+Document | 03 — Complete Go Backend Technical Architecture
+Status | Implementation-ready baseline
+Primary backend | Go
+Authoritative database | PostgreSQL
+Client | Flutter offline-first
+Local client DB | SQLCipher SQLite
+Object storage | Cloudflare R2 / S3-compatible
+Deployment | Docker containers
+Architecture | Modular monolith with clean domain boundaries
+API | REST /api/v1 + WebSocket
+Primary goal | Reliable, auditable, tenant-isolated financial/inventory system
+Layer | Responsibility | Must not do
+HTTP/WebSocket transport | Decode requests, authenticate context, validate transport shape, call use cases, map responses | Contain business rules or SQL
+Application/use-case | Orchestrate business transactions and domain operations | Know HTTP details
+Domain | Entities, value objects, invariants, domain services/events | Know PostgreSQL or HTTP
+Repository interfaces | Define persistence contracts | Embed transport logic
+Infrastructure | Postgres, Redis, R2, WhatsApp, payment providers, compliance providers | Change business decisions
+Jobs/workers | Execute asynchronous application commands | Bypass use-case transaction rules
+Middleware | Cross-cutting request concerns | Implement module-specific business logic
+Variable / setting | Purpose
+APP_ENV | development/staging/production
+APP_VERSION | build/version identifier
+HTTP_ADDR | API bind address
+DATABASE_URL | PostgreSQL connection string
+DATABASE_MAX_CONNS | pool maximum
+DATABASE_MIN_CONNS | pool minimum
+DATABASE_MAX_CONN_LIFETIME | connection lifetime
+JWT_ISSUER | token issuer
+JWT_PRIVATE_KEY / secret reference | token signing
+ACCESS_TOKEN_TTL | short-lived access token
+REFRESH_TOKEN_TTL | refresh session duration
+REDIS_URL | optional Redis
+R2_ENDPOINT | object storage endpoint
+R2_BUCKET | archive/file bucket
+R2_ACCESS_KEY_ID / secret | R2 credentials
+PAYMENT_* | provider configuration
+WHATSAPP_* | WhatsApp configuration
+COMPLIANCE_* | GST/e-way/provider configuration
+CORS_ALLOWED_ORIGINS | allowed application origins
+RATE_LIMIT_* | rate limiting configuration
+LOG_LEVEL | structured logging level
+OTEL_* | OpenTelemetry configuration
+Module | Core responsibilities
+Auth | login, refresh, logout, sessions, credentials
+Tenant | tenant profile, settings, feature flags, financial years
+RBAC | users, roles, permissions, device access
+Products | products, aliases, barcodes, UOM, tax, pricing
+Customers | customer master, tiers, addresses, credit profiles
+Khata | credit sales, ledger, receipts, limits, overrides
+Suppliers | supplier master, payables ledger
+Procurement | PO, GRN, received quantities, tare validation
+Inventory | batches, stock movements, balances, FIFO/FEFO, counts
+Sales/POS | cart, pricing, invoice finalization, allocations
+Returns | sales returns, stock reversal, refunds/credits
+Payments | intents, payment capture, webhooks, reconciliation
+Contra | buy-back/contra receipt and customer credit
+Accounting | journal entries, ledger postings, reconciliation
+Cash/EOD | cash sessions, movements, expected cash, variance
+Notifications | templates, jobs, delivery tracking
+WhatsApp | message adapter and delivery lifecycle
+Compliance | GST/e-way/provider requests and exports
+Reports | operational and financial reporting
+Sync | offline transaction ingestion, cursors, conflicts
+Archive | retention, R2 objects, manifests, restore tests
+Files | uploads, metadata, access control
+Audit | immutable audit events
+Devices | registered devices and lifecycle
+Hardware | configuration/status metadata; hardware control remains client-side
+Jobs | scheduled and retryable background work
+Job | Typical cadence/trigger | Failure handling
+Expiry alert | Daily | Retry + operator visibility
+Aflatoxin/expiry policy alert | Daily/configurable | Retry + audit
+Collection reminder | Daily/configurable | Deduplicate
+Outbox delivery | Continuous/short polling | Backoff + DLQ
+WhatsApp delivery | Queue-driven | Provider retry rules
+Payment reconciliation | Scheduled/on demand | Idempotent
+GST export | On demand/scheduled | Async job
+E-way request | On demand | Provider-aware retry
+Archive | Scheduled retention policy | Manifest/checksum + retry
+Archive restore test | Scheduled | Alert on failure
+EOD reconciliation | Daily/on demand | Audit exception
+Data integrity reconciliation | Scheduled | Alert only; no silent repair
+Scenario | Backend action
+Duplicate same transaction | Return original result
+Same ID, different payload | Reject as idempotency conflict
+Invoice number collision | Reject; allocate server-controlled series
+Stock changed after offline sale | Apply only if configured offline policy permits; otherwise conflict/review
+Customer balance changed | Do not overwrite; reconcile ledger
+Product master changed | Use version/effective-date rules
+Payment already settled | Return current authoritative state
+Unauthorized device/user | Reject and audit
+Class | HTTP example | Meaning
+validation_error | 400 | Request shape/value invalid
+authentication_required | 401 | No valid authentication
+forbidden | 403 | Authenticated but unauthorized
+not_found | 404 | Resource unavailable to caller
+conflict | 409 | State/concurrency/idempotency conflict
+business_rule_violation | 422 | Valid request but prohibited business operation
+rate_limited | 429 | Too many requests
+provider_error | 502/503 | External dependency failure
+internal_error | 500 | Unexpected server failure
+Area | Typical permissions
+Products | product.read/create/update/archive
+Pricing/Tax | pricing.read/manage, tax.manage
+Customers | customer.read/manage
+Khata | khata.read/manage, khata.override
+Suppliers | supplier.read/manage
+PO/GRN | procurement.read/create/approve/receive
+Inventory | inventory.read/adjust/count
+POS | sale.create, sale.return
+Payments | payment.create/reconcile/refund
+Contra | contra.create/approve
+Accounting | accounting.read/post/reverse
+EOD | cash.open/close/reconcile
+Compliance | compliance.create/read
+Reports | report.read/export
+Archive | archive.manage/restore
+Users | user.manage, role.manage
+Audit | audit.read
+Settings | tenant.settings.manage
+API family | Go module / service
+/auth/* | auth
+/users /roles /permissions | users/RBAC
+/tenant /settings | tenant
+/products /aliases /barcodes /search | products
+/uom /conversions | products/UOM
+/pricing /tax | products/pricing
+/customers /khata | customers/Khata
+/suppliers | suppliers
+/purchase-orders | procurement
+/goods-receipts | procurement
+/inventory /batches /counts | inventory
+/pos /sales /invoices | sales
+/returns /refunds | returns/payments
+/payment-intents /payments /webhooks | payments
+/contra | contra
+/accounting | accounting
+/cash /eod | cash
+/notifications /whatsapp | notifications
+/compliance /eway /gst | compliance
+/reports | reports
+/sync | sync
+/files | files
+/archive | archive
+/devices | devices
+/audit | audit
+/health /metrics | ops
+Metric | Target baseline
+Simple authenticated read | p95 < 300 ms under normal load
+Transactional POS finalization | p95 < 800 ms excluding external async work
+Search | p95 < 250 ms for normal catalogue size
+Sync batch | Process 100+ small transactions efficiently; tune from load tests
+API availability | Target 99.9% monthly excluding planned maintenance
+Background job retry | Exponential backoff with bounded maximum
+DB pool | Sized from measured workload, not arbitrary large values
+Test type | Coverage
+Unit | Domain rules, pricing, tax, UOM, FIFO/FEFO, credit, decimal calculations
+Repository integration | SQL queries, constraints, RLS, transactions
+Application integration | Complete use-case transaction boundaries
+API contract | Request/response/error compatibility
+Webhook tests | Signature, duplicate, retry, replay protection
+Sync tests | accepted/duplicate/conflict/rejected
+Concurrency tests | stock, invoice series, credit limits, payments
+Security tests | RLS bypass attempts, auth, RBAC, rate limits
+Load tests | POS, search, sync, reports
+Failure tests | DB outage, Redis outage, provider timeout, R2 failure
+Restore tests | backup restore + archive restore verification
+Source | This architecture implements
+PRD v1.2 | All major business modules, offline-first, hardware, compliance, archival, security and operations
+Database & ERD v1.0 | Entity ownership, transactions, RLS, precision, indexes, ledger/stock architecture
+API Specification v1.0 | Routes, error envelope, idempotency, sync, WebSocket, external integrations

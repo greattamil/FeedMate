@@ -1,0 +1,804 @@
+ANDIPATTI ANIMAL FEED SYSTEM
+Complete Product Requirements Document (PRD) • Business + Functional + Technical Scope • Version 1.0
+Document status: Baseline for architecture, database, API, Flutter UI, integrations, testing and production deployment.
+Primary business context: Animal-feed retail/wholesale shop with inventory, batch control, weighing, POS, GST, customer credit (Khata), supplier procurement, payments, hardware, reporting and archival.
+Important regulatory note: GST, e-invoicing, e-way bill, HSN/tax-rate, FSSAI and payment-provider requirements must be validated against the applicable current rules and provider specifications before production release. Tax rules must be configuration-driven, not hard-coded.
+1. Executive Summary
+The Andipatti Animal Feed System is an offline-first, multi-tenant-capable retail/wholesale management platform designed for an animal-feed shop. It covers the complete business lifecycle from shop setup and supplier procurement through goods receipt, batch/expiry control, weighed loose sales, invoicing, split tenders, customer Khata, contra/buy-back transactions, payment confirmation, statutory reporting, end-of-day reconciliation and long-term archival.
+The system is designed around a Flutter application for the shop floor and a Go backend with PostgreSQL as the authoritative transactional database. SQLite on the device provides offline execution. Redis/queues may be used for asynchronous jobs. Cloudflare R2 provides low-cost archival storage. Hardware integrations include ESC/POS thermal printers, digital weighing scales and barcode scanners.
+The design prioritizes correctness of stock and money, fast billing, tenant isolation, offline continuity, idempotent synchronization, auditable accounting, configurable taxation and operational simplicity.
+2. Product Vision and Goals
+Reduce billing time and manual entry for animal-feed sales.
+Maintain accurate stock across bags, loose kilograms and other UOMs.
+Prevent avoidable spoilage through batch, FIFO and expiry controls.
+Provide reliable customer credit/Khata with limits, approvals and complete audit history.
+Support mixed cash, UPI and credit settlement on one invoice.
+Continue selling during internet outages and reconcile safely when connectivity returns.
+Automate procurement alerts, payment confirmations, reminders and compliance exports.
+Keep the primary database lean while retaining auditable historical archives.
+Provide owner/manager visibility through dashboards, reports and reconciliation.
+Make all important business rules configurable per tenant and effective-dated.
+3. Non-Goals / Boundaries
+Not a replacement for a full statutory accounting package unless the accounting module is explicitly enabled.
+Not a bank or regulated lending platform; customer credit is trade credit only.
+Not an automatic tax-law decision engine; tax classifications require approved master data/configuration.
+Not dependent on one payment gateway, printer brand, weighing-scale protocol or messaging provider.
+Not permitted to silently delete financial history merely because it is archived; retention, restore and audit policies govern archival.
+4. Users, Roles and Permissions
+RBAC must be permission-based rather than role-name based. Sensitive actions such as credit-limit override, stock adjustment, invoice cancellation, payment reversal and archival must require explicit permissions and audit records.
+5. Tenant / Shop Model
+Every business record must be tenant-scoped. tenant_id is mandatory on all tenant-owned tables and must be enforced at the application/service layer, with database-level safeguards where practical.
+Shop profile: legal name, trade name, address, GSTIN if applicable, FSSAI/license details if applicable, contact details, invoice prefix, financial year settings and tax registration configuration.
+Each device has device_id, tenant_id, device name, app version, last sync time, local sequence state and activation status.
+Users belong to tenants; a user may have multiple permissions/roles.
+No API may return another tenant's data even when an ID is guessed or supplied manually.
+All unique business keys must be tenant-scoped.
+6. Module 1 — Master Setup & Configuration
+6.1 First-run setup
+Create/activate tenant.
+Capture legal/shop profile.
+Create owner account and secure recovery method.
+Configure financial year and invoice numbering.
+Create default UOMs and tax profiles.
+Create default customer tiers.
+Register payment methods.
+Pair supported hardware.
+Run connectivity and print/scale diagnostics.
+Create opening inventory and opening balances only through controlled opening-balance workflows.
+6.2 UOM Matrix
+UOM must support independent quantity and weight concepts. Parent-child conversion must be explicit and effective-dated.
+Use decimal/numeric quantities rather than binary floating point for inventory, weight and currency. Every conversion must retain source UOM, destination UOM, factor and reason/version.
+6.3 Product Master
+SKU, barcode(s), product name, Tamil/local display name, category, brand, HSN/SAC where applicable, tax profile, purchase UOM, sale UOM, base inventory UOM, pack size, standard weight, MRP, selling price, discount policy, reorder level, reorder quantity, batch/expiry requirement, active status.
+Support bagged products, loose products, supplements, additives and services/charges where permitted.
+Product aliases support Tamil voice/search and alternate spellings.
+Barcode uniqueness must be tenant-scoped unless a global barcode registry is intentionally implemented.
+6.4 Customer tiers and pricing
+Walk-In, Registered Farmer, Wholesale Dealer, Aavin Sub-Contractor and configurable future tiers.
+Tier price rules must be effective-dated.
+Discounts may be percentage, fixed amount or product-specific where authorized.
+Never allow discounting below configured floor without approval.
+Customer-specific price lists can override tier pricing under controlled precedence rules.
+7. Module 2 — Supplier & Procurement
+7.1 Supplier master
+Supplier legal/trade name, GSTIN if applicable, contact, address, payment terms, credit terms, bank/UPI details where required, tax configuration, active status.
+Supplier ledger tracks purchases, payments, debit/credit notes and outstanding payable.
+7.2 Reorder engine
+Trigger by available sellable stock, not merely total physical stock.
+Support minimum level, reorder level, target level, lead time and supplier preference.
+Exclude expired/quarantined stock from available quantity.
+Draft PO automatically; human approval remains configurable.
+7.3 Purchase Order
+PO number, supplier, lines, requested quantities/UOMs, expected date, price, tax profile, notes, status and approval history.
+PO lifecycle: Draft → Approved → Sent → Partially Received → Fully Received → Closed/Cancelled.
+PDF generation is asynchronous and versioned; generated document is retained as an attachment/archive reference.
+7.4 GRN
+GRN is the authoritative event for physically received stock. It must not simply overwrite a product's stock count.
+Capture PO reference where present, supplier invoice/challan, vehicle, receiver, date/time, product, batch, manufacturing date, expiry date, received quantity, UOM, gross weight, tare weight, net weight, unit cost, tax and quality status.
+Tare can be configured by bag count × standard tare or entered/measured. The system must show the calculation and permit authorized adjustment.
+Example: 50 bags × 0.100 kg tare = 5.000 kg deduction. The system must not assume a tare range as an automatic truth; the configured tare method must be explicit.
+Rejected/damaged/quarantined goods must be separate stock states and must not become sellable inventory.
+GRN posting creates stock movement and supplier payable/accounting events according to configuration.
+8. Module 3 — Inventory, Batch and Loss Prevention
+8.1 Inventory ledger
+Stock must be event-driven. Never rely solely on a mutable products.stock_quantity column as the source of truth.
+Stock movement types: Opening, Purchase/GRN, Sale, Sale Return, Purchase Return, Adjustment, Damage, Expiry, Transfer, Conversion, Repack, Contra Receipt, Manual Correction.
+Each movement records tenant, product, batch, UOM, quantity, signed quantity, source document, source line, device, user, timestamp and reason.
+Current stock may be cached/materialized from movements for performance, but reconciliation must be possible.
+8.2 Batch
+batch_id, product_id, supplier_id, manufacturing date, expiry date, received date, quantity received, quantity available, cost, status, storage location, quality/quarantine status.
+FIFO selection orders eligible stock by receipt date/batch policy. FEFO (first-expiry-first-out) should be supported and may be preferred for perishable feed.
+Sale allocation must record exactly which batch quantity was consumed.
+8.3 Expiry alerts
+Configurable thresholds such as 30/15/7/1 days.
+Alert severity based on remaining days and quantity/value at risk.
+Daily job creates deduplicated notifications; users can acknowledge/snooze where authorized.
+Expired stock automatically becomes non-sellable unless an authorized exception workflow exists.
+8.4 Loose/fractional inventory
+A 12.5 kg sale from a 50 kg bag must not be implemented as an imprecise floating subtraction. The inventory engine should represent sealed-pack quantity and loose-weight quantity using decimal arithmetic and an explicit conversion/repack model.
+Example display: 14 sealed bags + 37.500 kg loose. The exact underlying movement chain must remain auditable.
+9. Module 4 — POS & Billing
+9.1 Checkout
+Identify customer or select Walk-In.
+Scan/search product by barcode, SKU, Tamil/local name or voice-assisted search.
+For weighed products, read stable weight from scale.
+Apply price list/tier/discount rules.
+Validate stock and batch allocation.
+Calculate tax from effective tax configuration.
+Accept one or more tenders.
+Validate credit limit if credit is used.
+Create invoice transaction atomically.
+Print/send receipt.
+Post stock and ledger events.
+Queue integration events.
+9.2 Barcode and Tamil search
+Barcode scanner may operate as keyboard/HID or supported SDK.
+Search must support Tamil Unicode, transliteration, aliases and fuzzy matching.
+Voice search is an optional enhancement; billing must remain fully usable without speech recognition.
+Search results should prioritize active products and exact barcode matches.
+9.3 Weighing scale
+Support Bluetooth/serial/USB adapters according to hardware capability.
+Capture stable weight, unit, timestamp and device.
+Show live weight and stability indicator.
+Reject negative/invalid/out-of-range values.
+Record manual override separately from measured weight.
+Scale calibration/diagnostics must be an administrative function.
+9.4 GST/tax engine
+Tax must be data-driven. HSN and rates are master/configuration data subject to applicable law. The invoice engine calculates tax per line/tax component and aggregates it on the invoice.
+Support CGST+SGST for intra-state taxable supplies and IGST for applicable inter-state supplies.
+Support zero-rated/exempt/non-GST/other configured treatments as applicable.
+Do not hard-code one HSN as universally representing animal feed.
+Tax profile must contain effective_from/effective_to, rate components, classification, rounding policy and applicability conditions.
+Invoice stores the tax snapshot used at issuance so later master-data changes do not rewrite historical invoices.
+Tax rounding must be deterministic and tested for line-level and invoice-level scenarios.
+9.5 Invoice numbering
+Financial-year-aware numbering.
+Tenant-specific prefix/series.
+Device-safe allocation for offline mode.
+No duplicate numbers after synchronization.
+Cancelled numbers remain auditable and are never silently reused.
+9.6 Multi-tender
+Example ₹3,000 bill: ₹1,000 cash + ₹500 UPI + ₹1,500 credit. Tender lines must sum exactly to invoice grand total. Credit tender posts a customer receivable; cash/UPI posts the corresponding settlement account.
+9.7 Returns and cancellations
+Sales return references original invoice/line where possible.
+Return quantity cannot exceed eligible sold quantity unless an authorized exception is used.
+Refund can be cash, UPI reversal/refund, credit to Khata or configurable combination.
+Invoice cancellation requires reason, permission and immutable audit record.
+After statutory submission/locking, corrections should use the appropriate adjustment/credit-note workflow rather than destructive edits.
+10. Module 5 — Udhari / Khata / Trade Credit
+10.1 Customer ledger
+The customer balance must be derived from immutable financial events: credit sales, receipts, returns, adjustments and approved contra transactions.
+Credit limit, available credit, outstanding balance, overdue balance, payment terms, risk/status and authorized override policy.
+At POS, calculate proposed post-transaction balance before posting.
+Over-limit credit requires configured owner/manager approval and records approver identity/reason.
+10.2 Receipts
+Cash/UPI/bank receipt against one or multiple invoices.
+Unapplied receipt support where business permits.
+Receipt reversal requires permission and reason.
+Customer statement shows opening, transactions, receipts, adjustments and closing balance.
+10.3 Contra / buy-back
+A farmer may provide approved raw material in exchange for reducing an outstanding feed balance. This is not merely a negative payment; it is an inventory receipt plus a financial settlement.
+Create buy-back/contra document with product, batch/quality, quantity, valuation, approval and ledger allocation.
+Debit inventory/stock value and credit the appropriate contra/settlement account according to accounting configuration.
+Apply approved value against customer receivable.
+Never permit arbitrary valuation without an authorized price/approval rule.
+10.4 Aavin-cycle reminders
+Reminder schedule is configurable rather than permanently tied to the 10th/25th.
+Only eligible customers with outstanding balance are selected.
+Message templates support Tamil and English.
+WhatsApp provider response/status is recorded.
+UPI payment link is generated only through a configured payment/collection mechanism.
+Opt-out, consent and messaging compliance rules must be respected.
+11. Module 6 — Payments & Hardware
+11.1 UPI/payment integration
+Use provider abstraction so the system can support multiple gateways/collect mechanisms.
+Webhook must verify provider signature/authentication.
+Webhook processing must be idempotent.
+Payment state machine: Created → Pending → Authorized/Success → Failed/Expired/Refunded/Reversed.
+Do not mark an invoice paid solely because a client says payment succeeded.
+Reconcile provider settlement against internal transactions.
+11.2 Soundbox
+Soundbox status is supplemental confirmation, not the accounting source of truth.
+Provider webhook or trusted payment confirmation remains authoritative.
+Handle delayed/out-of-order webhook events.
+11.3 ESC/POS
+Receipt renderer produces raw ESC/POS commands where supported.
+Configurable paper width, character set, Tamil support strategy, logo, QR, GST fields, footer and cut command.
+Printer failure must not silently roll back a successful invoice.
+Reprint is an explicit operation and is audited.
+12. Module 7 — Compliance & Reporting
+12.1 E-way bill
+The system should evaluate e-way-bill applicability using configurable legal rules and the latest authorized integration specification. It must collect required transaction, consignee, transporter and vehicle data when applicable. Do not hard-code a single threshold as the only rule.
+12.2 EOD reconciliation
+At close, expected drawer cash is calculated from opening cash plus cash receipts less cash payouts/withdrawals and other configured cash movements. The manager enters physical cash. Difference is logged as short/over with reason and approval.
+Locking EOD prevents unauthorized backdated changes.
+Late transactions require controlled reopen/adjustment workflow.
+EOD report includes sales by tender, refunds, expenses/payouts, credit sales, expected cash, actual cash and variance.
+12.3 GST exports
+Export formats must be configuration-driven and aligned with the current portal/accounting import requirements.
+Separate B2B/B2C and applicable tax categories.
+Include invoice number/date, customer GSTIN where applicable, place of supply, taxable values, tax amounts, HSN and document status.
+Export is a reporting artifact; it does not itself prove statutory filing success.
+Reconciliation report flags missing/invalid GSTIN, tax mismatch, duplicate invoice, cancellation and credit-note issues.
+13. Module 8 — Archival & Retention
+Archival is a storage-management feature, not permission to destroy the only copy of financial records.
+Archive candidates based on configurable retention policy, financial year, settlement state and legal/accounting requirements.
+Before purge, create a versioned archive package containing data, metadata, checksums, schema version, export manifest and generation timestamp.
+Upload to Cloudflare R2/S3-compatible storage using encryption and restricted credentials.
+Verify upload and checksum before any purge.
+Maintain archive_catalog in PostgreSQL with object key, checksum, row counts, date range, schema version, encryption metadata and restore status.
+Prefer soft-delete/partitioning or cold-storage strategies over irreversible DELETE when retention requirements are uncertain.
+Any purge requires an explicit policy, audit trail and tested restore process.
+Never purge records solely because payment_status='Fully Paid'.
+Recommended architecture: partition high-volume transaction tables by financial year/month where appropriate; archive old partitions/records after retention review; retain summarized balances and archive references in the live database.
+14. Offline-First Architecture
+14.1 Local data
+SQLite stores only the data required for the device's assigned tenant, users and operational horizon.
+Use encrypted storage/secure key handling where feasible.
+Local database includes products, prices, customers, credit limits, tax snapshots/config, inventory availability snapshot, pending invoices, payments and sync metadata.
+14.2 Transaction envelope
+Every offline write receives a globally unique client_transaction_id, device_id, local_sequence, created_at, entity_type, payload_version and idempotency key.
+14.3 Sync
+Device creates local transaction.
+Transaction is committed locally before UI success is shown.
+Sync worker uploads pending envelopes in order where ordering matters.
+Server validates tenant, authorization, version and business rules.
+Server accepts idempotently or returns the original result for duplicate submissions.
+Server assigns authoritative IDs/timestamps where appropriate.
+Device marks transaction acknowledged.
+Conflicts are routed to a deterministic resolution workflow; never silently overwrite financial data.
+14.4 Offline restrictions
+Some operations may be disallowed offline: high-risk refunds, statutory API submissions, certain credit overrides, master-data changes and payment confirmation.
+Offline credit should use a cached credit limit with a configurable safety buffer and risk policy.
+Invoice numbering must be designed specifically for offline concurrency.
+15. API Requirements — Go Backend
+Use versioned REST APIs, e.g. /api/v1, with OpenAPI documentation. WebSockets are for realtime events, not the authoritative transaction channel.
+All write endpoints must support authorization, tenant isolation, validation, idempotency where applicable, audit logging and structured errors.
+16. Database Requirements
+PostgreSQL is the source of truth. Suggested core entities include:
+tenants, tenant_settings, financial_years, users, roles, permissions, user_roles, devices, audit_logs
+products, product_aliases, product_barcodes, categories, brands, uoms, uom_conversions, price_lists, price_list_items, tax_profiles
+customers, customer_tiers, customer_addresses, customer_credit_profiles
+suppliers, supplier_contacts
+purchase_orders, purchase_order_lines, goods_receipts, goods_receipt_lines
+batches, inventory_locations, stock_movements, stock_balances, stock_counts, stock_count_lines
+sales_invoices, sales_invoice_lines, invoice_taxes, invoice_batch_allocations, sales_returns, sales_return_lines
+payments, payment_allocations, payment_webhook_events, refunds
+customer_ledger_entries, supplier_ledger_entries, journal_entries, journal_lines
+contra_transactions, contra_lines
+notifications, message_templates, message_deliveries
+eod_sessions, cash_movements, expenses
+sync_transactions, sync_conflicts
+compliance_documents, export_jobs, archive_manifests, archive_objects
+Money columns should use NUMERIC with explicit currency precision. Quantities/weights should use NUMERIC with defined scale. Timestamps should be timezone-aware. IDs should be UUIDs or another collision-safe identifier. Business document numbers are separate human-readable keys.
+17. Accounting Model
+For reliable balances, implement a journal/event model even if the first UI exposes only simple ledgers.
+Exact chart-of-accounts treatment must be configured with the accountant and must reconcile to statutory/accounting requirements.
+18. Notifications & Background Jobs
+19. Security Requirements
+TLS for all network traffic.
+Short-lived access tokens with refresh-token rotation/revocation strategy.
+Password hashing using a modern adaptive algorithm.
+PINs for overrides must never be stored in plaintext.
+Encrypt sensitive secrets and provider credentials.
+Least-privilege service accounts.
+Webhook signature verification.
+Rate limiting and brute-force protection.
+Audit all privileged actions.
+Tenant isolation tests are mandatory.
+Do not store unnecessary payment-card credentials.
+PII minimization and configurable retention.
+Secure local storage for offline data.
+Remote device deactivation capability.
+20. Audit & Traceability
+Every material change must be attributable to tenant, user/service, device, timestamp, action, entity, entity_id, before/after or event payload where appropriate, reason and correlation/request ID.
+Immutable audit records for invoice issue/cancel, stock adjustments, batch changes, credit overrides, payments/refunds, EOD variance, master-data tax changes and archival.
+Audit logs are append-only from the application's perspective.
+System clock manipulation must be detectable through server timestamps and device sync metadata.
+21. UI / Screen Inventory
+22. Reporting Requirements
+Daily sales by product/category/customer/tier/user/tender.
+Gross sales, discounts, returns, net sales and taxes.
+Stock on hand by product/UOM/batch/location.
+Stock aging and expiry-risk valuation.
+Purchase and supplier payable aging.
+Customer Khata aging and collection due.
+Cash/UPI/credit reconciliation.
+EOD short/over history.
+Product margin reports using configured cost method.
+Batch traceability: supplier → GRN → stock → invoice → customer.
+Audit report for privileged actions.
+Offline synchronization health report.
+Archive inventory and restore verification report.
+23. Business Rules & Edge Cases
+Never sell more than available sellable stock unless negative-stock policy is explicitly enabled.
+Do not sell expired/quarantined stock.
+Tax is calculated from the invoice-time tax snapshot.
+Invoice total must equal sum of line totals, taxes, rounding and charges under one deterministic rule.
+Tender total must equal invoice grand total.
+Credit amount must equal the credit tender portion, not an independently typed balance.
+Duplicate payment webhooks must have no financial side effects.
+Duplicate offline uploads must return the original authoritative result.
+Printer failure must not duplicate an invoice.
+Scale disconnect must permit manual weight only when configured and must record the override.
+PO may be partially received.
+GRN may contain short, excess, damaged or rejected quantities subject to tolerance.
+Returns must respect original batch traceability where available.
+Backdated stock/financial changes require permission and audit.
+Changing a product tax profile must not change historical invoices.
+Changing a UOM conversion must not rewrite historical quantities.
+Archive jobs must be restartable and idempotent.
+Restore tests must prove archive usability before purge policies are relied upon.
+24. Performance & Reliability Targets
+25. Observability & Operations
+Structured logs with correlation IDs.
+Metrics for API latency, error rate, DB connections, queue depth, sync backlog, failed webhooks and device connectivity.
+Tracing for complex transaction flows.
+Alerts for payment mismatch, sync conflicts, database capacity, backup failure and archive failure.
+Health endpoints for API dependencies.
+Admin dashboard for active devices and last sync.
+26. Docker & Deployment Architecture
+All application components should run in Docker containers for repeatable deployment and easier management.
+flutter-web/mobile build artifacts are distributed separately; mobile apps communicate with the backend.
+Go API container.
+Background worker/cron container.
+PostgreSQL container for development/self-hosted environments; managed PostgreSQL may be used in production.
+Redis container if queues/cache are enabled.
+Reverse proxy/TLS container such as Nginx/Caddy/Traefik according to deployment choice.
+Optional monitoring stack.
+Local development via Docker Compose; production via an appropriate container orchestrator or managed container platform.
+Secrets must be injected through environment/secret management, not committed to images or source control.
+27. Backup & Disaster Recovery
+Automated PostgreSQL backups with retention.
+Point-in-time recovery where supported.
+Encrypted backup storage.
+Separate credentials and storage for backups.
+Regular restore drills.
+R2 archive checksums and manifests.
+Documented recovery runbook.
+Recovery must include tenant isolation and invoice/ledger consistency checks.
+28. Testing Strategy
+29. Acceptance Criteria — Core Business Lifecycle
+Owner can create a shop and configure products/UOM/tax/pricing.
+Supplier PO can be created, approved and partially/fully received.
+GRN records batch, expiry, quantity, weight and tare where applicable.
+Inventory movements are traceable and stock totals reconcile.
+POS can sell bagged and loose products.
+Scale weight can populate a POS line without manual typing when hardware is connected.
+Invoice supports multiple tax treatments on the same transaction.
+Invoice supports cash + UPI + Khata split.
+Credit-limit enforcement requires approval when exceeded.
+Contra buy-back creates inventory and reduces the customer's receivable through an auditable transaction.
+Payment webhook is verified and idempotent.
+Internet outage does not prevent authorized core billing.
+Offline invoices synchronize exactly once.
+EOD calculates expected cash and records variance.
+GST/compliance exports are generated from immutable invoice/tax snapshots.
+Near-expiry stock generates alerts.
+Archive process verifies data before any retention-based purge.
+Backup and archive restore procedures are tested.
+30. Data Integrity Principles
+Money: NUMERIC, never binary floating point.
+Inventory: event ledger + materialized balance, not only mutable counters.
+Tax: invoice-time snapshot.
+Payments: provider event + internal state machine + reconciliation.
+Offline: idempotency key + device ID + local sequence + authoritative server result.
+Audit: append-only.
+Documents: immutable after finalization; corrections through controlled documents.
+Tenant isolation: mandatory tenant context on every query.
+Time: server-authoritative timestamps for financial events.
+Archive: manifest + checksum + restore verification.
+31. Implementation Dependencies / External Services
+Payment/UPI provider with webhook and reconciliation support.
+WhatsApp Business/Cloud API provider and approved messaging templates.
+Applicable Indian GST/e-way-bill services or authorized integration provider.
+Cloudflare R2/S3-compatible object storage.
+Printer/scales with documented protocol or SDK.
+Optional barcode scanner.
+Hosting provider and domain/TLS.
+Monitoring/alerting service.
+32. Configuration Catalogue
+Tenant profile and legal identifiers.
+Financial years and invoice series.
+UOM conversions.
+Product/tax/HSN master.
+Price lists and discounts.
+Customer credit limits and override rules.
+Supplier payment terms.
+Reorder thresholds.
+Batch/expiry alert thresholds.
+FIFO vs FEFO policy.
+Cash drawer opening/closing policy.
+Payment providers and settlement accounts.
+WhatsApp templates/schedule.
+Printer/scales configuration.
+E-way bill/compliance settings.
+Archive retention and approval policy.
+Feature flags.
+33. Migration / Opening Data
+Import product master with validation report.
+Import customers and opening Khata balances through a controlled opening-balance document.
+Import suppliers and opening payables.
+Import opening stock by product/batch/UOM/location.
+Validate opening totals before go-live.
+Freeze source-system opening snapshot and retain it as migration evidence.
+34. Future Extensibility
+Multiple shops/branches and inter-branch transfers.
+Central warehouse.
+Mobile delivery/route sales.
+Customer mobile app.
+Farmer loyalty/rewards.
+Purchase price variance analytics.
+Demand forecasting.
+Automated supplier PO approval.
+Accounting software integration.
+Digital signatures/e-invoice extensions where applicable.
+Advanced BI/data warehouse.
+35. Final Product Definition
+The Andipatti Animal Feed System is complete only when the system can reliably execute the full business loop: configure the shop → maintain products/UOM/pricing/tax → identify reorder needs → create PO → receive and weigh goods → assign batch/expiry → maintain auditable inventory → sell bagged/loose feed → calculate configured taxes → accept cash/UPI/credit → maintain Khata → process receipts/contra/returns → reconcile payments → print receipts → close the day → generate management/statutory exports → back up and archive according to approved retention policy.
+The system must optimize for operational speed without sacrificing financial, inventory, tax, security or audit correctness. All external legal/provider rules are configuration/integration concerns and must be validated before production.
+36. Product Readiness Checklist
+☐ Database schema reviewed and migration scripts tested
+☐ Tenant isolation tested
+☐ RBAC matrix approved
+☐ Product/UOM/tax masters validated
+☐ Inventory ledger reconciles to balances
+☐ Batch FIFO/FEFO tested
+☐ Scale integration tested with actual target hardware
+☐ Printer/Tamil receipt tested with actual target printer
+☐ Offline POS tested through outage/reconnect cycles
+☐ Duplicate sync prevented
+☐ Payment webhooks verified and reconciled
+☐ Khata and contra accounting approved
+☐ EOD reconciliation approved
+☐ GST/compliance exports validated by accountant
+☐ WhatsApp templates/provider approved
+☐ Backup restore tested
+☐ Archive/restore tested
+☐ Security assessment completed
+☐ Production monitoring/alerts configured
+☐ Docker deployment tested
+☐ User training and operational SOPs completed
+Appendix A — Recommended State Machines
+Appendix B — Required Audit Events
+LOGIN_SUCCESS / LOGIN_FAILURE / PASSWORD_RESET
+USER_CREATED / USER_PERMISSION_CHANGED / USER_DISABLED
+PRODUCT_CREATED / PRODUCT_UPDATED / TAX_PROFILE_CHANGED / UOM_CHANGED
+PO_CREATED / PO_APPROVED / PO_CANCELLED
+GRN_CREATED / GRN_POSTED / GRN_REVERSED
+STOCK_ADJUSTED / STOCK_COUNT_POSTED / BATCH_QUARANTINED / BATCH_RELEASED
+INVOICE_CREATED / INVOICE_FINALIZED / INVOICE_CANCELLED / INVOICE_REPRINTED
+RETURN_CREATED / REFUND_CREATED / REFUND_REVERSED
+CREDIT_OVERRIDE / CREDIT_LIMIT_CHANGED
+PAYMENT_CREATED / PAYMENT_WEBHOOK_RECEIVED / PAYMENT_RECONCILED / PAYMENT_REFUNDED
+CONTRA_CREATED / CONTRA_APPROVED / CONTRA_REVERSED
+EOD_OPENED / EOD_CLOSED / EOD_REOPENED
+EXPORT_GENERATED / COMPLIANCE_SUBMISSION / COMPLIANCE_RESPONSE
+SYNC_CONFLICT / SYNC_RESOLVED
+ARCHIVE_CREATED / ARCHIVE_VERIFIED / ARCHIVE_RESTORE_TESTED / ARCHIVE_PURGED
+Appendix C — Critical Design Corrections Incorporated
+Tax and HSN are configuration-driven rather than permanently hard-coded.
+E-way bill logic is configurable and legal-rule-driven rather than a single hard-coded threshold.
+Inventory uses an auditable movement ledger rather than direct stock overwrites.
+Loose stock uses exact decimal quantities and explicit UOM/conversion semantics.
+Offline transactions use idempotent synchronization and authoritative server reconciliation.
+Payment webhooks are verified and idempotent; payment status is a state machine.
+Printer failure cannot create duplicate financial transactions.
+Archival requires manifest/checksum/restore verification and an approved retention policy.
+Accounting events are modeled explicitly so Khata, supplier payable, cash and contra transactions can reconcile.
+Sensitive operations require RBAC, approval and audit trails.
+
+PRD v1.1 — Technical Hardening Addendum
+This addendum incorporates the requested security, offline-storage, numeric-precision, local-language search, collection-reminder, hardware-fallback and GRN tare-validation controls. These requirements are mandatory for the production design and supersede weaker/less-specific wording elsewhere in v1.0.
+A1. Database-Level Tenant Isolation — PostgreSQL RLS
+PostgreSQL Row-Level Security (RLS) is mandatory for every tenant-owned transactional table in production.
+The Go API must establish the authenticated tenant context on every database transaction using a trusted server-side session variable or equivalent mechanism; clients must never be allowed to choose an arbitrary tenant context.
+RLS policies must deny access by default and allow rows only when row.tenant_id matches the trusted transaction tenant context.
+Service accounts that require cross-tenant administration must use an explicitly separate, tightly permissioned administrative path; ordinary application connections must not bypass RLS.
+Automated security tests must attempt cross-tenant reads, inserts, updates and deletes using valid object IDs and verify denial.
+Migrations must fail CI/review if a new tenant-owned table is created without tenant_id, the required index and an RLS policy.
+Application-layer tenant checks remain mandatory. RLS is a defense-in-depth failsafe, not a replacement for authorization.
+A2. Encrypted Offline SQLite — SQLCipher
+The Flutter offline database must use SQLCipher (or an equivalent audited encrypted SQLite implementation) rather than plaintext SQLite.
+The database encryption key must never be hard-coded, embedded in the APK/IPA, stored in source control or stored as plaintext in shared preferences.
+The key must be generated/managed through the platform secure keystore/keychain facilities, with appropriate device binding and recovery policy.
+Sensitive local data includes customer Khata balances/limits, customer identifiers, cached pricing, pending payment/sync envelopes, device credentials and other business data; all such data is protected by the encrypted database.
+Pending offline transaction envelopes must include integrity protection so a modified local record is rejected during synchronization.
+On device logout/deactivation, the application must revoke access and follow the configured secure-data lifecycle policy.
+Rooted/jailbroken devices should be treated as higher risk; the system may restrict offline operation based on an explicit device-security policy.
+A3. Standardized Numeric Precision
+All API, Go, PostgreSQL and Flutter serialization rules must use a single documented numeric model. JSON monetary and quantity values must not be transported through binary floating-point types when precision could affect financial or inventory correctness.
+The exact precision may be increased if future products require it, but the project must not mix incompatible scales for the same business concept. Database migrations, OpenAPI schemas, validation and serialization tests must enforce the chosen scale.
+A4. Phonetic / Colloquial Tamil Alias Engine
+product_aliases must support Tamil Unicode, English, transliteration, phonetic spellings, colloquial regional terms, abbreviations and common farmer shorthand.
+Each alias should record alias_text, normalized_text, language/script, alias_type, optional region/context, priority and active status.
+Search normalization should handle Unicode normalization, punctuation/spacing differences and configured transliteration equivalents.
+The system must support multiple aliases pointing to the same SKU and must preserve the canonical product name separately.
+Search ranking should prioritize exact barcode/SKU, exact canonical name, exact alias, normalized alias and fuzzy/phonetic matches in that order.
+Voice search results must always be confirmed by the worker before an irreversible billing action if confidence is below the configured threshold.
+Administrators must be able to add shop-specific aliases without changing the canonical product master.
+A5. Khata Collection Reminder Grace Period
+Add tenant configuration: collection_cycle_dates, reminder_days_before, grace_period_days, reminder_pause_dates and reminder_pause_reason.
+Grace period must suppress or postpone collection reminders for the configured number of days after the expected cooperative payout date.
+The reminder engine must also support ad-hoc local payout delays without changing the underlying customer ledger due date.
+A reminder suppressed by a grace period must be visible in an internal notification/audit log with the reason.
+After the grace period expires, only eligible outstanding balances should be selected.
+Customers must not receive duplicate reminders for the same cycle.
+Message templates must support respectful Tamil wording and configurable payment-link text.
+A6. Printer Failure — Immediate WhatsApp Receipt Fallback
+Finalized invoice creation must complete independently of printer availability.
+If ESC/POS printing returns timeout, disconnect, paper-out or other configured failure, the POS must immediately display a non-blocking failure state with a one-tap 'Send receipt via WhatsApp' option.
+The WhatsApp fallback must use the finalized invoice data, not recalculate the bill.
+Receipt delivery must be asynchronous and must show Pending/Sent/Failed status.
+If the customer has no WhatsApp-capable number, the UI must offer reprint or other configured receipt options.
+A printer retry must never create a second invoice; it is a reprint operation tied to the original invoice ID.
+WhatsApp delivery failure must never change the financial state of the invoice.
+A7. GRN Tare Weight Validation & Approval
+The GRN must calculate gross weight, configured tare weight and resulting net weight separately and display the complete calculation before posting.
+A configurable maximum tare percentage must be enforced against gross weight. Recommended initial default: 5%, subject to validation with the actual bag types used by the business.
+The threshold must be configurable by product/package type because tare characteristics can differ.
+If entered tare exceeds the configured threshold, the GRN cannot be posted normally. The user must correct the value or obtain an authorized override.
+Override requires a permitted role, explicit reason and audit record containing gross, tare, threshold and final net weight.
+Net weight must never be negative. Zero or implausibly low net weight must trigger validation.
+For count-based tare, the system must calculate tare from bag count × configured tare per bag and show both the formula and result.
+Where a physical scale is available, measured tare should be stored separately from standard tare.
+A8. Additional Acceptance Tests for v1.1
+A cashier authenticated for Tenant A cannot read or modify a Tenant B invoice even when the Tenant B invoice ID is known.
+A database query executed without the trusted tenant context returns no tenant-owned rows.
+A rooted-device tampering attempt against a pending local sync record is detected and rejected.
+₹123.45 remains exactly ₹123.45 through Flutter → JSON → Go → PostgreSQL → JSON.
+12.345 kg remains exact through POS → API → inventory movement → report.
+A colloquial Tamil alias resolves to the intended SKU while the canonical product name remains unchanged.
+A 2-day cooperative payout delay suppresses configured collection reminders without changing the customer's actual receivable.
+A printer timeout offers WhatsApp receipt fallback and does not create a duplicate invoice.
+A GRN with tare above the configured maximum is blocked until corrected or explicitly overridden.
+Every tare override contains user, device, timestamp, reason and before/after values in the audit trail.
+A9. Updated Mandatory Architecture Principles
+PostgreSQL is the authoritative transactional system.
+PostgreSQL RLS is the final database-level tenant-isolation control.
+Flutter uses SQLCipher for encrypted offline storage.
+Money uses NUMERIC(12,2) or a higher approved precision; weights use NUMERIC(12,3); UOM factors use NUMERIC(12,6).
+Inventory remains event-driven and auditable.
+Offline writes are idempotent and integrity-protected.
+Tax/HSN rules are effective-dated configuration snapshots, never hard-coded business assumptions.
+Payment webhooks are authenticated, idempotent and reconciled.
+Printer failure never rolls back a finalized invoice; WhatsApp is an explicit fallback.
+Khata reminders respect configurable payout grace periods.
+GRN tare is bounded, validated and auditable.
+R2 is archival storage, not a substitute for approved backup/retention policy.
+
+PRD v1.2 — Final Master Clarifications & Production Controls
+This section consolidates additional production controls so the PRD can be used as the master requirements baseline for database, backend, Flutter, hardware, integrations, QA and deployment.
+A10. Mandatory Transaction Atomicity
+Invoice finalization, invoice lines, tax snapshot, tender allocation, stock movements, batch allocation and customer ledger entries must be committed atomically in one authoritative server-side transaction whenever the operation is online.
+An invoice must never exist as 'successful' while its required stock or financial postings are only partially committed.
+Offline transactions are first committed atomically to the local SQLCipher database and subsequently committed atomically by the server.
+External side effects such as printer output, WhatsApp delivery and provider notifications must occur after the financial transaction is committed and must be independently retryable.
+Every transaction must have a correlation ID so invoice, payment, stock, ledger, sync and audit records can be traced together.
+A11. Idempotency & Duplicate Prevention
+Every financially material API command must accept or derive an idempotency key.
+The server must persist the idempotency result for the applicable retention period and return the original result for duplicate requests.
+Idempotency must cover offline invoice upload, payment creation, payment webhook processing, refunds, receipts, contra entries and stock adjustments.
+Client retries after timeout must never create a second invoice, payment, receipt or ledger posting.
+Idempotency keys must be scoped to tenant and operation type.
+A12. Concurrency & Stock Reservation
+When multiple POS devices sell the same product, the server must prevent overselling through transactional stock validation/locking or an equivalent reservation mechanism.
+Offline devices may operate against cached stock only under a configurable offline-risk policy.
+On synchronization, insufficient-stock conflicts must be explicitly resolved and must never silently create negative stock.
+Inventory balance calculations must be safe under concurrent GRNs, sales, returns and adjustments.
+A13. Financial Year & Number-Series Control
+Financial year configuration must be effective-dated and immutable for finalized documents.
+Invoice, PO, GRN, receipt, return, credit-note and contra series must be independently configurable where required.
+Offline numbering must be collision-safe across all active devices.
+Number gaps caused by failed/cancelled documents must remain auditable.
+Year-end transition must preserve historical numbering and create the next year's series without rewriting prior documents.
+A14. Master-Data Governance
+Product, UOM, tax, pricing, customer tier, credit-limit and supplier-master changes must have effective dates.
+Historical transactions retain immutable snapshots of relevant master values.
+Deleting master records is prohibited when referenced by historical transactions; records are deactivated instead.
+Critical master changes may require approval according to tenant policy.
+Bulk imports must run validation, duplicate detection and preview before commit.
+A15. Stock Count & Shrinkage Workflow
+Physical stock counts must support full-shop and cycle-count modes.
+Count sessions capture expected quantity, counted quantity, variance, reason and approver.
+Variance does not directly overwrite stock; it creates an auditable adjustment movement.
+Large variances can require manager/owner approval based on configurable percentage or value thresholds.
+Batch-level counting must be supported for controlled products.
+Count reports must show book quantity, physical quantity, variance quantity and variance value.
+A16. Product Costing & Margin
+The system must support a configurable inventory-costing method, with FIFO/weighted-average behavior explicitly selected by accounting policy.
+Purchase cost, landed cost and selling price must remain distinguishable.
+Gross-margin reports must state the costing method used.
+Historical cost used for a sale must be traceable to the relevant inventory allocation/cost layer.
+Discounts, returns, purchase price variance and applicable charges must be handled consistently in margin reporting.
+A17. Returns, Refunds & Credit Notes
+Sales returns must reference the original invoice whenever possible.
+Returned goods require condition classification: sellable, damaged, expired, quarantine or other configured status.
+Refunds must be linked to the return and original payment allocation.
+Refunds and credit notes require appropriate authorization and audit logging.
+Statutory documents already reported externally must not be silently edited; corrective workflows must be used.
+A18. Payment Reconciliation
+Internal payment records and provider settlement records must be reconciled.
+Reconciliation must identify unmatched internal payments, unmatched provider payments, amount mismatches, duplicate events, delayed settlements and refunds.
+Manual reconciliation adjustments require approval and audit.
+Payment provider settlement files/reports may be imported where supported.
+Payment success at POS and final settlement are separate states when the provider model requires it.
+A19. WhatsApp Messaging Governance
+Store only the minimum messaging data required for business operation.
+Message templates must be versioned and associated with a purpose.
+Delivery states must include queued, sent, delivered, read where the provider supplies them, failed and suppressed.
+Retries must use exponential backoff and must not generate duplicate customer messages.
+Opt-out and provider/template restrictions must be honored.
+WhatsApp is an optional communication channel; core billing and ledger operation must not depend on it.
+A20. Device & Hardware Lifecycle
+Each tablet/device must have a registered device identity and tenant association.
+Hardware pairing must be revocable.
+Printer and scale configurations must be versioned and testable.
+Device replacement must provide a controlled migration/deactivation workflow.
+Lost/stolen/decommissioned devices must be remotely disabled from synchronization.
+Hardware diagnostics should expose connection status, last successful operation and error code where available.
+A21. API Error Contract
+All APIs must return a consistent error envelope containing machine-readable code, human-readable message, correlation ID and validation details where applicable.
+Errors must distinguish authentication, authorization, validation, conflict, business-rule rejection, dependency failure and server failure.
+Sensitive internal exception details must never be returned to the client.
+Retryable errors must be explicitly identifiable.
+API versions must remain backward compatible for the supported client versions or provide a documented migration path.
+A22. Import / Export Safety
+CSV/Excel imports must validate file type, size, encoding, headers, row count and field constraints before processing.
+Large imports must be asynchronous with progress and downloadable validation-error reports.
+Exports containing sensitive data must respect RBAC and tenant scope.
+Generated exports must have an audit record and configurable retention.
+Never execute formulas/macros from imported spreadsheet content.
+A23. Search & Localization
+All user-facing labels should support English and Tamil localization.
+Dates, currency and number formats must follow tenant locale settings.
+Search normalization must preserve original stored text.
+Reports and receipts must support Tamil rendering where the selected printer/font path supports it.
+Localization must not alter underlying canonical codes, IDs, HSN values, invoice numbers or accounting values.
+A24. Accessibility & Usability
+POS primary actions must be reachable with minimal taps.
+Large touch targets and high-contrast states should be used for shop-floor conditions.
+Critical errors must explain the action required rather than expose technical stack traces.
+Offline status must be continuously visible but unobtrusive.
+Payment, credit and stock warnings must be visually distinct and require acknowledgment where risk is material.
+A25. Release & Change Management
+Database migrations must be version-controlled, reversible where practical and tested against representative production-size data.
+API, Flutter and database versions must have compatibility rules.
+Production deployment requires automated backup verification and health checks.
+Feature flags should allow risky integrations to be enabled gradually.
+Every production release must have a rollback plan.
+Security-sensitive changes require code review and targeted regression testing.
+A26. Definition of Done — Production
+All mandatory PRD requirements are mapped to implementation tickets/code modules and test cases.
+Critical unit, integration, API, offline, security and E2E tests pass.
+Database RLS tests pass.
+SQLCipher storage and secure-key tests pass.
+Payment webhook signature/idempotency tests pass.
+Stock, accounting and Khata reconciliation tests pass.
+Actual target printer and weighing-scale hardware are tested.
+Tamil invoice/search behavior is validated on real supported devices.
+Backup restore and archive restore have been demonstrated.
+Production Docker deployment has been rehearsed.
+Monitoring, alerts, secrets and operational runbooks are in place.
+Business owner/accountant acceptance is recorded before go-live.
+A27. Master Requirement Priority
+A28. Final Master Architecture Statement
+The Andipatti Animal Feed System shall be implemented as a security-first, offline-first, event-driven business platform. PostgreSQL is the authoritative transactional store and uses Row-Level Security for tenant isolation. Flutter uses SQLCipher for protected offline operation. Go provides the business-rule and API layer. Inventory and financial events are immutable/auditable where practical, while materialized balances are performance projections. External integrations are asynchronous and idempotent. Printing and messaging are delivery channels and never determine whether a financial transaction succeeded. Archival is governed by retention policy, integrity verification, backup and restore testing.
+A29. Final Master Scope Checklist
+☐ Master setup and tenant isolation
+☐ Users/RBAC/approvals
+☐ PostgreSQL RLS
+☐ SQLCipher offline database
+☐ Product/UOM/price/tax masters
+☐ Tamil/phonetic aliases
+☐ Supplier/PO/GRN
+☐ Tare validation
+☐ Batch + FIFO/FEFO
+☐ Expiry/quality/quarantine
+☐ Stock ledger/count/adjustment
+☐ POS/bag/loose weighing
+☐ GST/tax snapshots
+☐ Invoice numbering
+☐ Cash/UPI/credit split tender
+☐ Khata/credit limit/override
+☐ Contra/buy-back
+☐ Returns/refunds/credit notes
+☐ Payment webhooks/reconciliation
+☐ ESC/POS printing
+☐ WhatsApp receipt fallback
+☐ Collection reminders/grace period
+☐ EOD reconciliation
+☐ Compliance/e-way-bill architecture
+☐ GST/accounting exports
+☐ Offline sync/idempotency/conflicts
+☐ Accounting journal/ledger model
+☐ Reports/dashboard
+☐ Audit logging
+☐ Docker deployment
+☐ Monitoring/observability
+☐ Backup/disaster recovery
+☐ R2 archival/restore
+☐ Import/export controls
+☐ Security testing
+☐ Performance testing
+☐ Hardware E2E testing
+☐ Production readiness and rollback
+Role | Primary responsibilities | Key permissions
+Owner/Admin | Business setup, policy, approvals, reports | Full tenant administration; configuration; overrides; archival approval; user management
+Manager | Daily operations and control | POS, procurement, GRN, stock adjustment, EOD, approved credit overrides
+Cashier | Billing and collections | POS, payments, receipts, customer lookup; no sensitive configuration
+Godown/Inventory Staff | Receiving and stock handling | GRN, stock movement, batch/expiry, physical counts
+Accountant | Finance and compliance | Ledgers, reconciliation, GST exports, supplier/customer statements
+Auditor/Read-only | Review | Read-only reports, audit logs and archived records
+System/Service | Automated jobs | Only scoped service actions; no interactive login
+Example | Stored concept | Rule
+1 bag = 50 kg | Packaging + weight | bag_qty and kg_equivalent must be separately representable
+1 tonne = 1,000 kg | Weight | 1000 kg exact conversion
+Open 50 kg bag | Fractional parent + loose stock | Track sealed bags and loose kilograms without floating-point money/quantity errors
+20 bags = 1 tonne | Packaging conversion | Allowed only when configured; validation prevents inconsistent reciprocal factors
+Domain | Representative endpoints
+Auth | POST /auth/login; POST /auth/refresh; POST /auth/logout
+Tenant | GET/PUT /tenant; GET /tenant/settings
+Users/Roles | GET/POST /users; GET/POST /roles; permissions
+Products | GET/POST/PUT /products; barcode search; price lists
+Customers | GET/POST/PUT /customers; ledger; statements
+Suppliers | GET/POST/PUT /suppliers; ledger
+Procurement | PO create/approve/send; GRN create/post
+Inventory | stock; batches; movements; adjustments; counts
+POS | quote/cart validation; invoice create; returns; reprint
+Payments | payment intent; webhook; reconciliation; refunds
+Khata | credit validation; receipts; contra; statements
+Reports | sales, stock, expiry, customer, supplier, EOD, tax
+Sync | push/pull/ack; device registration; conflict status
+Compliance | e-way-bill request/status; export jobs
+Archive | archive jobs; manifest; restore verification
+Event | Typical accounting concept
+Cash sale | Dr Cash/UPI; Cr Sales; tax liabilities as applicable
+Credit sale | Dr Customer Receivable; Cr Sales; tax liabilities as applicable
+Purchase on credit | Dr Inventory/expense; Cr Supplier Payable; tax inputs as applicable
+Customer receipt | Dr Cash/Bank/UPI; Cr Customer Receivable
+Supplier payment | Dr Supplier Payable; Cr Cash/Bank
+Contra buy-back | Dr Inventory/stock asset; Cr Customer Receivable or configured settlement account
+Sales return | Reverse/reclassify the original sale/tax/receivable components as applicable
+Cash short/over | Post to configured variance account after approval
+Job | Frequency | Purpose
+Expiry scan | Daily configurable time | Find near-expiry/expired batches
+Reorder scan | Hourly/daily | Flag products below thresholds
+Payment reconciliation | Near real-time + scheduled | Resolve payment states
+Webhook retry | Queue-driven | Retry transient provider failures
+WhatsApp reminders | Configured dates | Customer collection reminders
+EOD reminder | Daily | Prompt closing if not completed
+Report generation | On demand/queued | Large exports
+Backup verification | Scheduled | Verify backups/checksums
+Archive candidate scan | Scheduled | Prepare eligible historical data
+Health monitoring | Continuous | API, DB, queue, device health
+Area | Screens
+Onboarding | Welcome; shop setup; legal profile; UOM; product import; customer tiers; hardware pairing; test/finish
+Dashboard | Today sales; cash/UPI/credit; stock alerts; expiry; receivables; payables
+POS | Product search; cart; customer; weighing; discount; tender split; invoice result; reprint
+Inventory | Stock list; batch list; expiry; movement history; stock count; adjustment; locations
+Procurement | Suppliers; reorder suggestions; PO; PO detail; GRN; receipt verification
+Customers | List; profile; credit; ledger; statement; receipts; reminders
+Suppliers | List; profile; PO history; payable ledger; payments
+Payments | Pending payments; success/failure; webhook status; reconciliation; refunds
+Reports | Sales; stock; expiry; customer aging; supplier aging; GST; EOD; audit
+Settings | Users; roles; tax; UOM; printers; scales; payment gateway; WhatsApp; invoice format; backup/archive
+Metric | Target
+Normal POS product add | < 300 ms perceived UI response when local data is available
+Local invoice commit | < 500 ms target on supported tablet hardware
+Thermal receipt print | ~1.5–3 sec target depending on printer/connection; do not block accounting commit on printer
+API p95 for ordinary reads | < 500 ms target under normal load
+API p95 for ordinary writes | < 800 ms target excluding external providers
+Offline continuity | Core billing remains available without internet
+Sync | Automatic retry with backoff; no duplicate financial posting
+Availability | Production target ≥99.9% for backend excluding planned maintenance
+Recovery | RPO/RTO defined with hosting/backup policy and tested periodically
+Layer | Required tests
+Unit | Tax calculations, UOM conversions, FIFO/FEFO, credit limits, tender splits, rounding
+Integration | PostgreSQL transactions, payment webhooks, WhatsApp, compliance providers, hardware adapters
+API | Auth, RBAC, tenant isolation, idempotency, validation, pagination, errors
+Offline | Disconnect/reconnect, duplicate sync, clock drift, conflicts, partial uploads
+POS E2E | Scan → weigh → bill → payment → print → ledger → stock
+Accounting | Journal balancing, customer/supplier balances, EOD
+Security | Tenant escape, privilege escalation, secret leakage, webhook forgery
+Performance | Concurrent POS, sync backlog, report/export load
+Recovery | Backup restore, archive restore, checksum verification
+Entity | States
+PO | DRAFT → APPROVED → SENT → PARTIALLY_RECEIVED → FULLY_RECEIVED → CLOSED / CANCELLED
+GRN | DRAFT → POSTED → REVERSED
+Invoice | DRAFT → FINALIZED → PARTIALLY_PAID / PAID / CREDIT → CANCELLED / RETURNED
+Payment | CREATED → PENDING → SUCCESS / FAILED / EXPIRED → REFUNDED / REVERSED
+Batch | ACTIVE → NEAR_EXPIRY → EXPIRED / QUARANTINED / DEPLETED
+Sync transaction | PENDING → UPLOADING → ACCEPTED / DUPLICATE / CONFLICT / REJECTED
+Archive | CANDIDATE → PACKAGED → UPLOADED → VERIFIED → RETAINED / PURGED
+Data class | PostgreSQL target | Go representation | Rule
+Currency / money | NUMERIC(12,2) minimum | Decimal-safe type/string | Never float32/float64 for accounting values
+Weight in kg | NUMERIC(12,3) | Decimal-safe type/string | 1 gram precision
+Inventory quantity | NUMERIC(12,3) | Decimal-safe type/string | Supports fractional loose stock
+UOM conversion factor | NUMERIC(12,6) | Decimal-safe type/string | Avoid conversion drift
+Tax rate | NUMERIC(7,4) | Decimal-safe type/string | Supports precise configured rates
+Priority | Meaning | Examples | Release rule
+P0 — Mandatory | Business/legal/data-integrity critical | Tenant isolation, atomic transactions, inventory, money, authentication, backups | Must pass before production
+P1 — Core | Required for normal daily operation | POS, Khata, procurement, batches, hardware, offline sync | Must pass for initial release
+P2 — Important | Operational efficiency | Advanced reports, automated reminders, analytics | Can follow core release if explicitly approved
+P3 — Future | Expansion | Forecasting, loyalty, multi-branch enhancements | Not required for first production release

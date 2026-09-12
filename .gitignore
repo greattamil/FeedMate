@@ -1,0 +1,33 @@
+# Build artifacts
+/services/api/bin/
+/services/worker/bin/
+*.exe
+*.o
+
+# Flutter
+apps/flutter/**/.dart_tool/
+apps/flutter/**/build/
+apps/flutter/**/.flutter-plugins
+apps/flutter/**/.flutter-plugins-dependencies
+apps/flutter/**/.packages
+
+# Go
+/services/**/vendor/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

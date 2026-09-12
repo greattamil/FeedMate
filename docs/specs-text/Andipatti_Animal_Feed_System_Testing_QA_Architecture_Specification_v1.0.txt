@@ -1,0 +1,665 @@
+Andipatti Animal Feed System
+Document 14 — Complete Testing & QA Architecture / Specification v1.0
+Implementation-ready quality engineering, test architecture, automation, environments, test data, security testing, financial/inventory integrity testing, hardware testing, offline testing, performance, release qualification and production verification. No sprint planning.
+1. Purpose, Scope, Objectives & Non-Goals
+1.1 Purpose
+Define the quality strategy and executable acceptance model for the Flutter application, Go backend, PostgreSQL, offline SQLCipher database, Docker platform, integrations, hardware and business workflows.
+1.2 Scope
+Functional, integration, system, regression and end-to-end testing.
+Unit and domain tests for pricing, tax, inventory, accounting, Khata, payment and compliance logic.
+API, database, RLS, authorization and security testing.
+Flutter widget, golden, accessibility, device and offline/synchronization testing.
+Barcode, scale, ESC/POS printer, cash drawer and payment-display testing.
+Payment/UPI webhook, reconciliation and refund testing.
+GST/e-invoice/e-way and export testing using approved sandbox/test environments.
+Docker/container, migration, backup/restore and deployment verification.
+Performance, load, concurrency, resilience, chaos and recovery testing.
+Release gates, defect management, production smoke tests and evidence retention.
+1.3 Quality Objectives
+Prevent incorrect financial, tax and inventory outcomes.
+Prove tenant isolation and authorization boundaries.
+Prove offline operation without compromising server authority.
+Detect integration and hardware failures without corrupting transactions.
+Make every production release repeatable, observable and rollback-safe.
+Provide automated regression coverage for critical business invariants.
+1.4 Non-Goals
+This document does not replace independent penetration testing or legal/compliance certification.
+Exact government/provider test cases must follow the current provider sandbox and authoritative specifications.
+No sprint planning is included.
+2. Quality Principles
+Test business invariants, not only UI behavior.
+Prefer deterministic automated tests for critical logic.
+Use realistic decimal precision and never floating-point assumptions for money.
+Every financial/inventory mutation must be tested for idempotency and concurrency.
+Tenant isolation is tested at both Go authorization and PostgreSQL RLS layers.
+External providers are mocked/simulated for deterministic tests and separately validated in sandbox environments.
+Hardware is tested through simulators plus physical-device certification.
+Offline tests include disconnects, retries, crashes, replay and revoked-device scenarios.
+Production smoke tests must be safe and non-destructive.
+A release is qualified by evidence, not by test count alone.
+3. Test Pyramid
+4. Test Environments
+Production customer data must not be copied into lower environments without approved masking/anonymization.
+Each environment has separate credentials and provider accounts.
+Test clocks and time zones must be controllable for financial-year, expiry and reminder tests.
+5. Test Data Architecture
+5.1 Seed Dataset
+Multiple tenants to validate isolation.
+Products with zero-tax, taxable and configurable tax profiles.
+Products sold by bag, kilogram and loose/fraction quantities.
+Products with batch, expiry, cost and different package tare values.
+Customers across all pricing tiers and credit-limit states.
+Suppliers with PO/GRN/payable histories.
+Invoices with cash, UPI, bank, Khata and split tender.
+Returns, refunds, contra/buy-back and adjustments.
+Tamil Unicode, transliterated and colloquial product aliases.
+Boundary values for weights, prices, tax rates and quantities.
+5.2 Determinism
+Use fixed IDs where test isolation requires them.
+Freeze/randomize seeds deliberately rather than relying on uncontrolled randomness.
+Mock external time where business rules depend on date/time.
+Reset ephemeral databases between isolated suites.
+6. Requirements Traceability
+Every high-priority requirement should map to one or more test cases. Maintain traceability from PRD → API/DB/domain design → automated test → release evidence.
+7. Unit Testing Standards
+Keep pure calculations deterministic and independently testable.
+Test normal, boundary, invalid and overflow-like cases.
+Test currency rounding at every configured precision boundary.
+Test weight precision to three decimals and UOM conversion precision to six decimals.
+Test tax calculations with inclusive/exclusive pricing, CGST/SGST/IGST and rounding.
+Test FIFO/FEFO allocation ordering.
+Test Khata exposure and credit-limit rules.
+Test payment state transitions and idempotency.
+Test financial-year/document-series allocation.
+Test permission and approval policies.
+8. Database & Repository Testing
+Use ephemeral PostgreSQL instances for integration tests.
+Run migrations from a clean database in CI.
+Test constraints, foreign keys, unique keys and check constraints.
+Test transaction rollback after injected failures.
+Test deadlock/retry behavior where applicable.
+Test repository queries with tenant context.
+Test indexes and representative query plans for critical paths.
+Test partition routing if partitioning is enabled.
+9. PostgreSQL RLS Security Testing
+RLS testing is mandatory for every tenant-owned table.
+Create at least two isolated tenants.
+Create representative records in each tenant.
+Authenticate as a user from tenant A and verify tenant A access.
+Attempt direct and indirect reads of tenant B records; verify rejection/empty result as designed.
+Attempt inserts with a forged tenant_id; verify server/RLS behavior.
+Attempt updates/deletes against tenant B IDs; verify rejection.
+Test joins that could accidentally bypass tenant boundaries.
+Test worker/job connections with explicit tenant context.
+Test support/admin roles separately and verify only intended cross-tenant access.
+Run the suite after every schema/security policy change.
+10. Authorization & RBAC Testing
+Test the full role × permission × resource × state matrix, not merely menu visibility.
+11. API Contract Testing
+Validate request/response schemas and required headers.
+Test authentication and authorization for every protected route.
+Test pagination, filtering and sorting constraints.
+Test malformed JSON, unknown fields, invalid enums and decimal formats.
+Test request size limits.
+Test standard error envelopes and safe error messages.
+Test idempotency key behavior for successful, failed and conflicting requests.
+Test rate limiting and brute-force protection.
+Test API version compatibility.
+Test WSS connection/authentication/reconnect behavior.
+12. Input Validation & Injection Testing
+SQL injection against all string/filter/search fields.
+JSON mass-assignment attempts.
+Path traversal and object-key injection.
+HTML/script injection where browser UI displays user data.
+Unicode normalization edge cases.
+Extremely long Tamil/Unicode aliases.
+Invalid numeric scale/weight values.
+Negative, NaN-like, infinity-like or malformed decimal inputs.
+Invalid dates/time zones.
+Malformed serial/BLE hardware payloads.
+13. Financial Calculation Testing
+14. Inventory & Batch Testing
+GRN increases stock only after successful transaction.
+Tare weight cannot produce negative net weight.
+Configured tare threshold rejects implausible totals unless authorized.
+Batch expiry status is respected.
+FEFO chooses earliest valid expiry where policy requires.
+FIFO chooses earliest eligible receipt where FEFO is not applicable.
+Expired/held/rejected batches cannot be sold.
+Loose stock conversion preserves configured precision.
+Concurrent sales cannot oversell available stock.
+Returns restore the correct stock state according to disposition.
+Damage/shrinkage/expiry adjustments are authorized and audited.
+Stock counts produce controlled adjustments and reconciliation.
+15. Tare Weight Test Matrix
+16. POS & Billing E2E Testing
+Scan/search product.
+Select customer tier.
+Add sealed and loose items.
+Capture scale reading where required.
+Apply configured price/tax/discount.
+Allocate eligible batches.
+Select payment method.
+Complete provider verification where applicable.
+Finalize invoice atomically.
+Post inventory and accounting effects.
+Print receipt or verify print-failure fallback.
+Verify audit and outbox events.
+Re-open/reprint according to permissions.
+Verify customer/supplier/stock/reporting projections.
+17. Tamil Search & Localization Testing
+Tamil Unicode exact search.
+Tamil transliteration search.
+Colloquial/regional spelling variants.
+Phonetic/fuzzy search.
+Mixed Tamil-English input.
+Case/diacritic/normalization variants where relevant.
+Barcode + Tamil search combination.
+No false cross-tenant results.
+Correct Tamil receipt rendering.
+Accessibility labels and readable typography.
+18. Offline-First Testing
+18.1 Connectivity Matrix
+18.2 Replay/Tamper Tests
+Replay an already accepted transaction envelope.
+Change amount after signing/hashing.
+Change tenant ID.
+Change product/quantity.
+Reuse sequence/nonce.
+Submit from a revoked device.
+Submit unsupported schema version.
+Submit valid payload with invalid integrity metadata.
+19. Synchronization & Conflict Testing
+Two devices update the same customer.
+Two devices sell the last available stock.
+Two devices attempt the same invoice number.
+One device works offline while master price changes online.
+One device works offline while product becomes inactive.
+Payment state changes online while POS is offline.
+Device reconnects after a long outage.
+Server rejects one item in a batch while others succeed according to transaction design.
+Full resync after cursor invalidation.
+Financial/inventory conflicts must never be silently resolved with generic last-write-wins.
+20. Payment & UPI Testing
+Test provider sandbox integration separately from deterministic adapter tests.
+Test payment-first and invoice-first orchestration according to the selected architecture.
+Test provider outage and recovery.
+21. GST & Compliance Testing
+Tax profile selection by effective date.
+Intra-state CGST/SGST calculation.
+Inter-state IGST calculation.
+Tax-inclusive and tax-exclusive pricing.
+HSN/product classification.
+Invoice tax snapshot immutability.
+Credit/debit note tax reversal.
+Cancellation behavior.
+E-invoice success/failure/timeout/duplicate.
+E-way bill applicability and transport data validation.
+GST export totals reconcile with invoice ledger.
+Period lock prevents unauthorized post-period mutation.
+Use current official/provider sandbox schemas and rules during final certification; do not rely on static test assumptions for legal thresholds.
+22. WhatsApp Testing
+Valid template/message request.
+Invalid recipient/opt-in state.
+Provider timeout.
+Provider error/retry.
+Duplicate delivery callback.
+Receipt generation failure.
+Message failure after invoice finalization — invoice remains finalized.
+Tenant isolation of messaging credentials and recipients.
+Sensitive data redaction in logs.
+23. Hardware Testing
+23.1 Scanner
+USB HID/Bluetooth/serial input where supported.
+Rapid repeated scans.
+Invalid/oversized barcode.
+Prefix/suffix configuration.
+Disconnect/reconnect.
+Wrong product barcode.
+23.2 Scale
+Stable reading.
+Unstable reading.
+Negative value.
+Zero/tare.
+Overload.
+Protocol corruption.
+Disconnect/reconnect.
+Unit mismatch.
+Manual fallback authorization.
+23.3 Printer
+Successful print.
+Tamil rendering.
+Paper out.
+Offline printer.
+Partial/uncertain print outcome.
+Duplicate print/reprint.
+Power loss after finalization.
+WhatsApp receipt fallback.
+24. Accounting & Khata Testing
+Every finalized sale posts balanced journal entries.
+Cash/UPI/bank/Khata allocations reconcile to invoice total.
+Khata balance equals authoritative ledger projection.
+Credit limit blocks/approves correctly.
+Owner override requires authorization and audit.
+Receipts allocate correctly to invoices.
+Overpayments become unapplied/credit according to policy.
+Supplier payables reconcile with GRNs and payments.
+Contra receipt updates inventory and ledger correctly.
+Refunds reverse appropriate financial effects.
+EOD expected cash calculation reconciles with movements.
+25. Accounting Invariants
+Every posted journal has total debits equal total credits.
+Every payment allocation cannot exceed applicable payment amount.
+Refunds cannot exceed refundable amount.
+A finalized invoice total equals its persisted tax/line/tender composition.
+Inventory movement quantities are internally consistent.
+Tenant ownership is consistent across all referenced records.
+Financial records are not silently overwritten by retries.
+Reversals preserve original record lineage.
+26. Security Testing
+Authentication bypass tests.
+Authorization/BOLA/IDOR tests.
+Tenant isolation and RLS tests.
+Brute-force/rate-limit tests.
+Token/session revocation tests.
+Webhook signature/replay tests.
+SQL injection and API injection tests.
+File upload/path traversal tests.
+Secret scanning.
+Dependency vulnerability scanning.
+Container image scanning.
+IaC scanning.
+SAST and DAST.
+Mobile static/dynamic security tests.
+Independent penetration testing before production.
+27. Container & Docker Testing
+Build every image from a clean runner.
+Verify non-root runtime user.
+Verify no privileged mode.
+Verify no Docker socket mount.
+Verify required capabilities only.
+Verify private DB/Redis ports.
+Verify health checks.
+Verify resource limits.
+Verify image vulnerability scan.
+Verify SBOM generation.
+Verify runtime secret injection.
+Verify containers restart safely after failure.
+28. CI/CD Testing Gates
+29. Performance Testing
+29.1 Load Test Areas
+Concurrent POS invoice creation.
+Product/Tamil search.
+Inventory availability and allocation.
+Khata/customer statement queries.
+Payment intent creation and webhook processing.
+Report/export generation.
+WebSocket concurrent connections.
+Offline sync batch upload.
+29.2 Test Types
+Baseline load.
+Stress beyond expected peak.
+Spike testing.
+Soak/endurance testing.
+Concurrency/race testing.
+Recovery after overload.
+Set final thresholds from measured production targets; do not substitute arbitrary latency numbers for business-approved SLOs.
+30. Database Performance Testing
+Identify slow critical queries.
+Test indexes for product/barcode/alias search.
+Test invoice/ledger/stock queries under realistic data volume.
+Test connection pool saturation.
+Test lock contention during concurrent sales.
+Test partition pruning if used.
+Review execution plans for high-volume reports.
+Test large exports without blocking transactional workloads.
+31. Reliability & Chaos Testing
+Kill API container during active traffic.
+Kill worker during a job.
+Restart Redis where used.
+Introduce database connection failures.
+Introduce provider timeouts.
+Drop WebSocket connections.
+Disconnect mobile network during finalization.
+Power-cycle a test POS device.
+Disconnect printer/scale.
+Corrupt a test queue message.
+Simulate R2 outage.
+Restore database backup and verify reconciliation.
+Chaos tests must run only against isolated environments and synthetic data.
+32. Backup / Restore Testing
+Create a known test dataset with financial/inventory relationships.
+Create backup.
+Restore into isolated infrastructure.
+Run migrations/compatibility validation.
+Run RLS/authorization tests.
+Run accounting/inventory reconciliation.
+Verify R2/archive checksums.
+Verify external side effects are disabled.
+Record restore duration and result.
+33. Mobile Device Matrix
+34. Accessibility Testing
+Touch targets meet platform guidance.
+Text remains readable at supported font scaling.
+Color is not the only indicator of state.
+Screen readers can identify critical controls.
+Error messages are understandable.
+Tamil content is readable and not clipped.
+POS workflows remain usable with accessibility settings enabled where supported.
+35. UI/UX Regression & Golden Testing
+Receipt/invoice print previews.
+POS cart and totals.
+Payment pending/paid/failed states.
+Khata ledger and collection screens.
+GRN/tare screens.
+Inventory batch/expiry screens.
+EOD reconciliation.
+Critical error dialogs.
+Tamil search results.
+Golden tests should tolerate only intentional, reviewed visual changes; fonts and rendering environments must be controlled.
+36. Test Automation Architecture
+Go: standard testing packages plus approved assertion/property helpers; use race detection.
+PostgreSQL: ephemeral instances for integration/RLS suites.
+Flutter: unit/widget/integration/golden tests.
+API: contract and integration harness.
+Hardware: protocol simulators plus physical test rigs.
+Payments/compliance: deterministic mocks + provider sandbox.
+Docker: Compose-based integration environment.
+CI: parallelize independent suites while preserving database isolation.
+37. Property-Based & Invariant Testing
+UOM conversion round-trip within defined precision tolerance.
+Tax calculation never produces impossible negative tax.
+Journal always balances.
+Invoice line totals and tax totals reconcile.
+Inventory cannot become negative unless an explicitly approved policy permits it.
+Refund total cannot exceed refundable total.
+Idempotent repetition produces the same authoritative result.
+Tenant context cannot change object ownership.
+38. Fuzz Testing
+API JSON fields.
+Tamil product aliases and Unicode normalization.
+Search filters and sort fields.
+Barcode input.
+Scale protocol frames.
+Printer response parsing.
+Webhook bodies and headers.
+File names and metadata.
+Offline transaction envelopes.
+39. Defect Severity
+Any defect that can cause incorrect money, tax, inventory, tenant isolation or payment state is at least High and may be Critical depending on impact.
+40. Release Qualification
+All mandatory automated suites pass.
+No unresolved blocker/critical defect.
+No unapproved critical/high security finding.
+Database migrations pass from clean and representative prior versions.
+Critical E2E workflows pass.
+Payment/compliance sandbox tests pass where included in release.
+Offline/reconnect suite passes for affected features.
+Hardware certification passes for supported hardware.
+Performance baseline is within approved limits.
+Backup/restore evidence is current for relevant production releases.
+Release artifact is traceable to the tested commit/image digest.
+Production smoke test plan is ready.
+41. Production Smoke Test
+Health/readiness endpoint.
+Authentication with a dedicated test/authorized operational account.
+Product search/read-only lookup.
+Safe customer/product read.
+Queue/worker health.
+Payment provider connectivity check that does not create a real charge.
+R2 access check with a non-sensitive test object if needed.
+Observability event ingestion.
+No destructive invoice, stock or financial mutation unless an explicitly approved test tenant exists.
+42. Production Monitoring Verification
+API latency/error dashboards active.
+Database connection/lock metrics active.
+Worker queue/DLQ metrics active.
+Payment webhook monitoring active.
+Security alerts active.
+Backup monitoring active.
+Container restart alerts active.
+Certificate monitoring active.
+Audit event ingestion verified.
+43. Test Evidence & Reporting
+Retain test run ID, commit SHA, image digest and environment version.
+Retain pass/fail summary and failed-test evidence.
+Security findings include severity and remediation status.
+Performance results include dataset size and concurrency assumptions.
+Hardware certification records include device model/protocol/firmware where relevant.
+Provider sandbox results include provider environment and test identifiers.
+Release approval references the evidence set.
+44. Test Data Privacy
+Synthetic data is the default.
+Mask customer phone/name/address and tax identifiers before lower-environment use.
+Never put production payment credentials in tests.
+Do not include real secrets in fixtures.
+Clean temporary exports and uploaded test files after test completion.
+Control access to test reports containing sensitive data.
+45. Test Failure Recovery
+A failed test must identify the affected environment and artifact.
+Do not automatically suppress flaky failures.
+Quarantine flaky tests with an owner and expiry date.
+Retry only when the test framework can distinguish infrastructure flakiness from product failure.
+Critical business-invariant tests are never ignored to unblock a release.
+46. Test Coverage Targets
+Coverage percentage alone is not a release criterion; critical path and invariant coverage take precedence.
+47. End-to-End Master Scenarios
+New tenant setup → tax/pricing/product master → user/device provisioning.
+PO → truck arrival → GRN → tare validation → batch creation → stock.
+Sealed-bag sale → tier pricing → GST → cash payment → invoice → inventory/accounting.
+Loose-feed sale → scale → UOM conversion → FEFO → UPI → receipt.
+Khata sale → credit validation → invoice → customer ledger → collection.
+Contra/buy-back → received stock → customer ledger credit → accounting.
+Return → stock disposition → refund/credit note → accounting reversal.
+Offline sale → encrypted local transaction → reconnect → server acceptance → reconciliation.
+Payment webhook → verification → allocation → invoice finalization → receipt.
+E-invoice/e-way → provider response → compliance state → export.
+EOD → cash count → expected vs physical → variance → audit.
+Archive → manifest/checksum → object storage → restore verification.
+48. Security Acceptance Tests
+Cross-tenant API access is denied.
+Cross-tenant RLS access is denied.
+Client cannot self-authorize an owner action.
+Client cannot mark a payment Paid.
+Webhook without valid signature cannot change payment state.
+Replayed webhook cannot duplicate payment.
+Replayed offline envelope cannot duplicate financial state.
+Revoked device cannot synchronize.
+Secrets are absent from logs and release artifacts.
+Unauthorized export is denied and audited.
+49. Financial Integrity Acceptance Tests
+Every finalized invoice has balanced accounting effects.
+Invoice total equals line/tax/tender totals.
+Stock movements reconcile with sale/return/adjustment transactions.
+Khata balance reconciles to ledger entries.
+Refunds never exceed eligible amounts.
+Duplicate finalization is impossible through retries.
+EOD expected cash reconciles from authoritative cash movements.
+Financial-year invoice series remains unique and auditable.
+50. QA Mapping to Documents 01–13
+51. QA Checklist
+Test environments reproducible.
+Synthetic/masked test data available.
+Critical unit/domain tests automated.
+RLS suite covers every tenant-owned table.
+Authorization matrix automated.
+API contract suite automated.
+Financial invariants automated.
+Inventory concurrency tests automated.
+Offline replay/conflict tests automated.
+Payment webhook/reconciliation tests automated.
+GST/compliance sandbox tests available.
+Hardware simulators available.
+Physical hardware certification completed.
+Security scans enabled.
+Container scans/SBOM enabled.
+Performance baseline documented.
+Backup restore test completed.
+E2E master scenarios pass.
+Release evidence retained.
+Production smoke plan validated.
+52. Non-Negotiable QA Rules
+Never release with known financial, inventory or tenant-isolation corruption.
+Never bypass RLS tests.
+Never accept client-side payment status as authoritative in tests or production.
+Never ignore idempotency failures on financial endpoints.
+Never use last-write-wins to hide financial/inventory conflicts.
+Never use real production secrets in test environments.
+Never copy unmasked production PII into lower environments.
+Never suppress flaky critical tests without controlled quarantine and review.
+Never consider UI-only success sufficient for a transaction; verify DB/accounting/inventory state.
+Never call a deployment successful without health, smoke and observability verification.
+53. Definition of Done — Testing & QA
+All critical requirements have traceable automated or documented acceptance tests.
+RLS and authorization tests pass.
+Financial and inventory invariants pass.
+Critical POS, Khata, procurement, return, payment and EOD E2E scenarios pass.
+Offline/replay/conflict tests pass.
+Hardware-supported profiles pass certification.
+Payment/GST/compliance sandbox tests pass where applicable.
+Security CI gates pass.
+Container and deployment tests pass.
+Performance results meet approved release baseline.
+Backup/restore verification is current.
+Release evidence is stored and traceable to the artifact.
+Production smoke and rollback verification are ready.
+54. Final QA Architecture Summary
+Quality is enforced as a layered system: deterministic domain tests protect business mathematics; PostgreSQL integration and RLS tests protect authoritative data; API/authorization tests protect boundaries; Flutter tests protect the operator experience; offline tests protect synchronization integrity; hardware tests isolate physical failures; payment/compliance tests protect external state transitions; security and container tests protect the platform; performance/reliability tests protect operations; and end-to-end reconciliation proves that invoice, inventory, accounting, payment and reporting outcomes agree.
+55. Important Production Note
+Final release gates must use current provider sandbox behavior, supported mobile/OS versions, selected hardware firmware/protocols, current tax/compliance requirements and measured production workload. This document establishes the engineering QA baseline; project-specific SLOs, legal certification and independent security assessment should be added before production.
+Layer | Primary tests | Target
+Unit | Pure domain/service calculations | Fast, extensive
+Component | Go service + repository + DB transaction | High
+API | REST/WSS contract and authorization | High
+RLS | Tenant isolation SQL tests | 100% tenant-owned tables
+Flutter | Widget, state, navigation, accessibility | High
+Golden | Receipts, invoices, key screens | Critical screens
+Integration | Payment/GST/WhatsApp/R2 adapters | High
+Hardware | Scanner/scale/printer protocol tests | High
+E2E | Complete business workflows | Critical flows
+Performance | Load, stress, soak, concurrency | Release-gated
+Security | SAST/DAST/fuzz/penetration | Release-gated
+Environment | Purpose | Data
+Developer | Fast local feedback | Synthetic
+CI | Deterministic automated tests | Ephemeral synthetic
+Integration | Cross-service validation | Synthetic
+Staging | Production-like release validation | Synthetic/masked only
+Provider sandbox | Payment/compliance integration | Sandbox
+Physical lab | Hardware certification | Synthetic
+Production | Smoke/monitoring only | Real; non-destructive
+Requirement class | Minimum evidence
+Tenant isolation | RLS + API negative tests
+Financial posting | Unit + DB transaction + E2E
+Inventory | Invariant + concurrency + E2E
+Payment | Webhook/idempotency/reconciliation tests
+GST | Tax calculation + export/provider sandbox tests
+Offline | Disconnect/replay/conflict/recovery tests
+Hardware | Simulator + physical certification
+Security | Authorization + SAST/DAST + penetration evidence
+Deployment | Container/migration/health/backup evidence
+Test class | Examples
+Positive | Cashier creates allowed sale
+Negative | Cashier performs unauthorized stock adjustment
+Object-level | Tenant A accesses Tenant B invoice ID
+State-level | Editing finalized invoice
+Approval | Discount override without authorized approval
+Privilege escalation | User attempts to self-assign owner role
+Session | Revoked device/session requests API
+Export | Unauthorized GST/report export
+Support | Time-bounded support access expires
+Area | Required cases
+Currency | 0, 0.01, half-cent rounding boundaries, large valid values
+Discount | Tier discount, manual discount, minimum-margin boundary
+Tax | 0%, configured rates, inclusive/exclusive, rounding
+Split tender | Exact, under, over, multiple tenders
+Khata | Limit exact, below, exceeded, override
+Refund | Full, partial, repeated, exceeds original
+Credit note | Tax reversal and linkage
+Contra | Quantity, valuation, ledger effect
+EOD | Opening + cash movements + sales - payouts vs physical cash
+Case | Expected
+50 bags, normal measured tare | Accept
+Tare exactly at configured threshold | Accept if policy allows boundary
+Tare above threshold | Reject or require authorized override
+Tare greater than gross | Reject
+Negative tare | Reject
+Missing tare | Require configured fallback/measurement policy
+Duplicate GRN submission | Idempotent; no duplicate stock
+Device disconnect during GRN | No partial authoritative posting
+Condition | Expected behavior
+Online | Normal server-authoritative operation
+Offline before sale | Allowed offline flows according to policy
+Offline during draft | Draft preserved locally
+Disconnect during finalization | No duplicate authoritative result
+Reconnect | Pending envelopes upload safely
+Duplicate retry | Idempotent
+Server rejects envelope | Conflict state shown; no silent overwrite
+Device revoked | Sync/API blocked
+App crash | Local transaction recovery is deterministic
+Database corruption | Secure recovery path; no false success
+Scenario | Expected
+Valid dynamic QR | Intent created; correct amount
+Valid webhook | Signature passes; state updates once
+Invalid signature | Rejected; no payment state change
+Replay webhook | Ignored/rejected idempotently
+Amount mismatch | Rejected/quarantined
+Unknown provider outcome | Pending/reconciliation
+Provider timeout | No false Paid state
+Duplicate payment | Reconciliation/overpayment workflow
+Refund retry | One authoritative refund
+Webhook out of order | State machine prevents invalid transition
+Gate | Release condition
+Format/lint | Pass
+Unit | Pass
+Integration | Pass
+RLS | Pass
+Authorization | Pass
+Security scans | No unapproved critical/high issue
+Container scan | Pass policy
+Migration | Clean upgrade test passes
+E2E critical paths | Pass
+Performance | Within approved baseline
+SBOM | Generated
+Artifact | Traceable/signature as required
+Dimension | Coverage
+Android | Supported OS range; representative low/mid/high devices
+iOS | Supported OS range; representative devices
+Screen | Small/large; portrait/landscape where supported
+Connectivity | Wi-Fi, mobile, offline, intermittent
+Bluetooth | Scale/printer variants
+USB | Scanner/scale variants where supported
+Storage | Low-storage condition
+Battery | Low-power/background restrictions
+Security | Rooted/jailbroken policy behavior
+Localization | Tamil + English
+Severity | Definition
+Blocker | Release/business operation cannot safely proceed
+Critical | Financial/security/inventory corruption or severe outage
+High | Major incorrect behavior or material workflow failure
+Medium | Important issue with workaround
+Low | Minor defect/cosmetic issue
+Area | Target philosophy
+Critical financial/domain logic | Very high automated coverage + invariants
+Tenant isolation/RLS | 100% tenant-owned tables
+Authorization matrix | All security-sensitive actions
+API routes | All protected routes + critical public routes
+Payment state machine | All states/transitions + failure paths
+Inventory allocation | All allocation policies + concurrency
+Offline sync | All envelope/replay/conflict classes
+Flutter critical flows | High automated integration coverage
+Hardware protocols | All supported profiles + failure paths
+Reports/exports | Representative correctness/reconciliation coverage
+Document | QA dependency
+01 Database & ERD | Schema, RLS, constraints, indexes, reconciliation
+02 API Specification | Contract, validation, auth, idempotency, errors
+03 Go Backend | Unit/component/concurrency/repository tests
+04 Flutter | Widget, integration, golden, device/offline tests
+05 Offline Sync | Replay, conflict, crash, reconnect, revocation tests
+06 Inventory & Batch | FIFO/FEFO, stock invariants, tare, concurrency
+07 Accounting & Khata | Double-entry, ledger, credit, refund, EOD
+08 POS & Billing | Critical POS E2E and pricing/tax/tender tests
+09 Hardware | Protocol, physical, failure and recovery tests
+10 Payment & UPI | Webhook, reconciliation, refund, provider sandbox
+11 GST & Compliance | Tax, export, provider sandbox, period-lock tests
+12 Security | RLS, authorization, secrets, mobile/container security
+13 Docker & DevOps | CI gates, images, migration, backup/restore, deployment tests

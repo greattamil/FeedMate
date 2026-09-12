@@ -1,0 +1,677 @@
+Andipatti Animal Feed System
+Document 06 — Complete Inventory & Batch Engine Specification
+v1.0 — Implementation Baseline
+Aligned with PRD v1.2, Database & ERD v1.0, API Specification v1.0, Go Backend Technical Architecture v1.0, Flutter Technical Architecture v1.0, and Offline-First & Synchronization Specification v1.0.
+This document defines the authoritative inventory engine: UOM conversion, receiving, tare validation, batches, stock ledger, balances, FIFO/FEFO allocation, loose/fraction stock, reservations, counts, adjustments, expiry/aflatoxin controls, costing, concurrency, reconciliation, offline interaction, and audit.
+1. Inventory Engine Objectives
+Maintain an exact, auditable quantity trail for every stock movement.
+Support bags, kilograms, tonnes, loose/fraction quantities and configurable product UOMs.
+Track batches where batch/expiry/quality controls apply.
+Allocate stock deterministically using configured FIFO/FEFO policies.
+Prevent double allocation and unauthorized negative stock.
+Separate physical quantity from accounting/cost information.
+Support purchase receiving, sales, returns, adjustments, stock counts and contra/buy-back.
+Remain safe under concurrent devices and offline synchronization.
+Make expiry, quality and shrinkage visible before they become financial losses.
+2. Core Inventory Concepts
+3. Authoritative Inventory Model
+stock_movements is the audit ledger. stock_balances is a derived/current-state projection. The engine must be able to rebuild balances from movements or otherwise reconcile them.
+Every mutation creates a movement or an explicit movement-linked state transition.
+Balances are updated atomically with movements.
+Finalized movements are immutable.
+Corrections are compensating movements.
+All quantities are decimal-safe NUMERIC values.
+Tenant, product, UOM, location and batch dimensions are explicit.
+4. Precision Standards
+Go must use decimal-safe types.
+Flutter must preserve decimal values without binary floating-point conversion.
+Rounding rules are explicit and consistent.
+Never truncate fractional quantities during conversion.
+5. UOM Architecture
+The system supports parent/child UOM relationships without assuming that every product uses the same package weight.
+UOM conversions must be effective-dated when historical correctness requires it.
+Product-specific conversions override generic conversions where applicable.
+Conversions must declare direction and factor clearly.
+Do not hardcode 50 kg for every bag.
+6. Product UOM Rules
+Each product has a base stock UOM.
+Sellable/purchasable UOMs map to the base UOM.
+Conversion factors are positive.
+Pack size and nominal weight are distinct from actual received weight.
+Fractional sale eligibility is configured per product/UOM.
+Inventory quantities are stored in a canonical base quantity plus transaction UOM metadata where needed.
+7. Conversion Algorithm
+For a quantity Q in source UOM with factor F to base UOM: base_quantity = Q × F. For reverse display conversion: source_quantity = base_quantity ÷ F, with configured rounding/display precision.
+Validate factor > 0.
+Use decimal arithmetic.
+Record source UOM and factor/version used for the transaction.
+Do not retroactively recalculate historical movements when a conversion changes.
+8. Batch Model
+Batch number may be mandatory for configured products.
+Duplicate batch numbers are permitted only according to tenant/product policy.
+Batch identity must not be silently merged when traceability would be lost.
+9. Batch Lifecycle
+EXPECTED — referenced by PO or advance information.
+RECEIVING — physically being received.
+AVAILABLE — passed required validations and posted to stock.
+HOLD — blocked pending quality/document review.
+REJECTED — not available for sale/use.
+EXPIRED — expiry reached according to policy.
+DEPLETED — no available quantity remains.
+ARCHIVED — retained for historical traceability.
+A batch may transition between operational statuses only through authorized rules. Expired does not necessarily mean physically destroyed; it means the batch is unavailable for normal sale unless an explicitly authorized policy says otherwise.
+10. Quality / Aflatoxin Controls
+Quality status is configuration-driven.
+Products requiring quality inspection can enter HOLD on receipt.
+Quality result/inspection metadata may be attached to GRN/batch.
+Daily jobs identify approaching expiry and configured quality-risk conditions.
+An alert does not automatically modify stock quantity.
+Rejected/held stock is excluded from normal sale allocation.
+11. Expiry Policy
+The example of 15 days is a configurable initial default, not a universal legal requirement.
+12. FIFO Policy
+FIFO selects the oldest eligible stock based on the configured inventory-age key, normally received/available date, with deterministic tie-breakers.
+Exclude expired/blocked/held batches unless policy explicitly permits.
+Sort by eligible age ascending.
+Use batch ID or another stable key as tie-breaker.
+Allocate only available quantity.
+Split allocation across multiple batches when one batch is insufficient.
+13. FEFO Policy
+FEFO selects stock by earliest expiry date first, then deterministic age/tie-breaker.
+Only applicable to products with expiry/quality semantics.
+Null expiry handling must be explicit; typically place no-expiry stock after dated stock.
+Expired stock is excluded.
+FEFO can be the preferred policy while FIFO remains the fallback for non-expiring products.
+14. Allocation Policy Configuration
+Each product/category policy must resolve to one deterministic allocation algorithm.
+15. Stock Movement Types
+16. Movement Invariants
+Movement quantity must be positive; direction determines sign/effect.
+Every movement has a reason/source type and source ID where applicable.
+Tenant/product/location scope must be valid.
+Batch is mandatory where product policy requires it.
+UOM conversion is valid for the product.
+Movement cannot be silently deleted after posting.
+Reverse/correct using a compensating movement.
+17. Stock Balance Model
+A stock balance row represents current on-hand quantity for a unique tenant + location + product + batch + UOM/base dimension as defined by the physical schema.
+Use a unique composite key for the balance dimension.
+Maintain on_hand, reserved and available quantities where reservations are supported.
+Available = on_hand − reserved, subject to policy.
+Do not let available become negative.
+Balance updates occur in the same DB transaction as movements.
+18. Reservation Model
+Reservations are optional for this retail system but useful for concurrent POS/online operations.
+Reservation has owner/source transaction, quantity, status and expiration where applicable.
+Reserved quantity cannot exceed eligible on-hand.
+Finalization consumes reservation; cancellation releases it.
+Expired reservations are released by a controlled job.
+Reservations never replace the immutable stock ledger.
+19. Concurrent Stock Allocation
+Begin database transaction.
+Identify all eligible balance/batch rows.
+Lock candidate rows in deterministic order.
+Calculate available quantity.
+Allocate required quantity across candidates.
+Insert allocation records/movements.
+Update balances atomically.
+Commit.
+Return allocation snapshot.
+Use row-level locking such as SELECT ... FOR UPDATE as appropriate. Application-memory locks are not sufficient for multiple API instances/devices.
+20. Negative Stock Policy
+Recommended default: prevent negative authoritative stock.
+21. GRN Receiving Flow
+Load PO and receiving permissions.
+Enter arrival/truck information.
+Select product/UOM and expected quantity.
+Capture package/bag count.
+Capture gross weight.
+Capture tare weight.
+Calculate net weight.
+Validate tare threshold.
+Create/resolve batch.
+Validate expiry/quality.
+Post stock receipt and supplier payable atomically.
+Generate receipt/GRN result.
+Queue synchronization if originating offline.
+22. Tare Weight Validation
+Tare validation must protect against obvious data-entry/device errors while remaining configurable.
+Store gross, tare and net separately.
+Net = gross − tare using decimal arithmetic.
+Net must not be negative.
+Compare total tare against configured maximum percentage or configured absolute rule.
+Recommended initial default threshold: 5% of gross, configurable by product/package and not a universal hardcoded rule.
+Over-threshold receipt requires correction or authorized override.
+Record threshold, actual percentage, decision and reason in audit data.
+23. Tare Example
+If a truck reports 50 bags and each sack's tare is expected to be approximately 100–150 g, the engine should calculate from the actual configured/entered tare policy. It must not blindly assume a single sack tare value. If 50 bags have 0.125 kg average tare, total tare would be 6.250 kg; gross/net calculations must use actual recorded values and configured validation.
+24. Loose / Fraction Stock
+Store loose quantity in base UOM with decimal precision.
+Example: 12.500 kg remaining from a 50 kg bag.
+Display can show sealed bags + loose kg through a conversion/display service.
+Do not physically invent a new bag when loose quantity is created.
+Splitting a bag into loose stock is represented by linked movements if physical traceability is required.
+Sale of loose quantity reduces the appropriate batch/base quantity.
+25. Bag-to-Loose Conversion
+When a 50 kg bag is opened and 12.500 kg is sold, the system may maintain 37.500 kg remaining as loose/base stock or represent package/loose states explicitly. The chosen representation must be consistent per product and must not cause double counting.
+Physical package state and accounting quantity are separate concepts.
+Use one canonical quantity to avoid duplicate inventory.
+Display sealed/loose is a derived operational view unless package-level traceability requires separate records.
+26. Stock Transfer
+Transfers use linked OUT and IN movements.
+Both sides are committed atomically when within the same inventory domain.
+Source and destination locations are required.
+Batch identity is preserved unless repack/reclassification is explicitly authorized.
+Failed transfer leaves both locations unchanged.
+27. Stock Count Workflow
+Open count session.
+Freeze or snapshot relevant expected quantity according to policy.
+Record physical quantities by product/location/batch.
+Calculate variance.
+Require reason for variance.
+Require approval if configured threshold is exceeded.
+Create adjustment movements.
+Close count.
+Reconcile balance.
+Counting should minimize disruption to POS. Where stock continues moving during a count, the system must use a documented snapshot/reconciliation method rather than mixing incompatible timestamps.
+28. Stock Adjustment Rules
+Adjustment requires reason code.
+Manual quantity change requires permission.
+Large variance may require owner/admin approval.
+Before/after values are recorded.
+Adjustment links to the count or source reason.
+Adjustment creates immutable movement(s).
+Never edit stock balance directly as a business operation.
+29. Shrinkage / Damage / Expiry
+30. Returns
+Validate original invoice and returnable quantity.
+Return to original batch where traceability permits.
+If original batch is unavailable, require policy-based alternative batch disposition.
+Returned product may enter HOLD pending quality inspection.
+Saleable returned stock increases available quantity only after acceptance.
+Refund/credit accounting is separate but linked to stock reversal.
+31. Contra / Buy-Back
+Contra receipt increases inventory quantity.
+Product, UOM, quantity and valuation are explicitly captured.
+Quality/batch rules apply if configured.
+Customer ledger receives the corresponding credit/valuation.
+Inventory and ledger postings are atomic on the server.
+Offline contra follows the same synchronization/idempotency rules.
+32. Product Costing
+Inventory quantity and cost are related but distinct. The system should support a documented costing method.
+Choose one authoritative costing method per tenant/business policy and do not mix methods implicitly. Costing changes require effective dating and historical preservation.
+33. Margin Calculation
+Revenue = finalized sale line net amount according to accounting definition.
+Cost = allocated inventory cost.
+Gross margin = revenue − cost.
+Margin reports must identify whether tax is excluded/included according to configuration.
+Discounts must be reflected consistently.
+Do not use current replacement cost to rewrite historical sale margin.
+34. Expiry Alert Job
+Run daily at tenant-local configured time.
+Find eligible batches within warning horizon.
+Exclude depleted/archived batches.
+Group alerts by product/location/batch.
+Create deduplicated notification jobs.
+Escalate expired stock according to policy.
+Do not modify stock solely because an alert is generated.
+35. FIFO/FEFO Allocation Pseudocode
+1. Resolve product inventory policy.
+2. Query eligible batches for tenant/location/product.
+3. Filter quality_status = AVAILABLE and quantity_available > 0.
+4. Exclude expired stock.
+5. Sort by FEFO or FIFO key.
+6. For each batch:
+   allocate = min(remaining_required, available)
+   append allocation
+   remaining_required -= allocate
+7. If remaining_required > 0:
+   apply negative-stock/offline policy.
+8. Persist allocations and movements atomically.
+The actual implementation must use parameterized/generated SQL and row locks where required.
+36. Batch Allocation Record
+37. Inventory Transaction Boundaries
+38. Reconciliation
+Rebuild/check stock balances from movements.
+Compare invoice batch allocations to sale movements.
+Compare GRN quantities to purchase receipt movements.
+Compare returns to return stock movements.
+Compare reservations to balance reserved quantity.
+Detect negative stock.
+Detect orphan movements without valid source.
+Detect batch stock not matching balance.
+Detect UOM conversion inconsistencies.
+Produce exceptions; never silently repair financial history.
+39. Reconciliation Queries / Invariants
+SUM(stock movements for dimension) = authoritative on-hand balance, subject to defined opening balance rules.
+SUM(batch allocations for a sale line) = sale line quantity in base UOM.
+Allocated quantity cannot exceed available quantity at commit.
+Reserved quantity cannot exceed on-hand quantity.
+Expired/blocked stock cannot be allocated under normal policy.
+Return quantity cannot exceed returnable original quantity.
+Every adjustment has a reason.
+Every manual override has actor + reason.
+40. Opening Stock
+Opening stock is imported as controlled inventory movements, not arbitrary balance edits.
+Each opening quantity should identify product/UOM/location and batch where required.
+Opening cost basis is captured if costing is enabled.
+Opening stock import is idempotent and auditable.
+After go-live, opening movements are immutable.
+41. Inventory Import
+Validate product IDs/barcodes/UOMs before import.
+Validate quantities and precision.
+Validate duplicate rows.
+Validate batch/expiry requirements.
+Preview before commit.
+Use an import job for large datasets.
+Commit import in controlled transactions.
+Provide error row references.
+42. Inventory Export
+Export stock by product/location/batch.
+Include quantity, UOM, expiry and quality status.
+Large exports run asynchronously.
+Export is tenant-scoped.
+Generated files are stored through controlled object storage.
+Record exporter, parameters and timestamp.
+43. Inventory API Responsibilities
+GET stock/balances: current projection.
+GET batches: traceability and status.
+POST receipts: receiving workflow.
+POST adjustments: authorized correction.
+POST counts: physical count lifecycle.
+POST transfers: location movement.
+GET movements: immutable history.
+POST reservations/release: if enabled.
+POST/GET allocation details: traceability.
+Exact routes remain governed by API Specification v1.0.
+44. Offline Inventory Interaction
+Client uses cached stock projection.
+Offline sale consumes local provisional stock according to policy.
+Local allocation should preserve batch identity when available.
+On server submission, authoritative stock is checked.
+Accepted operation reconciles local stock.
+Conflict never silently rewrites the local financial transaction.
+Full resync rebuilds server-derived stock while preserving pending envelopes.
+45. Inventory Sync Conflict Examples
+46. Inventory Audit
+Record actor/device/request ID.
+Record source document.
+Record before/after balance where practical.
+Record batch/location.
+Record reason/approval.
+Record override threshold decisions.
+Keep immutable movement history.
+Support trace from customer invoice → batch → GRN → supplier where data exists.
+47. Traceability Chain
+A batch should be traceable through: supplier → PO → GRN → received batch → stock movements → invoice/batch allocation → return/adjustment/write-off. This chain enables recall, expiry investigation, margin analysis and dispute resolution.
+48. Recall / Batch Hold
+Authorized user can place a batch on HOLD.
+Held quantity remains physically present but unavailable for normal sale.
+POS must exclude held batch from allocation.
+Existing reservations using a held batch must be evaluated.
+Release requires authorized action and reason.
+Recall status is auditable.
+49. Expiry Write-Off
+Identify expired batch.
+Confirm physical quantity.
+Require write-off permission.
+Record reason and optional attachment.
+Create EXPIRY_WRITE_OFF movement.
+Post accounting/cost adjustment where applicable.
+Mark batch depleted/archived when quantity reaches zero.
+50. Inventory Notifications
+Expiry warning.
+Expired stock.
+Low stock/reorder threshold.
+Negative-stock attempt.
+Large count variance.
+High tare anomaly.
+Batch quality HOLD.
+Unresolved sync inventory conflict.
+Notifications are deduplicated and configuration-driven.
+51. Reorder Threshold
+Product can define minimum/reorder point.
+Compare available stock to threshold.
+Optionally account for pending purchase orders.
+Create reorder recommendation or PO draft.
+Do not auto-purchase without explicit business policy.
+Thresholds can be UOM-aware.
+52. Inventory Valuation
+Choose costing method explicitly.
+Track cost at receipt.
+Preserve historical cost snapshots.
+Returns should use documented cost reversal policy.
+Adjustments affect valuation according to reason and accounting rules.
+Reports reconcile inventory valuation to accounting where integrated.
+53. Concurrency Scenarios
+54. Deadlock Avoidance
+Lock rows in stable deterministic order.
+Keep transaction scope narrow.
+Avoid network calls inside transaction.
+Retry known transient serialization/deadlock errors only for safe/idempotent operations.
+Monitor database deadlock metrics.
+55. Database Indexing
+Index tenant_id + product_id + location_id.
+Index tenant_id + product_id + batch status/expiry.
+Index batch_number where searchable.
+Index stock movements by tenant/product/location/batch/time.
+Index invoice batch allocations by batch/product.
+Use unique composite constraints for balance dimensions.
+Index pending/reservation statuses for workers.
+56. Partitioning Considerations
+Large stock_movements and audit/history tables may be partitioned by time and/or tenant strategy.
+Do not partition prematurely without measured data volume.
+Partitioning must preserve query/index behavior.
+Retention/archive policies must understand partitions.
+Financial history must remain recoverable and auditable.
+57. API Validation Rules
+Product exists and is active.
+UOM belongs to product or valid conversion exists.
+Quantity > 0.
+Precision does not exceed configured scale.
+Batch required when product policy says so.
+Location active.
+Quantity available according to policy.
+Dates valid and consistent.
+Expiry cannot precede manufacture date where those fields are both present.
+Override permission present when required.
+58. Error Catalogue
+59. Reporting Views
+Current stock by product/location.
+Current stock by batch.
+Expiry dashboard.
+Slow-moving stock.
+Fast-moving stock.
+Stock movement history.
+Purchase-to-stock reconciliation.
+Sales-to-stock reconciliation.
+Inventory valuation.
+Shrinkage/adjustment report.
+Batch traceability report.
+Low-stock/reorder report.
+60. Performance Targets
+Targets are engineering baselines and require production-like load testing.
+61. Security Controls
+Tenant RLS on every tenant-owned inventory table.
+Inventory mutation requires permission.
+Adjustments and overrides are audited.
+Direct balance edits are prohibited.
+Database role cannot bypass RLS.
+All API inputs validated.
+Secrets never appear in inventory logs.
+File attachments use controlled object storage access.
+62. Observability
+Inventory transaction success/failure rate.
+Stock allocation latency.
+Deadlocks/serialization retries.
+Negative-stock rejection count.
+Count variance volume.
+Expiry warning volume.
+Tare anomaly count.
+Sync inventory conflicts.
+Reconciliation exception count.
+Worker/job failures.
+63. Testing Strategy
+64. Property-Based Invariants
+Converting quantity to base and back within configured precision preserves expected quantity.
+Allocation sum never exceeds requested quantity.
+Allocation sum never exceeds available stock.
+After sale, on-hand decreases exactly by allocated base quantity.
+After return, on-hand increases exactly by accepted returned quantity.
+Transfer total across all locations is net zero.
+Opening balance + movements equals current balance.
+Duplicate transaction application does not change balance twice.
+65. End-to-End Example — 50 Bag GRN
+PO requests 50 bags.
+Truck arrives.
+Operator records 50 bags and actual gross/tare data.
+System calculates net weight.
+Tare validation checks configured threshold.
+Batch number and expiry are captured.
+Batch enters AVAILABLE or HOLD based on quality policy.
+Stock receipt movement is posted.
+Supplier payable is posted.
+Stock balance increases.
+GRN becomes immutable.
+Outbox/sync event is created.
+66. End-to-End Example — 12.5 kg Sale
+POS identifies product and eligible batch.
+Scale supplies 12.500 kg.
+Quantity is converted to base UOM.
+FEFO/FIFO selects oldest eligible stock.
+Batch allocation records 12.500 kg.
+Sale movement decreases stock by 12.500 kg.
+Invoice and financial postings commit atomically.
+Receipt prints independently.
+Server returns authoritative result if originating offline.
+67. End-to-End Example — Return
+Customer presents invoice.
+System checks original sold quantity and prior returns.
+Return quantity is validated.
+Original batch is selected where possible.
+Returned quantity is placed into saleable or HOLD state according to policy.
+Stock movement increases physical quantity.
+Refund/Khata reversal is linked.
+Transaction is committed atomically.
+68. End-to-End Example — Count Variance
+Expected stock is 420.000 kg.
+Physical count is 414.500 kg.
+Variance is -5.500 kg.
+System requests reason.
+Configured approval threshold is evaluated.
+Authorized adjustment-out movement is created.
+Balance becomes 414.500 kg.
+Accounting/costing impact is posted if required.
+Audit record references the count session.
+69. End-to-End Example — FEFO
+Eligible batches: A expires first with 10 kg; B expires later with 30 kg. A sale requires 25 kg. Engine allocates 10 kg from A and 15 kg from B, preserving traceability and remaining quantities.
+70. End-to-End Example — Concurrent Sale
+Two POS devices request 30 kg from a batch containing 40 kg. The database locks the relevant balance/batch rows. The first transaction allocates 30 kg. The second sees 10 kg available and either allocates 10 kg plus another eligible batch or rejects/conflicts according to policy. It cannot create 30 kg of duplicate allocation.
+71. Operational Controls
+Daily expiry review.
+Daily negative-stock exception review.
+Daily payment/inventory reconciliation where applicable.
+Periodic physical stock counts.
+Periodic batch traceability checks.
+Periodic slow-moving inventory review.
+Review of manual adjustments and overrides.
+Review of large tare anomalies.
+72. Inventory Acceptance Criteria
+Every stock mutation produces an auditable movement.
+Stock balance matches movement-derived quantity.
+FIFO/FEFO allocation is deterministic.
+Expired/held/rejected batches are excluded from ordinary sales.
+Loose quantity supports 3-decimal precision.
+UOM conversion is product-aware and versioned when necessary.
+GRN tare validation is configurable and audited.
+Concurrent sales cannot over-allocate authoritative stock.
+Returns and contra receipts correctly affect inventory.
+Stock counts generate controlled adjustments.
+Offline inventory transactions reconcile without duplicate effects.
+RLS prevents cross-tenant inventory access.
+Inventory reconciliation detects inconsistencies.
+73. Implementation Checklist
+Implement UOM and conversion service.
+Implement product inventory policy resolver.
+Implement batch lifecycle.
+Implement stock movement repository.
+Implement stock balance projection.
+Implement FIFO/FEFO allocator.
+Implement locking/concurrency strategy.
+Implement GRN receiving and tare validation.
+Implement loose/fraction stock.
+Implement reservations if enabled.
+Implement transfers.
+Implement stock counts and adjustments.
+Implement expiry/quality jobs.
+Implement costing integration.
+Implement reconciliation jobs.
+Implement inventory reports.
+Implement offline synchronization hooks.
+Implement comprehensive tests.
+74. Traceability to Previous Documents
+75. Final Inventory Architecture
+The inventory engine is ledger-driven, batch-aware, UOM-safe and concurrency-safe. PostgreSQL remains authoritative, while Flutter maintains an encrypted local projection for supported offline operations. FIFO/FEFO allocation is deterministic, all quantities use decimal precision, GRN tare validation is configurable, loose stock is represented without double counting, and all corrections occur through immutable movements. Reconciliation and audit are designed to detect rather than hide discrepancies.
+This document is the implementation baseline for Document 07 — Complete Accounting & Khata Engine Specification.
+Appendix A — Non-Negotiable Inventory Rules
+Never directly edit stock balance as a business correction.
+Never use float for inventory quantity.
+Never allocate expired/held stock under normal policy.
+Never over-allocate due to concurrent requests.
+Never silently change historical UOM conversion.
+Never hardcode universal bag weight.
+Never approve excessive tare without an auditable reason.
+Never delete posted movement history.
+Never resolve inventory sync conflict using last-write-wins.
+Never allow a client to bypass backend stock authority.
+End of Document 06.
+Concept | Definition
+Product | Canonical sellable/stocked item
+UOM | Unit of measure such as kg, bag, tonne
+Product UOM | Allowed UOM for a product and its conversion
+Batch | Traceable inventory lot with optional manufacture/expiry/quality metadata
+Location | Physical stock location/store/warehouse
+Stock movement | Immutable quantity change
+Stock balance | Current projected quantity for fast reads
+Reservation | Quantity temporarily committed to a transaction
+Available quantity | On-hand minus applicable reservations
+Loose stock | Unsealed/fractional quantity represented in a defined UOM
+Stock count | Physical verification event
+Adjustment | Authorized correction generated from a documented reason
+Cost layer | Quantity and cost basis used for margin/accounting
+Value | Recommended DB precision
+Currency | NUMERIC(12,2) minimum
+Weight/quantity | NUMERIC(12,3)
+UOM factor | NUMERIC(12,6)
+Tax rate | NUMERIC(7,4)
+Example | Meaning
+1 tonne = 1000 kg | Mass conversion
+1 bag = configured kg | Product-specific package conversion
+50 kg bag | One package with configured nominal quantity
+12.500 kg loose | Fractional sale quantity
+1 tonne = 20 × 50 kg bags | Derived package relation where configured
+Field | Purpose
+batch_id | Unique batch identity
+product_id | Product
+batch_number | Supplier/manufacturer lot
+manufacture_date | Traceability
+expiry_date | Expiry
+received_date | Inventory age
+supplier_id | Source supplier
+quality_status | Available/hold/rejected/expired etc.
+location_id | Physical location
+cost_basis | Cost metadata where applicable
+State | Default interpretation
+Safe | More than configured warning horizon
+Expiry warning | Within configurable warning days, e.g. 15
+Expired | Current business date/time has crossed expiry according to policy
+Blocked | Not eligible for ordinary sale
+Policy | Use
+FIFO | General stock
+FEFO | Expiry-sensitive feed/supplements
+Manual batch | Traceability-sensitive operations
+FIFO then FEFO | Only if explicitly defined; avoid ambiguous mixed rules
+No batch | Products without batch tracking
+Movement | Effect
+PURCHASE_RECEIPT | Increase
+SALE | Decrease
+SALE_RETURN | Increase
+CONTRA_RECEIPT | Increase
+STOCK_ADJUSTMENT_IN | Increase
+STOCK_ADJUSTMENT_OUT | Decrease
+TRANSFER_OUT | Decrease
+TRANSFER_IN | Increase
+COUNT_VARIANCE_IN | Increase
+COUNT_VARIANCE_OUT | Decrease
+DAMAGE | Decrease
+EXPIRY_WRITE_OFF | Decrease
+REPACK/SPLIT | Net-zero across linked movements
+Policy | Behavior
+Prevent | Reject sale when authoritative available stock is insufficient
+Controlled offline | Allow only within configured offline buffer and reconcile
+Authorized exception | Allow with explicit permission and audit
+Always negative | Not recommended
+Reason | Treatment
+Damage | Decrease with reason and optional attachment
+Expiry | Decrease only after authorized write-off process
+Shrinkage | Count-based adjustment with investigation metadata
+Spillage | Decrease with incident reason
+Quality rejection | Move/block stock according to process
+Theft suspicion | Adjustment requires elevated approval and audit
+Method | Use
+Weighted average | Simple retail inventory option
+FIFO cost layers | Useful when batch-level cost is important
+Standard cost | Only if business maintains standards
+Specific batch cost | Traceability-sensitive goods
+Field | Purpose
+invoice/transaction ID | Source
+product_id | Product
+batch_id | Allocated batch
+location_id | Location
+quantity_base | Canonical quantity
+quantity_transaction | Original transaction quantity
+uom_id | Transaction UOM
+cost_snapshot | Cost at allocation if required
+allocation_policy | FIFO/FEFO/manual
+created_at | Traceability
+Operation | Atomic scope
+Sale | Invoice + lines + batch allocations + stock movements + payment/ledger/accounting where applicable
+GRN | GRN + batch + stock receipt + supplier payable
+Return | Return + stock reversal + refund/credit linkage
+Contra | Contra + stock receipt + customer credit
+Adjustment | Adjustment + stock movement
+Transfer | OUT + IN movements
+Count closure | Count + variance adjustments
+Reservation | Reservation + balance update where applicable
+Conflict | Action
+Batch depleted server-side | Reject/conflict according to offline policy
+Batch expired since cache | Server applies expiry rule
+Different batch allocation | Server allocation wins if policy permits; client reconciles
+Product UOM changed | Use versioned conversion; do not reinterpret old sale
+Location disabled | Reject or route to authorized transfer
+Stock count changed balance | Use authoritative count/movement sequence
+Scenario | Protection
+Two POS sales same batch | Row lock + atomic allocation
+Sale during stock count | Snapshot/reconciliation policy
+Two GRNs same batch | Unique/controlled batch resolution
+Transfer vs sale | Lock relevant balance
+Return vs sale | Atomic balance updates
+Reservation vs sale | Reservation/available quantity lock
+Adjustment vs sale | Transactional lock + permission
+Code | Meaning
+INVENTORY_INSUFFICIENT | Insufficient available stock
+BATCH_NOT_SELLABLE | Batch blocked/expired/held
+INVALID_UOM_CONVERSION | No valid product conversion
+TARE_EXCESSIVE | Tare exceeds configured threshold
+NEGATIVE_NET_WEIGHT | Net weight below zero
+STOCK_LOCK_CONFLICT | Concurrent state changed
+COUNT_ALREADY_CLOSED | Count immutable
+ADJUSTMENT_NOT_AUTHORIZED | Permission missing
+BATCH_REQUIRED | Batch information required
+LOCATION_INACTIVE | Location unavailable
+RESERVATION_EXCEEDED | Requested reservation exceeds availability
+Operation | Baseline target
+Stock lookup | p95 < 250 ms normal workload
+Product/batch allocation | p95 < 500 ms excluding heavy contention
+POS inventory commit | Within overall POS transaction target
+Movement history page | p95 < 500 ms paginated
+Expiry job | Complete within scheduled operational window
+Reconciliation | Async for large datasets
+Test | Required coverage
+Unit | UOM, FIFO, FEFO, tare, expiry, quantity validation
+Repository integration | Locks, constraints, RLS, movement/balance consistency
+Application integration | Sale/GRN/return/transfer/count transactions
+Concurrency | Two+ sales competing for same batch
+Property-based | Conversion and allocation invariants
+Offline | Provisional stock and sync conflict
+Failure | Crash/timeout/retry
+Migration | Opening stock and schema upgrades
+Performance | Large movement/batch datasets
+Reconciliation | Corruption/mismatch detection
+Document | Inventory dependency
+PRD v1.2 | Procurement, GRN, batch, FIFO, expiry, loose stock, POS, returns, contra
+DB & ERD v1.0 | batches, stock_movements, stock_balances, counts, adjustments, allocations
+API v1.0 | Inventory/GRN/sales/returns/sync routes
+Go Architecture v1.0 | Transaction manager, locking, decimal arithmetic, RLS
+Flutter Architecture v1.0 | Scale/scanner/POS and local inventory projection
+Offline Sync v1.0 | Provisional stock, transaction envelopes and conflict policy

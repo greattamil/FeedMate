@@ -1,0 +1,12 @@
+DROP TABLE IF EXISTS system_jobs;
+DROP TABLE IF EXISTS integration_events;
+DROP TABLE IF EXISTS attachments;
+DROP TABLE IF EXISTS audit_logs;
+DROP TABLE IF EXISTS archive_restore_tests;
+DROP TABLE IF EXISTS archive_objects;
+DROP TABLE IF EXISTS archive_manifests;
+DROP TABLE IF EXISTS archive_jobs;
+DROP TABLE IF EXISTS export_jobs;
+DROP TABLE IF EXISTS compliance_documents;
+DROP TABLE IF EXISTS compliance_responses;
+DROP TABLE IF EXISTS compliance_requests;

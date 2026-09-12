@@ -1,0 +1,694 @@
+Andipatti Animal Feed System
+Document 15 — Complete UI/UX Architecture & Design Specification v1.0
+Implementation-ready Flutter UI/UX specification for a fast, Tamil-friendly, offline-first animal-feed retail/wholesale POS and operations application. Covers operator workflows, information architecture, screens, components, states, accessibility, hardware interaction, responsive behavior, localization, security UX and acceptance criteria. No sprint planning.
+1. Purpose, Scope, Objectives & Non-Goals
+1.1 Purpose
+Define the complete user experience and interface contract so Flutter implementation remains consistent across POS, procurement, inventory, customers/Khata, payments, GST/compliance, reporting, hardware, synchronization and administration.
+1.2 Objectives
+Optimize counter billing for speed, clarity and minimum operator taps.
+Support Tamil Unicode, transliteration, phonetic and colloquial product search.
+Make offline/online state visible without alarming operators unnecessarily.
+Present financial, inventory and payment states unambiguously.
+Support touch, barcode, weighing scale and thermal-printer workflows.
+Provide role-appropriate navigation and prevent accidental privileged actions.
+Remain usable on common Android POS/tablet/phone form factors.
+Provide accessible, localized and resilient error/recovery experiences.
+1.3 Non-Goals
+This document does not define Flutter source code line-by-line; it defines the UI/UX contract.
+Visual branding colors, final logo assets and exact typography may be supplied by the product brand guide.
+Server-side business rules remain authoritative as specified in Documents 01–14.
+2. UX Principles
+Counter-first: common sale actions are reachable with minimal navigation.
+Tamil-first capability: users may search and operate in Tamil or English.
+One clear primary action per screen.
+Never hide financial state behind decorative UI.
+Prevent errors before submission; explain errors after rejection.
+Use progressive disclosure for advanced configuration.
+Offline status is persistent and understandable.
+Never imply payment success without authoritative confirmation.
+Never imply stock availability without current/approved stock state.
+Hardware failures degrade gracefully without corrupting transactions.
+Destructive actions require clear confirmation and authorization.
+Every privileged action shows who approved it when applicable.
+3. User Personas & UX Needs
+4. Information Architecture
+Primary navigation should be role-aware while preserving predictable locations.
+5. Global Application Shell
+Top app bar: page title, contextual search where appropriate, connectivity/sync indicator and profile/menu.
+Bottom navigation or rail: role-aware core destinations.
+Persistent offline/sync status indicator.
+Global notification/alert center for expiry, payment, sync and operational warnings.
+Contextual action area for screen-specific primary actions.
+Safe-area support and keyboard-aware layout.
+No critical information should be hidden behind hover-only behavior.
+6. Dashboard
+6.1 Owner/Manager Dashboard
+Today sales and transaction count.
+Cash/UPI/Khata summary.
+Outstanding Khata and overdue collections.
+Low-stock/reorder alerts.
+Expiry/quality alerts.
+Pending payments/reconciliation.
+EOD status.
+Sync/device/hardware health.
+Compliance exceptions.
+Quick actions: New Sale, GRN, Collect Khata, Stock Count, EOD.
+6.2 Dashboard Rules
+Dashboard figures are read-only projections from authoritative or clearly labeled local state. Cards must indicate when data is pending synchronization or temporarily unavailable.
+7. POS — Primary Screen
+7.1 Layout
+7.2 POS Interaction Rules
+Search opens with keyboard ready when practical.
+Barcode scanner input should add a product without requiring manual focus changes.
+Selecting a product uses the configured price tier and current effective price.
+Loose items expose a prominent weight control.
+Scale status is visible when a scale is required.
+Quantity/weight edits show UOM and precision clearly.
+Totals update immediately using server-compatible decimal logic.
+Finalize is visually distinct and requires a valid payment/Khata path.
+After finalization, invoice state is immutable from the normal edit UI.
+8. Product Search UX
+Search supports Tamil Unicode, English, transliteration, phonetic variants and colloquial aliases.
+Show matched alias/highlighted text where useful.
+Results display product name, pack/UOM, price, availability and relevant batch status.
+Expired/held/rejected stock must not appear as saleable availability.
+Fuzzy matches must be visually distinguishable from exact matches.
+If multiple products are similar, show useful differentiators such as pack size/brand.
+Barcode scan should prioritize exact barcode match.
+Empty state provides spelling/search suggestions rather than a dead end.
+9. Product Selection & Line Editor
+10. Customer Selection
+Search by name, phone and supported identifiers.
+Show pricing tier and credit status before checkout.
+Display available credit/limit in Khata flows.
+Avoid exposing unrelated customer information at the counter.
+Allow quick creation only for fields required by policy.
+Warn when customer is blocked/inactive or credit limit is exceeded.
+11. Pricing Tier UX
+The percentages above are defaults from the business baseline; actual production values must remain configuration-driven and effective-dated.
+Show price source/tier in the line or customer summary when useful.
+Do not allow a client to alter the authoritative tier.
+Manual price/discount override requires permission and, where configured, approval.
+12. Loose Feed & Weighing UX
+Display live scale reading with unit.
+Show Stable / Unstable / Disconnected / Error state.
+Do not accept an unstable reading as final where stable-weight policy applies.
+Show tare state when applicable.
+Allow manual weight only when configured and authorized.
+Clearly label measured weight versus manually entered weight.
+Prevent negative, impossible or out-of-range values.
+Show converted sale quantity using the configured product UOM.
+13. Payment UX
+13.1 Payment Selection
+Cash, UPI, bank and Khata are visually distinct.
+Split tender exposes remaining balance after each tender.
+Cash entry shows change due.
+Khata shows credit availability before submission.
+UPI shows a dynamic QR/payment state rather than a static 'paid' assumption.
+13.2 UPI State Machine UX
+13.3 Payment Safety
+The UI must never allow an operator to manually switch an externally verified UPI payment to Paid. Manual intervention, if supported, must be a controlled server-side reconciliation/approval workflow.
+14. Khata UX
+Customer profile shows current balance, credit limit, available credit and recent activity.
+Sale on credit clearly states amount added to receivable.
+Collections show amount, method and allocation.
+Overdue items are visually identifiable without relying only on color.
+Owner/admin override displays approval requirement and reason.
+Collection reminders show configurable cycle/grace status.
+Statements support date filtering and export according to permission.
+15. Contra / Buy-Back UX
+Start with customer and material/product.
+Capture quantity/weight and valuation.
+Show resulting customer ledger credit before confirmation.
+Show inventory receipt effect.
+Require authorized confirmation where valuation or policy demands it.
+Display audit/approval information after completion.
+16. Invoice & Receipt UX
+Invoice header: business identity, invoice number, date/time, customer/tax identity as applicable.
+Lines show product/UOM/quantity/rate/discount/tax.
+Tax breakup clearly shows CGST/SGST or IGST where applicable.
+Payment/tender summary is explicit.
+Receipt actions: Print, Reprint, Share via WhatsApp where available.
+Printer failure never changes finalized invoice state.
+If printing is uncertain, label the print status rather than claiming failure/success without evidence.
+17. Receipt Printing & WhatsApp Fallback
+After finalization, the success screen should prioritize a clear receipt outcome. If the printer fails, show a non-blocking warning and offer one-tap WhatsApp/share fallback when configured. Sending the receipt is asynchronous and must not alter the invoice's financial state.
+Reprint requires appropriate permission.
+Do not generate a new invoice number for reprint.
+Receipt templates support Tamil text and thermal-paper constraints.
+WhatsApp delivery status is separate from invoice status.
+18. Procurement & PO UX
+Supplier search/selection.
+PO creation with product/UOM/quantity/expected price/date.
+Reorder suggestions based on configured thresholds.
+PO status: Draft, Submitted, Partially Received, Received, Cancelled.
+Show expected versus received quantities.
+Do not allow unauthorized price/master-data changes through PO screens.
+19. GRN UX
+Tare validation must make gross, tare and net values easy to compare. If configured tare thresholds are exceeded, the UI must require correction or authorized override.
+20. Inventory UX
+Stock overview by product, UOM, location and saleable status.
+Separate sealed bags and loose quantity where the business model requires it.
+Batch drill-down shows received date, expiry, quantity, cost and status.
+Expiry screen supports configurable warning windows.
+Stock movement history is read-oriented and traceable.
+Transfers show source, destination, quantity and status.
+Stock counts provide expected, counted, variance and approval.
+Adjustments show reason and authorization.
+21. Batch & Expiry UX
+Color may supplement but must not be the sole indication of batch state.
+22. Supplier & Payables UX
+Supplier profile, contact and tax identity as applicable.
+PO/GRN history.
+Outstanding payable balance.
+Supplier payment/adjustment history.
+Statement filtering by date.
+No direct editing of posted accounting records.
+23. Returns & Refunds UX
+Start from original invoice whenever possible.
+Show refundable quantities/amounts.
+Prevent return quantity above eligible quantity.
+Show stock disposition options where authorized.
+Show refund method and amount.
+Require approval for configured high-risk refunds.
+Display resulting credit note/refund reference.
+Repeated submission is safely handled as idempotent.
+24. Cash Session & EOD UX
+24.1 Cash Session
+Opening cash entry.
+Cash sales and cash movements.
+Payouts/expenses where configured.
+Current expected cash.
+Session open/closed status.
+Operator identity.
+24.2 EOD
+Expected cash calculated from authoritative movements.
+Physical count input.
+Variance displayed prominently with sign and amount.
+Reason/approval required according to policy.
+UPI/bank/Khata reconciliation status.
+Pending transactions and exceptions.
+Finalization confirmation and audit reference.
+25. GST & Compliance UX
+Tax classification is displayed but not casually editable from POS.
+Invoice tax breakdown is transparent.
+GSTIN validation status is clear.
+E-invoice state: Not Required/Required/Pending/Generated/Failed/Unknown according to actual backend state.
+E-way state similarly reflects actual provider state.
+Exports show period, filters, generation status and download permissions.
+Compliance failures provide actionable safe messages and reference IDs where useful.
+26. Reports & Dashboard UX
+Large reports are asynchronous with visible progress/status.
+Exports require permission and are audited.
+Charts always have a tabular/detail alternative.
+Numbers show currency/UOM and date context.
+27. Settings & Master Data UX
+Tenant/shop profile.
+Financial year/document series.
+Users/roles/permissions.
+Products/categories/brands/barcodes/aliases.
+UOM/conversions.
+Tax profiles.
+Price lists/customer tiers.
+Suppliers/customers.
+Hardware devices.
+Payment/provider configuration.
+Notification templates.
+Retention/archive configuration.
+Feature flags and effective dates.
+Effective-dated master data should show current, future and historical versions without allowing unsafe editing of records referenced by finalized transactions.
+28. User & Role Management UX
+User list with active/inactive state.
+Role assignment with permission summary.
+Device/session association.
+Last activity/security status where authorized.
+Role changes require appropriate privilege and audit.
+Avoid presenting permission names without human-readable descriptions.
+29. Device & Hardware Management UX
+Registered devices list.
+Device name, platform, app version and last seen.
+Paired scanner/scale/printer status.
+Pair/reconnect/test actions.
+Revoke device action with confirmation and reason.
+Hardware diagnostics must not expose secrets.
+30. Offline & Sync UX
+30.1 Global Status
+30.2 Operator Rules
+Do not repeatedly interrupt POS with generic connectivity dialogs.
+Show pending transaction count.
+Explain when a result is provisional versus authoritative.
+Never show a successful financial state solely because a local operation succeeded.
+Provide a Sync Center for detailed troubleshooting.
+31. Sync Center
+Last successful sync time.
+Pending uploads/downloads.
+Failed transactions with safe reason.
+Conflict items and required action.
+Device/server version compatibility.
+Retry action.
+Full resync option only where policy permits.
+Support diagnostics export without exposing secrets.
+32. Error & Empty States
+33. Confirmation & Destructive Action Patterns
+Use confirmation for void/cancel/refund/stock adjustment/device revoke/master-data changes.
+Confirmation includes object, amount/quantity and consequence.
+Privileged confirmation may require re-authentication/Owner PIN.
+Do not use generic 'Are you sure?' without context.
+After success, show authoritative reference.
+34. Notifications & Alerts
+Expiry/quality alert.
+Low stock/reorder alert.
+Payment pending/reconciliation alert.
+Khata collection reminder.
+EOD variance alert.
+Sync conflict/error.
+Device/security alert.
+Compliance exception.
+Alerts must be prioritized and deduplicated. Critical security/financial alerts should not be visually indistinguishable from routine informational notices.
+35. Aavin Cycle / Collection Reminder UX
+Cycle dates are configurable rather than hardcoded.
+Show next cycle date, reminder lead time and grace period.
+Pause dates/exceptions are visible to authorized users.
+Avoid duplicate reminders.
+Show paid/collected/overdue state from authoritative ledger data.
+36. Search, Filters & Lists
+Search fields should debounce input appropriately.
+Filters persist within a screen where helpful.
+Sort options are explicit.
+Long lists use pagination/infinite scrolling with loading states.
+List rows expose key status without requiring detail navigation.
+Use skeleton/loading states for network reads.
+No unbounded client-side loading of large datasets.
+37. Forms & Data Entry
+Use appropriate keyboard type for numeric, phone, currency and weight inputs.
+Format display values without changing stored precision.
+Show required fields clearly.
+Validate before network submission and again server-side.
+Preserve entered data after recoverable failures.
+Prevent accidental double-submit with in-flight state.
+Use autocomplete for master-data references.
+38. Keyboard, Scanner & POS Input
+Barcode scanner input must work without on-screen keyboard interference where configured.
+External keyboard/physical key navigation should be supported on POS/tablet where practical.
+Enter/confirm should map predictably to primary actions.
+Escape/back must not silently discard an active transaction.
+Focus order follows the transaction workflow.
+39. Voice & Tamil Search UX
+If voice input is enabled, show microphone/listening/error states.
+Treat speech recognition as search input, never as financial authorization.
+Normalize Tamil/English mixed phrases.
+Provide visible text confirmation before adding a product when confidence is low.
+Never execute privileged actions from voice alone.
+40. Localization
+Tamil and English must be first-class supported locales.
+All user-visible strings are externalized; no hardcoded UI text.
+Date/time/currency formatting follows locale and business configuration.
+Tamil numerals are not required unless explicitly selected; financial values should remain unambiguous.
+Product/customer names preserve original Unicode data.
+Translation changes do not alter stored business values.
+41. Accessibility
+Minimum touch target follows current platform guidance.
+Support dynamic text scaling within practical POS limits.
+Text and controls have semantic labels.
+Color is not the sole state indicator.
+Error states are accessible to screen readers.
+Focus order is predictable.
+Tamil text does not clip at supported font sizes.
+Animations respect reduced-motion settings where supported.
+42. Visual Design System
+Final colors, logo and brand assets should be injected from the approved visual identity. Functional status must remain understandable in monochrome/high-contrast conditions.
+43. Design Tokens
+Spacing scale.
+Typography sizes/weights.
+Corner radius.
+Elevation/shadow levels.
+Icon sizes.
+Touch target sizes.
+Status semantic tokens: success, warning, error, info, neutral.
+Light/dark themes if supported.
+Tamil-capable typography fallback.
+44. Responsive Layout
+Do not simply scale phone screens; adapt information density and interaction targets to available space.
+45. Dark Mode
+If supported, use semantic tokens rather than hardcoded colors.
+Financial totals remain high contrast.
+Thermal receipt preview remains paper-like for print accuracy.
+Charts remain distinguishable without color-only encoding.
+Test Tamil glyph rendering in both themes.
+46. Security UX
+Sensitive screens can require re-authentication based on policy.
+Mask secrets and sensitive customer information where appropriate.
+Owner PIN entry should obscure digits.
+Show session/device security status to authorized administrators.
+Warn before device revocation and security setting changes.
+Do not expose backend stack traces or database details.
+Clipboard/screenshot protections may be applied to selected sensitive screens.
+47. Privacy UX
+Collect only necessary customer/supplier data.
+Explain why optional data is requested where appropriate.
+Mask phone numbers in lists where full display is unnecessary.
+Export/share actions require permission.
+Receipt sharing must target the selected customer/transaction only.
+Do not display unrelated customer data on public/customer-facing screens.
+48. Customer-Facing Display
+Show current item, quantity/weight, price and running total.
+Show discount/tax where configured for customer clarity.
+Show payment QR only for the active payment intent.
+Do not display internal cost, margin, supplier data or privileged notes.
+Clear the display after transaction completion.
+49. Printer UX
+Show printer connected/disconnected state.
+Provide Test Print for authorized users.
+After finalization, printing is an output operation.
+For uncertain output, offer reprint without creating a second invoice.
+Tamil receipt preview should match expected thermal rendering as closely as practical.
+50. Scale UX
+Display connection status and protocol profile.
+Show stable reading state.
+Tare action is explicit and permission-controlled where appropriate.
+Manual fallback is visibly labeled.
+Error states explain whether operator should retry, reconnect or use authorized manual entry.
+51. Performance UX
+POS search should feel immediate using local indexes/cache where permitted.
+Show progress for operations that cannot complete instantly.
+Avoid blocking the whole screen for background sync.
+Use pagination for large histories.
+Cache read-only master data according to freshness policy.
+Preserve scroll position and form state when safe.
+52. Loading & Offline Skeletons
+Use skeletons for data-heavy screens.
+Use explicit progress for long-running exports.
+Do not show infinite spinners without timeout/recovery.
+When offline, switch to local data state rather than repeatedly retrying visible reads.
+Show stale-data indicators when freshness matters.
+53. Navigation & State Preservation
+Back navigation must preserve active POS draft unless explicitly abandoned.
+Switching tabs must not silently lose entered form data.
+Deep links open only allowed screens and must revalidate authorization.
+After login/session renewal, return the user to the safe prior context when possible.
+After device revocation, sensitive screens are cleared.
+54. App Lifecycle & Crash Recovery
+Persist safe draft POS state.
+Recover incomplete local transactions after crash.
+Never resume a privileged screen with stale authorization without revalidation.
+If local DB/key cannot be opened, provide a controlled recovery path.
+Do not expose crash logs containing PII/secrets.
+55. Role-Based Navigation
+56. Critical User Flows
+Login → device validation → dashboard.
+POS → search/scan → customer → cart → scale → price/tax → payment → finalization → receipt.
+POS offline → local transaction → pending sync → server acceptance → authoritative status.
+UPI → dynamic QR → webhook → Paid → finalization/receipt.
+Khata sale → credit validation → finalization → ledger.
+Collection → customer → amount → payment → allocation → receipt.
+PO → GRN → tare → batch → stock/payable.
+Return → original invoice → quantity → refund/credit note → stock/accounting.
+Stock count → expected → physical → variance → approval → adjustment.
+EOD → expected cash → physical count → variance → reconciliation → close.
+Device management → revoke → confirm → server invalidation.
+57. Critical State Model UX
+58. UX for Financial Integrity
+Use exact decimal display rules defined by business configuration.
+Show grand total prominently before finalization.
+Make tender remaining/due amount obvious.
+Show confirmation of final amount immediately before irreversible finalization.
+After finalization, replace Edit with allowed post-sale actions such as Reprint/Return according to permissions.
+Do not provide UI affordances that suggest a finalized invoice can be freely edited.
+59. UX for Inventory Integrity
+Show available saleable quantity, not merely physical quantity, when relevant.
+Explain blocked/expired stock separately.
+Show batch selection only when manual selection is allowed.
+For stock adjustment, display before/after quantity and reason.
+For GRN, show gross/tare/net and resulting stock before finalization.
+60. Testing & UX Acceptance
+Every critical screen has loading, success, empty, error and offline states.
+Tamil strings fit without clipping on supported devices.
+Critical flows are usable with barcode scanner and scale.
+Payment states cannot visually imply success without authoritative state.
+Finalized invoice UI prevents unauthorized editing.
+Accessibility checks pass for critical screens.
+Golden screenshots cover receipt/POS/key financial screens.
+Offline/reconnect behavior matches Document 06.
+Security UX matches Document 12.
+Deployment builds match the tested UI version from Document 13/14.
+61. UI Test Matrix
+62. UX Analytics & Observability
+Measure screen errors and workflow abandonment without collecting unnecessary PII.
+Track POS search latency, payment pending duration and sync failures.
+Track printer/scale failure rates.
+Track repeated authorization failures.
+Use correlation IDs for support diagnostics.
+Analytics must not become a source of financial truth.
+63. Design Governance
+Central component library for buttons, inputs, tables, dialogs, badges and status indicators.
+Central localization catalog.
+Central design tokens.
+Review new screens for accessibility and offline behavior.
+No feature-specific duplicate implementation of critical payment/status components.
+Breaking UX changes require updated golden/E2E tests.
+64. UX Error Message Guidelines
+Say what happened.
+Say what the operator can do next.
+Avoid blame.
+Avoid technical stack traces.
+For financial failures, provide a safe reference ID.
+For authorization failures, do not reveal hidden permissions or tenant information.
+For provider failures, distinguish 'provider unavailable' from 'payment not confirmed'.
+65. Sample Message Patterns
+66. UX Acceptance Criteria
+Cashier can complete a normal sale without navigating through unrelated modules.
+Tamil/English product search finds configured aliases reliably.
+Barcode scan adds the correct product.
+Loose-feed sale clearly displays stable scale weight and converted quantity.
+Price tier is correctly reflected in the UI.
+Tax breakdown is understandable.
+Split tender shows remaining amount correctly.
+UPI pending/unknown never displays Paid prematurely.
+Khata credit state is visible before confirmation.
+Finalized invoice cannot be casually edited.
+Printer failure does not undo the invoice and exposes fallback receipt action.
+Offline pending state is visible and recoverable.
+RLS/authorization failures are safely represented.
+EOD clearly exposes expected cash, physical cash and variance.
+Critical screens work in Tamil and English.
+Accessibility requirements pass for critical workflows.
+Supported phone/tablet layouts remain usable.
+All critical screens have complete state handling.
+67. Non-Negotiable UI/UX Rules
+Never show payment as successful without authoritative confirmation.
+Never allow the UI to bypass server authorization.
+Never silently discard an active POS transaction.
+Never imply that a finalized invoice can be edited freely.
+Never hide offline/pending financial state.
+Never use color alone for critical status.
+Never expose secrets or unnecessary PII in the UI.
+Never allow hardware failure to roll back a finalized transaction.
+Never treat client-side displayed stock as authoritative.
+Never hardcode tax/legal thresholds or business percentages where configuration is required.
+68. Mapping to Documents 01–14
+69. UI/UX Implementation Checklist
+Design tokens defined.
+Tamil/English localization infrastructure defined.
+Navigation shell implemented.
+Role-based navigation implemented.
+POS shell implemented.
+Product search and barcode flow implemented.
+Customer/Khata flow implemented.
+Scale states implemented.
+Payment state machine UI implemented.
+Invoice/receipt flow implemented.
+Printer failure fallback implemented.
+Procurement/GRN UI implemented.
+Inventory/batch/expiry UI implemented.
+Returns/refunds UI implemented.
+EOD UI implemented.
+GST/compliance UI implemented.
+Reports/export UI implemented.
+Hardware/device management UI implemented.
+Offline/sync center implemented.
+Security/session/device UI implemented.
+Accessibility testing completed.
+Responsive layouts tested.
+Golden/E2E tests completed for critical screens.
+70. Definition of Done — UI/UX
+All screens and critical workflows in this specification have approved designs and implemented states.
+Tamil and English localization is complete for supported screens.
+Critical POS workflows are optimized for counter use.
+Offline, sync, conflict and device-revocation states are implemented.
+Payment and compliance state displays match authoritative backend states.
+Hardware failures are safely represented.
+Accessibility and responsive tests pass.
+Golden tests cover approved visual baselines.
+Critical E2E tests pass on supported devices.
+Security and privacy UX controls pass Document 12 requirements.
+UI behavior is traceable to Documents 01–14.
+No sprint planning is required or included.
+71. Final UX Architecture Summary
+The application should feel like a purpose-built retail POS rather than a generic enterprise system: the cashier reaches search, scan, weigh, price, pay and receipt in one focused flow; managers and back-office users receive deeper operational screens; Tamil is a first-class search and display language; offline state is visible but unobtrusive; payment, inventory and financial states are explicit; hardware is integrated without becoming authoritative; and every privileged or irreversible action is deliberate, authorized and auditable.
+72. Important Production Note
+Final visual identity, supported device sizes, accessibility targets, exact translations, payment-provider screens, printer paper dimensions, scale protocols and regulatory wording must be validated against the selected production devices/providers and current requirements. UI must never weaken the server-authoritative security, accounting, inventory, payment or compliance rules defined in earlier documents.
+Persona | Primary tasks | UX priority
+Owner | Dashboard, approvals, reports, security, configuration | Full visibility + controlled privilege
+Manager/Admin | Operations, inventory, pricing, staff | Fast operational control
+Cashier | POS, barcode, scale, payment, receipt | Maximum speed/minimal complexity
+Inventory/Procurement | PO, GRN, batches, counts | Accuracy + traceability
+Accounts | Khata, receipts, reconciliation, EOD | Financial clarity
+Compliance | GST, exports, e-invoice/e-way | Validation + evidence
+Support/Auditor | Diagnostics, read-only review | Search + auditability
+Area | Major destinations
+Home/Dashboard | Today, alerts, sync, cash session, shortcuts
+POS | New sale, held carts, recent invoices, reprint
+Customers | Customers, Khata, collections, statements
+Inventory | Stock, batches, expiry, transfers, counts, adjustments
+Procurement | Suppliers, POs, GRN, payables
+Payments | Payment status, reconciliation, refunds
+Reports | Sales, stock, margin, Khata, GST, EOD
+Compliance | GST, e-invoice, e-way, exports
+Operations | Cash session, EOD, hardware, sync
+Settings | Products, pricing, tax, UOM, users, devices
+Security/Admin | Sessions, devices, audit, privileged settings
+Region | Content
+Header | Customer, invoice/session context, connectivity, held-cart access
+Search | Tamil/English search, barcode scan, voice/search affordance if enabled
+Cart | Product, batch/UOM, quantity/weight, unit price, discount, tax
+Totals | Subtotal, discount, CGST/SGST/IGST, grand total
+Payment | Cash, UPI, bank, Khata, split tender
+Actions | Hold, clear, finalize, print/share receipt
+Status | Scale/printer/payment/sync state
+Field | UX behavior
+Product | Read-only after selection unless line replaced
+UOM | Selectable only among product-supported UOMs
+Quantity | Decimal input with configured precision
+Weight | Scale/manual input depending on policy
+Price | Calculated; editable only with authorized override
+Discount | Policy-controlled; approval when required
+Batch | Auto FIFO/FEFO; manual selection only if policy permits
+Tax | Displayed from effective tax profile
+Notes | Optional, bounded length
+Tier | Default behavior
+Walk-In MRP | Standard configured retail price
+Registered Farmer | 2% discount when current configuration applies
+Wholesale Dealer | 5% discount when current configuration applies
+Aavin Sub-Contractor | Configured effective price/discount
+State | UI
+Created | QR/payment request visible
+Waiting | Animated/progress state + safe cancel/close
+Paid | Authoritative success indicator + receipt action
+Failed | Reason-safe message + retry/change method
+Expired | Expired indicator + create new intent
+Unknown | Reconciliation/pending message; never show Paid
+Step | UI requirement
+Arrival | Supplier, PO, truck/reference
+Receipt | Received bags/items and UOM
+Tare | Gross/tare/net values with scale/manual state
+Batch | Batch/lot, manufacture/expiry, quality status
+Validation | Threshold warnings and correction/approval
+Review | Stock impact + payable impact
+Finalize | Explicit finalization with audit
+Batch state | Presentation
+Available | Saleable quantity shown
+Near expiry | Warning/expiry date prominent
+Expired | Not saleable; clear blocked status
+Held | Blocked with reason
+Rejected | Blocked with quality reason
+Depleted | Historical/zero quantity
+Report | Key filters
+Sales | Date, customer, product, payment method
+Product Sales | Product/category/brand/UOM
+Stock | Location/product/batch/status
+Expiry | Days-to-expiry/batch
+Margin | Date/product/category/tier
+Khata | Customer/date/overdue
+Supplier | Supplier/date/payable
+Payments | Method/status/reconciliation
+GST | Period/tax profile/HSN
+EOD | Date/session/operator
+State | Presentation
+Online/Synced | Normal status
+Online/Syncing | Progress/activity
+Offline | Clear offline indicator
+Pending | Pending count/indicator
+Conflict | Action-required warning
+Device Revoked | Blocking security state
+Sync Error | Actionable recovery message
+State | UX pattern
+Validation | Inline field message + summary if needed
+Authorization | Clear permission message; no sensitive details
+Network | Offline/retry guidance
+Server error | Safe message + request/reference ID
+Conflict | Explain authoritative state + next action
+Payment unknown | Do not imply success; reconciliation path
+No results | Search/filter suggestions
+No stock | Explain unavailable state and alternatives
+Printer failure | Invoice remains complete; offer fallback
+Scale failure | Show manual policy only if authorized
+Component | Standard
+Typography | Readable hierarchy; Tamil-capable font stack
+Buttons | Primary/secondary/destructive variants
+Inputs | Label + value + validation state
+Cards | Reserved for summary information
+Tables | Responsive; horizontal scroll only when necessary
+Badges | Status + text, not color alone
+Dialogs | Short title, consequence, explicit action
+Snackbars | Non-critical transient feedback
+Bottom sheets | Quick selection/contextual actions
+Form factor | Recommended UX
+Phone | Single-column, bottom navigation, compact POS
+Small tablet | Two-pane POS where space allows
+Large tablet/POS | Three-region POS: search/cart/payment
+Landscape POS | Persistent cart + payment summary
+Desktop-like Flutter target | Navigation rail + dense data views if supported
+Role | Primary navigation
+Cashier | POS, Customers/Khata, Recent, limited Operations
+Inventory | Inventory, Procurement, Suppliers, Reports
+Accounts | Khata, Payments, EOD, Reports
+Compliance | Compliance, Reports, relevant invoices
+Manager/Admin | Most operational areas
+Owner | All permitted areas + Security/Settings
+Auditor/Support | Read-only/diagnostic surfaces
+Domain | States shown to user
+Invoice | Draft, Pending, Finalized, Cancelled/Returned as applicable
+Payment | Created, Pending, Paid, Failed, Expired, Refunded, Unknown
+Sync | Synced, Pending, Failed, Conflict, Revoked
+Batch | Available, Near Expiry, Held, Rejected, Expired, Depleted
+PO | Draft, Submitted, Partial, Received, Cancelled
+GRN | Draft, Validating, Finalized, Exception
+EOD | Open, Counting, Variance, Finalized
+Device | Active, Offline, Revoked, Risk/Attention
+Area | Minimum tests
+POS | Search, scan, cart, price, tax, tender, finalize
+Tamil | Unicode, transliteration, fuzzy, mixed language
+Scale | Stable/unstable/disconnect/manual
+Payment | All states + timeout/unknown
+Khata | Limit/override/collection
+Inventory | Batch/expiry/count/adjustment
+GRN | Tare boundaries/batch
+Returns | Partial/full/refund
+Offline | Draft/retry/replay/conflict
+Security | Role/authorization/re-auth
+Accessibility | Semantics, scaling, contrast, focus
+Responsive | Phone/tablet/landscape
+Printer | Tamil, failure, reprint
+EOD | Count/variance/finalize
+Situation | Pattern
+Offline | You're offline. New sales allowed by offline policy will sync when connection returns.
+Payment unknown | Payment status is not yet confirmed. Do not collect again until reconciliation is checked.
+Printer failed | Invoice completed. Receipt printing failed; you can retry or share the receipt.
+Credit exceeded | This sale exceeds the customer's available credit. Authorized approval is required.
+Expired batch | This batch is expired and cannot be sold.
+Sync conflict | This transaction needs server reconciliation. No financial change was silently overwritten.
+Document | UI/UX dependency
+01 Database & ERD | Entity fields, states, precision and audit
+02 API | Endpoint contracts, errors, pagination, idempotency
+03 Go Backend | Server-authoritative validation and workflow states
+04 Flutter | Application architecture, widgets, device services
+05 Offline Sync | Offline states, pending/conflict/replay UX
+06 Inventory | Batch, FIFO/FEFO, stock, tare and loose-feed UX
+07 Accounting & Khata | Credit, receipts, EOD, financial state
+08 POS | POS flows, pricing, tax, invoice and returns
+09 Hardware | Scanner, scale, printer and diagnostics UX
+10 Payment/UPI | QR, pending, webhook-confirmed state, refunds
+11 GST/Compliance | Tax, e-invoice/e-way/export states
+12 Security | RBAC, re-auth, privacy, device security
+13 Docker/DevOps | Environment/release/configuration behavior
+14 Testing/QA | Golden, E2E, accessibility, device and regression tests

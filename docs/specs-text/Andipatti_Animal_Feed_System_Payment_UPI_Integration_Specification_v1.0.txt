@@ -1,0 +1,856 @@
+Andipatti Animal Feed System
+Document 10 — Complete Payment & UPI Integration Specification v1.0
+Implementation-ready • UPI intent/QR • Gateway webhooks • Reconciliation • Multi-tender • Offline-safe • Docker
+Document sequence: 10 of 20 | No sprint planning
+This document defines the authoritative payment boundary for cash, UPI, bank transfer, Khata and split tender. It covers payment intents, dynamic QR, provider callbacks, status polling, idempotency, refunds, reconciliation, offline restrictions, accounting integration, security, observability and failure recovery.
+1. Document Control
+2. Purpose, Scope & Objectives
+Provide a secure and idempotent payment abstraction independent of a single provider.
+Support UPI dynamic QR and provider payment-intent workflows.
+Support cash, bank and Khata as payment methods.
+Support split tender with exact reconciliation.
+Verify asynchronous payment through signed webhook and/or trusted provider status API.
+Prevent duplicate payments, duplicate invoice finalization and duplicate refunds.
+Separate payment state from printer/WhatsApp/hardware state.
+Support delayed payment confirmation and reconciliation.
+Provide payment/accounting traceability from intent to settlement.
+Support provider outages without corrupting POS financial state.
+3. Non-Goals
+Do not hardcode a specific payment provider into POS domain logic.
+Do not treat QR display as proof of payment.
+Do not treat client callback/UI success as proof of payment.
+Do not store UPI PIN, bank credentials or other prohibited payment secrets.
+Do not use Redis as the financial source of truth.
+Do not allow payment provider retries to create duplicate internal payments.
+4. Core Payment Principles
+Provider integrations are adapters behind a stable PaymentProvider interface.
+PostgreSQL is the internal authoritative ledger of payment records and allocation state.
+Provider responses are untrusted until signature/authenticity and amount/reference checks pass.
+Every payment command has an idempotency identity.
+Every webhook has a unique provider event identity where available.
+Payment amount must match the expected invoice/intent amount according to explicit tolerance/rounding rules.
+Paid state is established only from an authoritative verified provider response or valid internal tender confirmation such as cash.
+External network calls never hold an open database transaction unnecessarily.
+Financial finalization is atomic; external calls are coordinated through explicit states and outbox/reconciliation.
+5. Payment Architecture
+Flutter POS
+  -> Go Payment API
+      -> PaymentService
+          -> Provider Adapter
+             -> UPI / Gateway / Bank
+          -> PostgreSQL
+          -> Outbox / Worker
+          -> WebSocket status events
+          -> Reconciliation jobs
+
+Provider Webhook
+  -> HTTPS webhook endpoint
+  -> Signature verification
+  -> Event idempotency
+  -> Payment state transition
+  -> Allocation/reconciliation
+  -> Outbox/WebSocket
+
+The provider adapter translates provider-specific fields and statuses into the platform's canonical payment model.
+6. Canonical Payment Entities
+7. Payment Method Model
+A payment method is not itself a payment state. For example, UPI can be PENDING, PAID, FAILED or EXPIRED.
+8. Payment State Machine
+9. Payment Intent Lifecycle
+POS requests payment intent with cart/invoice reference or a controlled pre-finalization payment reference.
+Backend validates tenant, amount, currency and idempotency.
+PaymentService creates provider-side intent/order/reference.
+Provider response is validated and stored.
+Backend returns QR/display payload and intent identifiers to Flutter.
+Flutter displays dynamic QR/payment UI.
+Provider webhook/status callback updates internal state after verification.
+PaymentService verifies amount/currency/order/reference.
+Payment is marked PAID only when authoritative criteria pass.
+POS finalization allocates the verified payment, or a configured post-payment finalization workflow proceeds.
+Outbox emits payment status events.
+Receipt is generated from final invoice/payment allocation.
+10. Pre-Finalization vs Post-Payment Design
+The implementation must choose and consistently apply one of two safe orchestration patterns:
+For ordinary POS UPI, payment-first with a short-lived cart/payment reference is recommended when the provider supports it, because it avoids creating a finalized invoice before settlement. Regardless of pattern, no payment is allocated twice and no client-only success can finalize a paid invoice.
+11. Dynamic UPI QR
+QR payload must be generated from the verified payment provider intent.
+Amount, merchant identity and transaction reference must originate from trusted backend/provider data.
+QR must have an explicit expiration/validity window when supported.
+Flutter displays QR but does not alter its financial content.
+Reusing an expired intent requires a new intent or provider-supported retry.
+Do not generate arbitrary static QR strings in the POS as a substitute for a configured payment workflow unless the tenant explicitly operates a static-QR reconciliation model.
+Static QR can be supported as a separate payment mode only if settlement identification and reconciliation are sufficiently reliable; it must not be silently treated as equivalent to dynamic intent-based UPI.
+12. Payment Display & Soundbox
+Optional customer display may show amount and QR.
+Soundbox/voice notification is informational.
+Neither QR display nor soundbox output is authoritative.
+Provider verification determines internal PAID state.
+Soundbox failures never change payment state.
+Any hardware event can be correlated to intent ID for diagnostics.
+13. WebSocket Payment Updates
+WebSocket is an acceleration channel for UI updates.
+Only authenticated terminals/users may subscribe to authorized payment events.
+Events include intent ID, state, timestamp and safe display fields.
+Do not send provider secrets or unnecessary PII.
+Events may be lost; Flutter must recover by querying payment status.
+Out-of-order events must not cause state regression.
+Payment event:
+{
+  "type": "payment.status",
+  "intent_id": "...",
+  "state": "PAID",
+  "amount": 1250.00,
+  "occurred_at": "server-time",
+  "version": 7
+}
+
+Client rule:
+ignore stale event versions and re-query after reconnect.
+Exact API schema is governed by Document 02.
+14. Polling Fallback
+After QR presentation, Flutter receives polling parameters.
+Poll at bounded intervals.
+Stop on PAID, FAILED, EXPIRED or CANCELLED.
+On WebSocket reconnect, refresh current status.
+On app restart, recover active intent by ID.
+After timeout, leave payment in PENDING/UNKNOWN according to provider contract and provide reconciliation action.
+Never create a new payment merely because the UI timed out.
+Polling intervals must be configurable and rate-limited to protect provider and backend capacity.
+15. Provider Webhook Security
+Receive webhook over HTTPS.
+Validate provider signature/HMAC/public-key signature according to provider contract.
+Validate timestamp/replay protection when provider supplies it.
+Validate event ID/idempotency key.
+Persist the raw/normalized event metadata required for audit before applying state transition.
+Verify merchant/tenant mapping.
+Verify provider transaction/reference.
+Verify amount and currency.
+Apply state transition only if valid.
+Return provider-required acknowledgement promptly.
+Perform longer reconciliation asynchronously.
+Webhook endpoint must be designed for duplicate delivery.
+Unknown provider event types are retained and safely acknowledged according to provider guidance, then monitored.
+Invalid signatures are rejected and alerted.
+16. Never Trust Client Paid Flag
+The Flutter client may display a provider SDK result or user-facing success screen, but it cannot directly set a financial payment record to PAID.
+Client may request refresh.
+Client may report that the customer claims to have paid.
+Client may show pending.
+Only backend/provider verification changes authoritative state.
+Manual payment confirmation, if supported for bank/cash exception workflows, requires explicit permission, evidence and audit and must not be confused with ordinary UPI success.
+17. Amount & Currency Validation
+Intent amount is stored as NUMERIC(12,2) or stronger configured precision.
+Currency is explicit; INR is the expected primary currency for this system.
+Provider callback amount must equal expected amount under the provider's exact minor-unit rules.
+Any mismatch enters PAYMENT_AMOUNT_MISMATCH/reconciliation review.
+Do not round a mismatch away.
+Payment allocation cannot exceed invoice due unless explicit overpayment workflow exists.
+Expected: INR 1250.00
+Provider: INR 1250.00 -> acceptable
+Provider: INR 1249.00 -> reject/reconcile
+Provider: INR 1250.50 -> reject/reconcile
+Provider: wrong currency -> reject/reconcile
+18. Reference and Correlation IDs
+Persist relationships between all applicable identifiers. Never rely on invoice number alone for provider idempotency.
+19. Idempotency Model
+Create-intent requests use Idempotency-Key.
+Repeated identical create-intent requests return the existing internal intent/result.
+Same key with different amount/cart fingerprint returns IDEMPOTENCY_CONFLICT.
+Webhook provider_event_id is unique per provider account/event scope.
+Payment allocation uses an idempotency identity tied to payment + invoice allocation.
+Refund requests use their own idempotency key.
+Network timeout after provider creation is resolved through lookup by merchant reference before creating another provider order.
+Idempotency records must be retained long enough to cover realistic retry and reconciliation windows, subject to retention policy.
+20. Split Tender
+Split tender is a controlled composition of multiple tender allocations.
+Invoice due = 1,000.00
+Cash accepted = 400.00
+UPI verified = 600.00
+Accepted total = 1,000.00
+Residual = 0.00 -> finalize
+
+Invoice due = 1,000.00
+Cash = 400.00
+UPI = 599.99
+Residual = 0.01 -> do not silently finalize unless explicit rounding policy permits it.
+Cash received may exceed cash allocation because change is separately calculated.
+UPI intent should normally be created for the exact remaining amount.
+Khata can be used for a remaining amount only if customer credit policy allows it.
+Every component must reach an accepted terminal/authorized state before paid finalization.
+21. Cash Tender
+Cashier enters amount received.
+System computes change = received − allocated cash amount.
+Change cannot be negative unless the UI interprets input as exact tender rather than received amount.
+Cash movement is recorded in the active cash session.
+Physical cash count is reconciled at EOD.
+Cash tender is not dependent on provider webhooks.
+22. Bank Transfer
+Bank transfer payment method is configurable.
+Capture bank/reference number where appropriate.
+Verification policy can be manual, provider-backed or reconciliation-based.
+Manual confirmation requires permission, evidence/reason and audit.
+Unverified bank claim must remain pending/unverified.
+Bank settlement reconciliation must not create duplicate internal payment records.
+23. Khata Tender
+CreditService/KhataService validates customer credit exposure.
+Credit limit, overdue and grace rules come from Document 07.
+Owner/admin override is explicitly audited.
+Khata is an internal receivable, not an external payment-provider settlement.
+Invoice + receivable + stock + accounting are atomic.
+24. Payment Allocation
+Identify invoice/receivable target.
+Verify payment is PAID/authorized tender.
+Verify unallocated payment amount.
+Lock payment allocation state.
+Validate remaining invoice due.
+Create allocation.
+Update allocation totals atomically.
+Post/complete accounting mapping.
+Commit and emit event.
+A single payment can be allocated to one or multiple invoices only when the accounting model explicitly supports it.
+Allocation cannot exceed available verified payment amount.
+Reallocation requires controlled reversal/new allocation, not direct mutation of historical allocation.
+25. Payment + Invoice Finalization
+When payment-first is used, the recommended sequence is:
+Calculate final cart quote.
+Create payment intent for exact expected amount.
+Verify payment PAID.
+Begin short database transaction.
+Revalidate cart, price/tax snapshot, customer and inventory.
+Lock/select document series.
+Allocate stock.
+Create invoice.
+Create invoice tax lines.
+Allocate verified payment.
+Post accounting/Khata/cash as applicable.
+Create audit and outbox entries.
+Commit.
+Trigger receipt/notification after commit.
+If payment becomes invalid or stock becomes unavailable before finalization, the invoice must not finalize. The verified payment remains separately traceable and is reconciled/refunded according to provider workflow; never create a replacement payment silently.
+26. Payment-First Failure Recovery
+27. Payment Pending UX
+Show amount, customer instruction, QR and countdown where applicable.
+Show PENDING state clearly.
+Provide Refresh/Check Status.
+Do not show receipt as paid until verified.
+Allow cancellation only if provider supports cancellation and state permits it.
+Allow alternate tender only after the first intent is explicitly handled according to provider/tenant policy.
+Never create a second intent without preserving the first intent reference.
+28. Offline Payment Policy
+Cash can be supported offline according to POS cash policy.
+Khata can be supported offline only under explicit offline credit policy and later server validation.
+UPI must not be considered verified offline solely from a client/QR display.
+Static UPI QR workflows may be recorded as UNVERIFIED and reconciled later only if explicitly configured.
+Bank transfer claims remain pending unless an offline trusted process exists.
+Offline payment records use transaction envelopes and stable client IDs.
+Reconnection performs idempotent upload and reconciliation.
+29. Offline UPI Scenarios
+30. Refunds
+30.1 Refund principles
+Refunds are linked to original payment and invoice/return where applicable.
+Refund amount cannot exceed refundable remaining amount.
+Provider refund operation is idempotent.
+Refund state is independent from original payment PAID state.
+Partial refunds are supported if provider and business policy allow.
+Refund completion requires provider verification or authorized internal settlement method.
+30.2 Refund states
+31. Refund Workflow
+Validate original invoice/payment and return/credit-note eligibility.
+Calculate refundable amount.
+Check prior refunds.
+Create refund with idempotency key.
+Submit provider refund.
+Persist provider refund reference.
+Receive webhook/status.
+Verify amount/reference.
+Mark refund state.
+Post accounting/receivable reversal when refund is confirmed.
+Notify customer asynchronously.
+32. Chargeback/Dispute Extension
+Provider dispute events should be accepted through a future dispute adapter.
+Do not automatically reverse invoices without documented business/accounting workflow.
+Store dispute evidence/reference.
+Expose reconciliation task to finance/admin.
+Maintain original payment and invoice audit chain.
+33. Reconciliation Engine
+Reconciliation detects differences between internal records and provider/bank settlement.
+Fetch provider settlement/status data.
+Normalize provider records.
+Match by provider transaction/reference.
+Compare amount/currency/state.
+Create reconciliation result.
+Auto-resolve safe idempotent differences.
+Create exception for unresolved mismatch.
+Audit and notify finance.
+34. Reconciliation States
+35. Payment Webhook Event Processing
+receive
+ -> authenticate/signature verify
+ -> deduplicate provider_event_id
+ -> normalize
+ -> locate intent/reference
+ -> verify merchant/account
+ -> verify amount/currency
+ -> validate legal state transition
+ -> persist event + state transition
+ -> create outbox event
+ -> acknowledge
+
+Event ordering is not guaranteed.
+Older state must not overwrite newer terminal state.
+Unknown intents are retained for reconciliation rather than blindly creating payments.
+Webhook processing is safe to retry.
+36. Provider Adapter Interface
+interface PaymentProvider {
+  createIntent(request) -> ProviderIntent
+  getStatus(providerReference) -> ProviderStatus
+  cancelIntent(providerReference) -> ProviderResult
+  refund(request) -> ProviderRefund
+  verifyWebhook(headers, body) -> VerifiedEvent
+  parseSettlement(file/data) -> []SettlementRecord
+}
+Provider-specific SDKs/API clients live behind this boundary. The POS and accounting domains use canonical internal types.
+37. Provider Configuration
+Secrets are supplied through secure secret/config management and are never embedded in mobile builds or source control.
+38. API Mapping
+Exact endpoint names and schemas remain governed by Document 02.
+39. Database Mapping
+40. Accounting Mapping
+Exact chart-of-accounts mappings are governed by Document 07 and tenant accounting configuration.
+41. Security Threat Model
+42. Permissions
+43. Error Catalogue
+44. Webhook Idempotency & Ordering
+Store provider_event_id before or atomically with state application.
+If an event is already processed, return success without repeating side effects.
+Use payment version/state transition sequence where provider supplies ordering.
+Do not regress PAID to PENDING because of a late callback.
+Do not regress REFUNDED to PAID.
+Out-of-order events are logged and reconciled.
+45. Timeouts & Unknown Outcomes
+A timeout is not a payment failure. The provider may have accepted the transaction before the network timed out.
+Mark API attempt as UNKNOWN/REQUIRES_STATUS_CHECK.
+Lookup by merchant reference/provider order ID.
+If provider says PAID, update internal state idempotently.
+If provider says FAILED/EXPIRED, update accordingly.
+If provider cannot determine, keep pending/unknown and schedule reconciliation.
+Never blindly create a second intent.
+46. Provider Outage
+Detect elevated provider failures via metrics/health checks.
+Do not falsely mark payments failed solely from local timeout if provider outcome is unknown.
+Allow alternate tender methods if the cashier chooses and policy permits.
+Prevent duplicate charging when retrying.
+Provide finance/admin reconciliation for transactions created near outage window.
+47. Duplicate Customer Payment
+If a customer pays twice, the system must preserve both provider transactions rather than collapsing them.
+First verified payment may settle the invoice.
+Second verified payment becomes an unallocated/excess payment exception or explicit customer credit/refund workflow.
+Do not silently allocate both to the same invoice.
+Finance can refund or allocate excess according to policy.
+Both transactions remain traceable.
+48. Overpayment
+Reject over-allocation by default.
+If tenant supports customer wallet/advance, excess can be posted to a dedicated liability/advance account.
+If tenant does not support advances, create refund/reconciliation workflow.
+Never discard excess money.
+Audit the resolution.
+49. Payment Expiry
+Expired intent cannot be treated as paid.
+Flutter disables stale QR where practical.
+New intent uses a new idempotency/payment-attempt identity.
+Old intent remains in history.
+Late provider success is handled by reconciliation rather than silently creating a duplicate invoice.
+50. Refund and Return Integration
+Sales Return
+   -> refundable amount
+   -> RefundService
+      -> Provider refund
+      -> Refund webhook/status
+   -> Accounting reversal
+   -> Customer notification
+
+Original Invoice
+   remains immutable
+   and links to Return + Credit Note + Refund
+Inventory return disposition is governed by Document 06; accounting reversal by Document 07.
+51. Offline Synchronization
+Payment-related offline transaction envelopes use stable client_transaction_id.
+Upload order preserves dependencies.
+Payment claims and cash tenders are distinct from verified external settlements.
+Server returns authoritative payment state and reconciliation status.
+Conflict resolution never uses last-write-wins for payment state.
+Duplicate upload returns existing authoritative result.
+52. Payment Sync Conflict Matrix
+53. Observability
+Metrics: intent creation rate, success rate, provider latency, pending duration, webhook rate, invalid signature count, duplicate events, amount mismatches, state-transition rejects, refund success/failure, reconciliation mismatches, settlement lag.
+Trace IDs connect POS → payment intent → provider adapter → webhook → invoice finalization.
+Alert on unusual duplicate payment, signature failures, amount mismatches and reconciliation backlog.
+Logs contain safe identifiers, not payment secrets.
+54. Performance Targets
+55. Testing Strategy
+55.1 Unit tests
+Provider request/response mapping.
+Amount/currency validation.
+Signature verification.
+Replay detection.
+State machine transitions.
+Idempotency.
+Split-tender arithmetic.
+Refund ceilings.
+Overpayment logic.
+Polling/backoff.
+Settlement matching.
+55.2 Integration tests
+Create intent → webhook → paid.
+Create intent → polling → paid.
+Duplicate webhook.
+Out-of-order webhook.
+Invalid signature.
+Amount mismatch.
+Provider timeout then successful status lookup.
+Payment-first sale finalization.
+Payment-first stock conflict.
+UPI payment + printer failure.
+Refund success/failure/unknown.
+Settlement reconciliation.
+55.3 Security tests
+Tenant isolation/RLS.
+Forged webhook.
+Modified amount.
+Replay callback.
+Cross-provider reference.
+Unauthorized refund.
+Unauthorized manual bank confirmation.
+Idempotency-key abuse.
+55.4 Offline tests
+Offline cash sale.
+Offline UPI payment claim.
+Reconnect/replay.
+App restart during payment.
+Network timeout after provider creation.
+Duplicate sync upload.
+Device revocation during offline period.
+56. Chaos & Failure Tests
+Kill API process after provider accepts intent.
+Drop network after provider response but before internal response.
+Send duplicate webhooks concurrently.
+Send webhooks out of order.
+Delay webhook for several minutes.
+Return malformed provider payload.
+Provider returns amount mismatch.
+Provider becomes unavailable during QR flow.
+Database connection loss during allocation.
+Worker crashes during webhook processing.
+Duplicate refund submission.
+Settlement file contains duplicate rows.
+57. End-to-End Scenarios
+57.1 Normal UPI sale
+POS calculates exact total.
+Backend creates intent.
+Dynamic QR displayed.
+Customer pays.
+Provider webhook/status verifies PAID.
+POS finalizes invoice.
+Payment allocated.
+Accounting posted.
+Receipt printed/shared.
+57.2 UPI delayed
+QR displayed.
+Customer pays but webhook is delayed.
+POS remains PENDING.
+Polling checks status.
+Provider confirms PAID.
+Same intent transitions to PAID.
+Invoice finalizes once.
+57.3 UPI timeout after customer payment
+Provider accepts payment.
+API response times out.
+Client sees unknown/pending.
+Backend lookup finds provider reference PAID.
+Existing intent is updated.
+No second charge is created.
+57.4 Split cash + UPI
+Invoice total = configured amount.
+Cash portion recorded.
+UPI intent created for exact residual.
+UPI verified.
+Tenders reconcile exactly.
+Invoice finalizes once.
+57.5 Khata
+Customer selected.
+Credit validation passes.
+Khata allocation authorized.
+Invoice/receivable/accounting/stock commit atomically.
+57.6 Duplicate payment
+Two provider transactions arrive.
+Both are retained.
+Only required amount is allocated.
+Excess enters configured credit/refund workflow.
+Finance can reconcile both.
+57.7 Refund after return
+Return references invoice.
+Refundable amount calculated.
+Refund request created idempotently.
+Provider confirms refund.
+Accounting reversal/credit note posted.
+Customer notification sent.
+58. API Security Headers & Controls
+Authorization bearer/session token.
+X-Request-ID.
+Idempotency-Key on mutable payment commands.
+X-Device-ID.
+Content-Type/application version headers.
+Webhook provider signature headers preserved for verification.
+Rate limits on intent creation, status polling, refund requests and webhook ingress.
+Strict request body validation and maximum payload size.
+59. Docker & Deployment
+Go API container exposes payment endpoints.
+Worker container processes reconciliation, settlement imports, provider retries and notifications.
+PostgreSQL stores authoritative payment state.
+Redis is optional for short-lived coordination/caching, never financial authority.
+Reverse proxy/API gateway terminates TLS and routes provider webhooks.
+Secrets are injected at runtime.
+Health checks include database connectivity and provider integration readiness where appropriate.
+Provider-specific certificates/keys are mounted securely and not baked into images.
+docker compose concept:
+  api
+  worker
+  postgres
+  redis        # optional
+  reverse-proxy
+  object-store integration (R2 externally)
+
+Flutter POS remains an edge/mobile application and accesses payment APIs securely.
+Production topology may use managed PostgreSQL/R2 and external payment providers while keeping application workloads containerized.
+60. Provider Onboarding Checklist
+Confirm provider legal/business onboarding.
+Create sandbox merchant/account.
+Document create-intent API.
+Document status API.
+Document webhook signature algorithm.
+Document event IDs and replay rules.
+Document refund API.
+Document settlement/report format.
+Configure webhook endpoint.
+Store secrets securely.
+Create provider adapter.
+Run sandbox conformance tests.
+Run duplicate/out-of-order tests.
+Run amount mismatch tests.
+Run refund tests.
+Validate production cutover configuration separately.
+61. Payment Provider Certification Matrix
+62. Data Retention
+Payment records follow financial/legal retention requirements configured for the tenant.
+Webhook event records must be retained long enough for audit/reconciliation.
+Sensitive raw provider payloads should be minimized and protected.
+Settlement files are retained according to compliance/finance policy.
+Do not delete payment records merely because an invoice is archived.
+Archival must preserve payment references and restore traceability.
+63. Reconciliation Dashboard Requirements
+Pending payments by age.
+Unknown payment outcomes.
+Amount mismatches.
+Duplicate provider transactions.
+Unallocated verified payments.
+Unrefunded/failed refunds.
+Settlement mismatches.
+Webhook signature failures.
+Provider outage indicators.
+Manual-review queue with role-controlled resolution.
+Every exception links to invoice/payment/provider reference.
+64. Manual Review Controls
+Manual resolution requires authorized role.
+Require reason and evidence/reference.
+Show immutable original state.
+Do not allow arbitrary amount editing.
+Resolution creates a compensating transaction where necessary.
+Audit before/after, actor, timestamp and approval.
+Closed reconciliation items cannot be silently deleted.
+65. Business Rules
+UPI paid state requires verified provider evidence.
+Payment amount must match expected amount.
+One payment allocation cannot exceed unallocated verified amount.
+One invoice cannot be marked paid twice.
+One provider event cannot create two internal payment outcomes.
+Refund cannot exceed refundable balance.
+Finalized invoice cannot be edited to hide payment differences.
+Payment and invoice state must remain traceable.
+External provider failures do not justify inventing a paid state.
+Provider success does not permit stock/accounting bypass; finalization remains atomic.
+66. Implementation Checklist
+Define canonical payment domain types.
+Define PaymentProvider interface.
+Implement provider adapter(s).
+Implement payment intent persistence.
+Implement idempotency.
+Implement dynamic QR response.
+Implement webhook verification.
+Implement provider status polling.
+Implement WebSocket status events.
+Implement payment allocation.
+Implement cash tender.
+Implement bank tender.
+Implement Khata tender integration.
+Implement split tender.
+Implement refund state machine.
+Implement reconciliation engine.
+Implement settlement import.
+Implement payment audit.
+Implement metrics/tracing.
+Implement offline payment envelope handling.
+Implement Docker worker/reconciliation deployment.
+Create sandbox certification tests.
+Create operational payment runbooks.
+67. Acceptance Criteria
+UPI dynamic QR can be generated from a verified backend payment intent.
+Client cannot directly mark UPI paid.
+Signed webhooks are verified and idempotent.
+Polling correctly recovers when WebSocket events are missed.
+Delayed provider success is reconciled without duplicate charge.
+Provider timeout does not cause duplicate payment creation.
+Amount mismatch is rejected/reconciled.
+Split tender totals reconcile exactly.
+Cash tender integrates with cash session/EOD.
+Khata tender respects Document 07 credit controls.
+Refunds are linked to original payment and cannot exceed refundable balance.
+Duplicate webhooks do not duplicate payment/accounting outcomes.
+Duplicate customer payments are preserved and routed to excess-payment workflow.
+Offline UPI is never falsely marked verified.
+RLS prevents cross-tenant payment access.
+Payment secrets never appear in Flutter source/logs.
+Provider outage has a safe recovery path.
+Settlement reconciliation identifies mismatches.
+All critical payment operations are audited.
+All listed end-to-end and chaos tests pass.
+68. Non-Negotiable Payment Rules
+Never trust a client-only paid flag.
+Never treat a QR scan/display as proof of payment.
+Never create a second provider intent merely because a prior request timed out.
+Never allocate a payment above its verified unallocated amount.
+Never accept a provider callback without required authenticity verification.
+Never ignore amount or currency mismatch.
+Never process the same provider event twice.
+Never allow payment state to regress because of an old/out-of-order event.
+Never finalize a paid invoice without verified/authorized tender according to policy.
+Never edit historical payment records to hide discrepancies; use compensating/reconciliation records.
+Never let printer, WhatsApp or soundbox state determine payment state.
+Never store provider secrets in the Flutter app.
+Never bypass tenant isolation or RLS.
+Never silently discard overpayments or duplicate customer payments.
+Never delete payment traceability when archiving invoices.
+69. Definition of Done
+Provider adapter is isolated behind canonical interface.
+UPI intent/QR/status/webhook workflow is implemented.
+Webhook verification and idempotency are tested.
+Payment-first POS finalization integrates with Documents 06–08.
+Cash/Khata/bank/split tender are integrated.
+Refunds and credit notes are integrated.
+Reconciliation and settlement workflows exist.
+Offline behavior is explicit and tested.
+Security and RLS tests pass.
+Observability and alerts exist.
+Sandbox certification evidence is captured.
+Docker API/worker deployment works.
+Runbooks cover provider outage, delayed payment, duplicate payment, refund unknown and settlement mismatch.
+No P0 payment-integrity/security defect remains.
+70. Dependency & Change Control
+This document depends on Documents 01–09 and is normative for payment behavior used by Documents 11–20. Provider-specific changes must not leak into POS domain contracts. Any change to payment state, amount validation, refund semantics, settlement mapping, offline behavior or webhook security requires versioned change control and regression testing.
+End of Document 10 — Complete Payment & UPI Integration Specification v1.0.
+Item | Specification
+Document ID | AAF-PAY-010
+Version | 1.0
+Status | Implementation Baseline
+Primary dependencies | Documents 01–09
+Financial authority | Go backend + PostgreSQL transaction
+External payment authority | Configured payment provider/bank/UPI integration, subject to verified provider response
+Client role | Display/initiate/capture user input; never authoritative for paid status
+Deployment | Go API/worker and supporting services containerized with Docker
+Entity | Purpose
+payment_intents | Represents requested external payment attempt and expected amount.
+payments | Represents verified payment/settlement record.
+payment_allocations | Associates payment amount with invoice/receivable.
+payment_webhook_events | Immutable provider callback/event idempotency record.
+refunds | Represents refund request and resulting provider state.
+refund_allocations | Associates refund amount with payment/invoice.
+integration_events | Outbox events for downstream actions.
+audit_logs | Sensitive operation and exception audit.
+Method | Authority / behavior
+CASH | Cashier records tendered amount; cash session/EOD is authoritative internal record.
+UPI | Verified provider intent/webhook/status.
+BANK | Configured bank reference/settlement workflow; verification policy applies.
+KHATA | Accounting/Khata engine creates receivable subject to credit policy.
+SPLIT | Multiple tender components; each component follows its own authority.
+State | Allowed transition examples | Meaning
+CREATED | → PENDING/CANCELLED | Intent created.
+PENDING | → PAID/FAILED/EXPIRED/CANCELLED | Awaiting provider outcome.
+PAID | → PARTIALLY_REFUNDED/REFUNDED | Verified settlement.
+FAILED | → CREATED/PENDING | New attempt may be created; do not mutate old attempt into a new payment.
+EXPIRED | → CREATED/PENDING | New payment intent may be created.
+CANCELLED | terminal | Cancelled attempt.
+PARTIALLY_REFUNDED | → REFUNDED | Some or all amount refunded.
+REFUNDED | terminal for full refund | Full refund recorded.
+Pattern | Use
+Payment-first | Create payment intent for an exact cart total; verify payment; finalize invoice and allocate payment.
+Invoice-first / payment-pending | Create a controlled invoice/payment-pending state, then settle payment before treating invoice as paid.
+Identifier | Purpose
+client_transaction_id | Stable offline/client operation identity.
+idempotency_key | Prevents duplicate API command outcome.
+payment_intent_id | Internal payment attempt identity.
+provider_order_id | Provider order/reference.
+provider_transaction_id | Provider settlement transaction.
+provider_event_id | Webhook event idempotency identity.
+invoice_id | Internal sale identity.
+invoice_number | Human/legal document number.
+request_id | API tracing identity.
+Failure | Required behavior
+Stock unavailable after payment | Do not finalize sale; mark internal exception and initiate configured refund/reconciliation.
+Price changed | Do not silently charge a different amount; require a new authorized flow or refund/retry.
+Tax configuration invalid | Do not finalize; preserve payment trace.
+Invoice number conflict | Do not overwrite; retry transaction safely.
+Backend timeout after commit | Client queries by idempotency/payment reference.
+Webhook delayed | Intent remains pending until verified.
+Provider unavailable | No false paid state; allow alternate tender where policy permits.
+Scenario | Behavior
+QR generated before network loss | Do not claim payment success without provider verification.
+Customer paid while app offline | Record claim/reference if permitted; status remains UNVERIFIED/PENDING.
+App reconnects | Query/reconcile provider by stored reference.
+Provider confirms paid | Create/complete verified payment and allocate according to configured workflow.
+Provider says failed | Keep invoice unpaid or initiate alternate tender.
+No provider record | Escalate reconciliation; never assume success.
+State | Meaning
+REQUESTED | Internal refund request created.
+PROCESSING | Provider accepted/in progress.
+SUCCEEDED | Provider confirms refund.
+FAILED | Provider rejected/failed.
+UNKNOWN | Outcome uncertain; reconciliation required.
+CANCELLED | Request cancelled if provider permits.
+Comparison | Examples
+Intent vs provider | Amount/reference/state mismatch.
+Payment vs allocation | Verified payment not allocated or over-allocated.
+Settlement vs payment | Provider settled but internal payment missing.
+Refund vs provider | Refund succeeded externally but internal state pending.
+Daily totals | Internal provider total differs from settlement report.
+Webhook coverage | Provider transaction exists with no corresponding event.
+State | Meaning
+MATCHED | Internal and external records agree.
+AUTO_RESOLVED | Safe automated correction applied.
+UNMATCHED_INTERNAL | Internal record has no provider match.
+UNMATCHED_PROVIDER | Provider record has no internal match.
+AMOUNT_MISMATCH | Amount differs.
+STATE_MISMATCH | Payment/refund state differs.
+DUPLICATE | Multiple records represent same external transaction.
+MANUAL_REVIEW | Requires authorized human decision.
+RESOLVED | Exception closed with evidence.
+Configuration | Requirement
+provider_name | Tenant-selected provider.
+merchant/account identifier | Secret/reference stored securely.
+environment | SANDBOX/PRODUCTION.
+webhook endpoint | Versioned HTTPS endpoint.
+signature configuration | Secret/public-key reference; never expose to Flutter.
+timeout | Configured request timeout.
+polling policy | Min/max interval and total window.
+refund policy | Allowed methods/limits.
+currency | Configured supported currency.
+feature flags | Dynamic QR, static QR, refunds, settlement import, etc.
+Capability | Representative endpoint
+Create payment intent | POST /api/v1/payments/intents
+Get payment status | GET /api/v1/payments/intents/{id}
+Cancel intent | POST /api/v1/payments/intents/{id}/cancel
+Provider webhook | POST /api/v1/payments/webhooks/{provider}
+Allocate payment | POST /api/v1/payments/{id}/allocations
+Refund | POST /api/v1/payments/refunds
+Refund status | GET /api/v1/payments/refunds/{id}
+Reconciliation | POST/GET /api/v1/payments/reconciliation
+Settlement import | POST /api/v1/payments/settlements/import
+Payment WebSocket | WSS /api/v1/ws
+Payment concern | Entities
+Intent | payment_intents
+Verified payment | payments
+Invoice allocation | payment_allocations
+Webhook | payment_webhook_events
+Refund | refunds; refund_allocations
+Audit | audit_logs
+Accounting | journal_entries; journal_lines
+Customer credit | customer_ledger_entries
+Cash | cash_sessions; cash_movements
+Outbox | integration_events
+Sync | sync_transactions; sync_conflicts; sync_cursors
+Payment event | Accounting impact
+Cash sale | Debit cash / credit receivable or sales-related accounts as defined by Document 07.
+UPI verified sale | Debit UPI/clearing/bank receivable / credit sales/tax accounts as configured.
+Bank verified | Debit bank/clearing / credit receivable/sales mapping as configured.
+Khata sale | Debit customer receivable / credit sales/tax accounts.
+UPI settlement | Move clearing to bank/settled account; do not duplicate sales.
+Refund | Reverse/refund corresponding cash/clearing and sales/tax treatment according to credit note policy.
+Threat | Control
+Fake paid callback | Signature + provider reference + amount verification.
+Replay webhook | Provider event ID + timestamp/replay checks.
+Duplicate API request | Idempotency.
+Amount tampering | Server-calculated expected amount and provider amount validation.
+Tenant crossover | Auth context + RLS.
+Credential leakage | Secret manager/server-only secrets.
+QR tampering | Backend/provider-generated trusted payload.
+Man-in-the-middle | HTTPS/WSS and certificate validation by platform stack.
+Excessive polling | Rate limits/backoff.
+Refund abuse | Permission, amount ceiling, original-payment linkage and audit.
+Operation | Cashier | Senior | Manager/Owner | Finance/Admin
+Create UPI intent | ✓ | ✓ | ✓ | ✓
+Cancel pending intent | Configured | ✓ | ✓ | ✓
+Manual bank confirmation | — | Limited | ✓ | ✓
+Payment reconciliation | — | — | ✓ | ✓
+Refund request | Limited | ✓ | ✓ | ✓
+Large refund override | — | — | ✓ | ✓
+Settlement import | — | — | — | ✓
+Provider configuration | — | — | Limited | ✓
+View payment audit | Limited | ✓ | ✓ | ✓
+Code | Meaning
+PAYMENT_PROVIDER_UNAVAILABLE | Provider cannot be reached.
+PAYMENT_PROVIDER_TIMEOUT | Provider request timed out.
+PAYMENT_INTENT_NOT_FOUND | Internal intent not found.
+PAYMENT_PROVIDER_REFERENCE_NOT_FOUND | Provider reference invalid/unavailable.
+PAYMENT_PENDING | Payment not yet verified.
+PAYMENT_FAILED | Provider failure.
+PAYMENT_EXPIRED | Intent expired.
+PAYMENT_CANCELLED | Intent cancelled.
+PAYMENT_AMOUNT_MISMATCH | Provider amount differs from expected.
+PAYMENT_CURRENCY_MISMATCH | Currency mismatch.
+PAYMENT_SIGNATURE_INVALID | Webhook signature invalid.
+PAYMENT_REPLAY_DETECTED | Webhook replay detected.
+PAYMENT_EVENT_DUPLICATE | Event already processed.
+PAYMENT_STATE_TRANSITION_INVALID | Illegal state transition.
+PAYMENT_ALREADY_ALLOCATED | Payment has already been allocated.
+PAYMENT_OVERALLOCATION | Allocation exceeds available amount.
+PAYMENT_IDEMPOTENCY_CONFLICT | Same key used with different request.
+REFUND_AMOUNT_EXCEEDED | Refund exceeds remaining refundable amount.
+REFUND_PROVIDER_FAILED | Provider refund failed.
+REFUND_UNKNOWN | Refund outcome uncertain.
+RECONCILIATION_REQUIRED | Manual/async reconciliation needed.
+CREDIT_LIMIT_EXCEEDED | Khata credit unavailable.
+DEVICE_REVOKED | Terminal not authorized.
+Conflict | Resolution
+Same idempotency key, same payload | Return original result.
+Same key, different payload | IDEMPOTENCY_CONFLICT.
+Client says PAID, provider says PENDING | Provider/verified backend state wins; keep pending.
+Client says PAID, provider says FAILED | Do not allocate; reconcile exception.
+Two provider transactions for one invoice | Preserve both; settle first and route excess.
+Payment allocated twice | Prevent with allocation lock/idempotency; reconcile if detected.
+Refund success externally, internal pending | Reconciliation updates internal state.
+Unknown provider transaction | Manual/automated reconciliation required.
+Operation | Target
+Create payment intent API | p95 < 800 ms excluding provider latency; provider timeout bounded.
+Internal status query | p95 < 300 ms.
+Webhook acknowledgement | p95 < 500 ms where feasible; heavy work async.
+Payment state UI update | Near real-time through WebSocket; polling fallback bounded.
+Allocation/finalization | p95 < 1.5 s excluding external provider operations.
+Reconciliation | Batch/async; scalable without blocking POS.
+Capability | Sandbox | Production evidence
+Create intent | Required | Successful transaction sample
+Dynamic QR | Required | Verified QR/payment sample
+Status query | Required | Delayed status sample
+Webhook | Required | Signed callback sample
+Duplicate webhook | Required | Idempotent result
+Amount mismatch | Required | Rejected/reconciled
+Refund | Required | Successful refund
+Settlement | Required | Matched settlement file/report
+Provider outage | Required simulation | Runbook verified

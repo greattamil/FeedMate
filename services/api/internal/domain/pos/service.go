@@ -137,60 +137,31 @@ func (s *Service) FinalizeInvoice(ctx context.Context, tenantID, deviceID, userI
 		)
 
 		for _, line := range req.Lines {
-			if line.Quantity.LessThanOrEqual(decimal.Zero) {
-				return fmt.Errorf("%w: line quantity must be positive", ErrValidation)
-			}
-			p, err := product.GetByID(ctx, tx, line.ProductID)
+			priced, err := priceLine(ctx, tx, line)
 			if err != nil {
-				return fmt.Errorf("load product %s: %w", line.ProductID, err)
+				return err
 			}
-			if !p.Active {
-				return fmt.Errorf("%w: product %s is not active", ErrValidation, p.SKU)
-			}
-
-			unitPrice := p.SellingPrice
-			if line.UnitPriceOverride != nil {
-				unitPrice = line.UnitPriceOverride
-			}
-			if unitPrice == nil {
-				return fmt.Errorf("%w: product %s has no selling price configured", ErrValidation, p.SKU)
-			}
-
-			lineSubtotal := unitPrice.Mul(line.Quantity)
-			taxableValue := lineSubtotal.Sub(line.DiscountAmount)
-			if taxableValue.LessThan(decimal.Zero) {
-				return fmt.Errorf("%w: discount exceeds line subtotal for product %s", ErrValidation, p.SKU)
-			}
-
-			if p.TaxProfileID == nil {
-				return ErrNoTaxProfile
-			}
-			taxProfile, err := GetActiveTaxProfile(ctx, tx, *p.TaxProfileID)
-			if err != nil {
-				return fmt.Errorf("tax profile for product %s: %w", p.SKU, err)
-			}
-			comps, lineTax := CalculateLineTax(taxProfile, taxableValue)
-			for _, c := range comps {
+			for _, c := range priced.taxComps {
 				taxByType[c.Type] = taxByType[c.Type].Add(c.Amount)
 			}
 
-			allocations, err := inventory.AllocateForSale(ctx, tx, tenantID, p.ID, req.LocationID, line.Quantity, fifoFefoPolicy)
+			allocations, err := inventory.AllocateForSale(ctx, tx, tenantID, priced.product.ID, req.LocationID, line.Quantity, fifoFefoPolicy)
 			if err != nil {
 				if errors.Is(err, inventory.ErrInsufficientStock) {
-					return fmt.Errorf("%w: product %s", inventory.ErrInsufficientStock, p.SKU)
+					return fmt.Errorf("%w: product %s", inventory.ErrInsufficientStock, priced.product.SKU)
 				}
-				return fmt.Errorf("allocate stock for %s: %w", p.SKU, err)
+				return fmt.Errorf("allocate stock for %s: %w", priced.product.SKU, err)
 			}
 
-			subtotal = subtotal.Add(lineSubtotal)
+			subtotal = subtotal.Add(priced.unitPrice.Mul(line.Quantity))
 			discountTotal = discountTotal.Add(line.DiscountAmount)
-			taxableTotal = taxableTotal.Add(taxableValue)
-			taxTotal = taxTotal.Add(lineTax)
+			taxableTotal = taxableTotal.Add(priced.taxableValue)
+			taxTotal = taxTotal.Add(priced.taxTotal)
 
 			prepared = append(prepared, preparedLine{
-				input: line, product: p, unitPrice: *unitPrice, taxableValue: taxableValue,
-				taxProfile: taxProfile, taxComps: comps, taxTotal: lineTax,
-				lineTotal: taxableValue.Add(lineTax), allocations: allocations,
+				input: line, product: priced.product, unitPrice: priced.unitPrice, taxableValue: priced.taxableValue,
+				taxProfile: priced.taxProfile, taxComps: priced.taxComps, taxTotal: priced.taxTotal,
+				lineTotal: priced.lineTotal, allocations: allocations,
 			})
 		}
 

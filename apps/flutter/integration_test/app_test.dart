@@ -7,18 +7,19 @@
 // Prerequisites (see docs/IMPLEMENTATION_STATUS.md for exact commands):
 //   - Postgres running and migrated
 //   - The Go API server running and reachable at API_BASE_URL
-//   - The persistent dev fixture tenant/device/user seeded (device_uuid
-//     77777777-..., username "owner", password "TestPass123!")
-//   - A product with SKU "FLUTTER-E2E-01" created via the API
+//   - The persistent dev fixture tenant/device/user/product/batch/location
+//     seeded (device_uuid 77777777-..., username "owner", password
+//     "TestPass123!", product SKU "CF-TEST-01" with stock and a tax profile)
 //
 // Run with, e.g.:
-//   flutter test integration_test/app_test.dart -d windows --dart-define=API_BASE_URL=http://127.0.0.1:8081
+//   flutter test integration_test/app_test.dart -d emulator-5554 --dart-define=API_BASE_URL=http://10.0.2.2:8081
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 
 import 'package:feedmate_app/core/secure_storage.dart';
 import 'package:feedmate_app/main.dart';
+import 'package:feedmate_app/features/pos/cart_screen.dart';
 import 'package:feedmate_app/features/pos/product_search_screen.dart';
 
 // Matches the device_uuid seeded for the persistent dev fixture tenant (see
@@ -32,7 +33,7 @@ const _fixtureDeviceUuid = '77777777-7777-7777-7777-777777777777';
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('login against the real backend and find a real product', (tester) async {
+  testWidgets('login, search, add to cart, and complete a real checkout against the live backend', (tester) async {
     const apiBaseUrl = String.fromEnvironment('API_BASE_URL', defaultValue: 'http://127.0.0.1:8081');
     final storage = SecureStorage(store: InMemoryKeyValueStore());
     await storage.seedDeviceUuidForTesting(_fixtureDeviceUuid);
@@ -40,14 +41,11 @@ void main() {
     await tester.pumpWidget(FeedMateApp(apiBaseUrl: apiBaseUrl, storageOverride: storage));
     await tester.pumpAndSettle();
 
-    // Should land on the login screen (no prior session on a fresh test run).
+    // --- Login ---
     expect(find.byKey(const Key('username_field')), findsOneWidget);
-
     await tester.enterText(find.byKey(const Key('username_field')), 'owner');
     await tester.enterText(find.byKey(const Key('password_field')), 'TestPass123!');
     await tester.tap(find.byKey(const Key('login_button')));
-
-    // Real network round trip to the real server — give it real time.
     await tester.pumpAndSettle(const Duration(seconds: 5));
 
     expect(
@@ -56,14 +54,43 @@ void main() {
       reason: 'expected a real login against the live backend to succeed and navigate to product search',
     );
 
-    await tester.enterText(find.byKey(const Key('search_field')), 'FLUTTER-E2E-01');
-    await tester.pumpAndSettle(const Duration(seconds: 3)); // debounce + real network round trip
+    // --- Search for the persistent fixture product ---
+    await tester.enterText(find.byKey(const Key('search_field')), 'CF-TEST-01');
+    await tester.pumpAndSettle(const Duration(seconds: 3));
 
     expect(
-      find.text('Flutter E2E Test Feed'),
+      find.text('Cattle Feed Test 50kg'),
       findsOneWidget,
-      reason: 'expected the real product created via the API to appear in search results',
+      reason: 'expected the real fixture product to appear in search results',
     );
-    expect(find.textContaining('₹999.00'), findsOneWidget);
+
+    // --- Add to cart and open the cart screen ---
+    await tester.tap(find.text('Cattle Feed Test 50kg'));
+    await tester.pump(const Duration(milliseconds: 300)); // let the "added to cart" snackbar settle
+    await tester.tap(find.byKey(const Key('cart_button')));
+    await tester.pumpAndSettle(const Duration(seconds: 3)); // real quote round trip
+
+    expect(find.byType(CartScreen), findsOneWidget);
+    expect(
+      find.textContaining('Total: ₹'),
+      findsOneWidget,
+      reason: 'expected a real server-computed quote total, not a placeholder',
+    );
+
+    // --- Complete a real checkout ---
+    final checkoutButtonFinder = find.byKey(const Key('checkout_button'));
+    expect(
+      tester.widget<FilledButton>(checkoutButtonFinder).onPressed,
+      isNotNull,
+      reason: 'checkout should be enabled once a real quote has been fetched',
+    );
+    await tester.tap(checkoutButtonFinder);
+    await tester.pumpAndSettle(const Duration(seconds: 5)); // real invoice finalization round trip
+
+    expect(
+      find.textContaining('Sale Complete'),
+      findsOneWidget,
+      reason: 'expected a real invoice to be finalized against the live backend',
+    );
   });
 }

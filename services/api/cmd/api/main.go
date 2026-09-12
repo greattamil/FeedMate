@@ -17,6 +17,7 @@ import (
 	"github.com/andipatti/feedmate/services/api/internal/domain/contra"
 	"github.com/andipatti/feedmate/services/api/internal/domain/eod"
 	"github.com/andipatti/feedmate/services/api/internal/domain/identity"
+	"github.com/andipatti/feedmate/services/api/internal/domain/location"
 	"github.com/andipatti/feedmate/services/api/internal/domain/payment"
 	"github.com/andipatti/feedmate/services/api/internal/domain/pos"
 	"github.com/andipatti/feedmate/services/api/internal/domain/procurement"
@@ -55,6 +56,7 @@ func main() {
 	contraSvc := contra.NewService(db)
 	eodSvc := eod.NewService(db)
 	reportsSvc := reports.NewService(db)
+	locationSvc := location.NewService(db)
 
 	var provider paymentprovider.Provider
 	switch cfg.PaymentProvider {
@@ -76,6 +78,7 @@ func main() {
 	contraHandlers := &httpapi.ContraHandlers{Contra: contraSvc}
 	eodHandlers := &httpapi.EODHandlers{EOD: eodSvc}
 	reportsHandlers := &httpapi.ReportsHandlers{Reports: reportsSvc}
+	locationHandlers := &httpapi.LocationHandlers{Location: locationSvc}
 
 	r := chi.NewRouter()
 	r.Use(appmw.RequestID)
@@ -102,7 +105,10 @@ func main() {
 			r.Get("/products/{id}", productHandlers.Get)
 			r.With(appmw.RequirePermission("product.manage")).Post("/products", productHandlers.Create)
 
+			r.With(appmw.RequirePermission("pos.sell")).Post("/pos/quote", posHandlers.Quote)
 			r.With(appmw.RequirePermission("pos.sell")).Post("/pos/invoices", posHandlers.FinalizeInvoice)
+
+			r.With(appmw.RequirePermission("pos.sell")).Get("/locations", locationHandlers.List)
 
 			r.With(appmw.RequirePermission("grn.post")).Post("/procurement/grns", procurementHandlers.PostGRN)
 

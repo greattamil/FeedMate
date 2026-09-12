@@ -222,8 +222,27 @@ PRD describes.
 ### Known gaps in this phase
 - **No offline storage.** SQLCipher-backed local persistence (products, prices, customers, credit snapshots, pending invoices, sync queue — PRD 14.1) is not implemented. The app is online-only: every screen requires a live connection to the backend.
 - **No device self-registration flow.** Devices must currently be created via the admin/SQL path exactly as backend integration tests do; there is no in-app "register this device" step a real shop could use standalone.
-- **No POS cart / invoice finalization screen yet.** Product search is wired up; turning search results into a cart and calling `POST /api/v1/pos/invoices` is the natural next step.
+- **POS cart/checkout now exists (see Phase 12)** but only supports a single full-amount CASH tender; no split tenders or customer/Khata selection in the UI yet.
 - **No hardware integration** (barcode scanner as HID input, weighing scale, ESC/POS printer).
+
+## Phase 12 — POS Cart/Checkout (Backend Quote Endpoint + Flutter Cart Screen)
+
+| Area | Status | Evidence |
+|---|---|---|
+| `pos.Service.Quote` — server-computed pricing preview, no writes/stock checks | **VERIFIED** | `internal/domain/pos/quote.go`; a new test (`TestQuote_MatchesWhatFinalizeWouldCharge`) proves the quoted total is exactly what `FinalizeInvoice` actually charges for the identical cart — not just plausible-looking, provably identical, because both now call one shared `priceLine` helper |
+| Refactored `FinalizeInvoice` to share pricing logic with `Quote` (no duplicate tax math) | **VERIFIED** | Full POS test suite re-run after the refactor — all prior tests (cash sale, insufficient stock, tender mismatch, credit limit, concurrency) still pass unchanged |
+| `GET /api/v1/locations` (needed for the Flutter location picker) | IMPLEMENTED | `internal/domain/location` |
+| Flutter cart model + cart/checkout screen | **VERIFIED** | `lib/features/pos/cart_model.dart`, `cart_screen.dart`, `pos_api.dart`; wired into product search (tap-to-add, cart badge) |
+| **Real end-to-end checkout**: Android emulator → live quote → live invoice finalization → live PostgreSQL | **VERIFIED** | `integration_test/app_test.dart` extended to search, add to cart, open the cart screen, wait for a real server-computed total, and tap checkout — then independently confirmed in the database: a genuinely new `INV-2627-00005` for exactly ₹1260.00 (1 bag @ ₹1200 + 5% GST) appeared, and stock dropped from 16 to 15 |
+| Widget test coverage for add-to-cart | **VERIFIED** | New widget test confirms tapping a search result populates the cart and updates the badge |
+
+The cart never computes its own total — it calls the real `/api/v1/pos/quote` endpoint and displays exactly what the server would charge, which is the same code path `FinalizeInvoice` uses. This directly avoids the class of bug where a client-side price/tax calculation could silently drift from the server's.
+
+No new bugs were found in the backend quote logic (it reused already-tested code via the shared `priceLine` extraction). One test-harness gap was found and fixed: the existing widget tests broke immediately because `ProductSearchScreen` now depends on `CartModel`, which the tests' provider setup didn't include — a `ProviderNotFoundException`, caught immediately by running the suite rather than assuming the new code wouldn't affect old tests.
+
+### Known gaps in this phase
+- Checkout only supports a single CASH tender for the exact quoted amount. Split tenders (cash+UPI+credit) and a customer picker for Khata/credit sales are not wired into the UI, though the backend fully supports both.
+- No cart persistence — closing the app loses the cart (expected, since there is no offline storage yet).
 
 ## Not Yet Started
 

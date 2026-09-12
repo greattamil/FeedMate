@@ -7,12 +7,13 @@ import '../../core/api_client.dart';
 import '../../core/api_error.dart';
 import '../../core/auth_session.dart';
 import '../auth/login_screen.dart';
+import 'cart_model.dart';
+import 'cart_screen.dart';
 import 'product.dart';
 
 /// Product search, backed by the real Go backend's ranked search endpoint
-/// (barcode > SKU > exact name > alias > fuzzy — see PRD A4). This is a POS
-/// building block: the next step is wiring selected products into a cart and
-/// calling POST /api/v1/pos/invoices to finalize a real sale.
+/// (barcode > SKU > exact name > alias > fuzzy — see PRD A4). Tapping a
+/// result adds it to the cart; the cart button navigates to checkout.
 class ProductSearchScreen extends StatefulWidget {
   const ProductSearchScreen({super.key});
 
@@ -82,10 +83,24 @@ class _ProductSearchScreenState extends State<ProductSearchScreen> {
   @override
   Widget build(BuildContext context) {
     final session = context.watch<AuthSession>();
+    final cart = context.watch<CartModel>();
     return Scaffold(
       appBar: AppBar(
         title: Text(session.displayName ?? 'Product Search'),
         actions: [
+          IconButton(
+            key: const Key('cart_button'),
+            icon: Badge(
+              label: Text('${cart.itemCount}'),
+              isLabelVisible: !cart.isEmpty,
+              child: const Icon(Icons.shopping_cart),
+            ),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const CartScreen()),
+              );
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: () async {
@@ -137,6 +152,12 @@ class _ProductSearchScreenState extends State<ProductSearchScreen> {
                     p.sellingPrice != null ? '₹${p.sellingPrice!.toStringAsFixed(2)}' : '—',
                     style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
+                  onTap: () {
+                    context.read<CartModel>().addProduct(p);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Added ${p.name} to cart'), duration: const Duration(seconds: 1)),
+                    );
+                  },
                 );
               },
             ),

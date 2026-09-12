@@ -13,6 +13,7 @@ import 'package:feedmate_app/core/api_client.dart';
 import 'package:feedmate_app/core/auth_session.dart';
 import 'package:feedmate_app/core/secure_storage.dart';
 import 'package:feedmate_app/features/auth/login_screen.dart';
+import 'package:feedmate_app/features/pos/cart_model.dart';
 import 'package:feedmate_app/features/pos/product_search_screen.dart';
 
 Widget _wrapWithProviders({
@@ -28,6 +29,7 @@ Widget _wrapWithProviders({
       ChangeNotifierProvider<AuthSession>(
         create: (_) => AuthSession(apiClient: apiClient, storage: storage),
       ),
+      ChangeNotifierProvider<CartModel>(create: (_) => CartModel()),
     ],
     child: MaterialApp(home: child),
   );
@@ -122,6 +124,7 @@ void main() {
         Provider<SecureStorage>.value(value: storage),
         Provider<ApiClient>.value(value: apiClient),
         ChangeNotifierProvider<AuthSession>(create: (_) => AuthSession(apiClient: apiClient, storage: storage)),
+        ChangeNotifierProvider<CartModel>(create: (_) => CartModel()),
       ],
       child: const MaterialApp(home: ProductSearchScreen()),
     ));
@@ -132,5 +135,56 @@ void main() {
 
     expect(find.text('Cattle Feed 50kg'), findsOneWidget);
     expect(find.textContaining('₹1200.00'), findsOneWidget);
+  });
+
+  testWidgets('tapping a search result adds it to the cart, shown as a badge', (tester) async {
+    final client = MockClient((request) async {
+      if (request.url.path == '/api/v1/products/search') {
+        return http.Response(
+          jsonEncode({
+            'results': [
+              {
+                'product': {
+                  'id': 'p1', 'sku': 'CF-01', 'name': 'Cattle Feed 50kg',
+                  'selling_price': '1200.00', 'batch_required': true,
+                  'loose_sale_allowed': false, 'active': true,
+                },
+                'match_type': 'NAME',
+              }
+            ]
+          }),
+          200,
+        );
+      }
+      return http.Response('not found', 404);
+    });
+
+    final storage = SecureStorage(store: InMemoryKeyValueStore());
+    await storage.saveTokens(accessToken: 'tok', refreshToken: 'ref', tenantId: 'tenant-123');
+    final apiClient = ApiClient(baseUrl: 'http://test.invalid', storage: storage, httpClient: client);
+    final cart = CartModel();
+
+    await tester.pumpWidget(MultiProvider(
+      providers: [
+        Provider<SecureStorage>.value(value: storage),
+        Provider<ApiClient>.value(value: apiClient),
+        ChangeNotifierProvider<AuthSession>(create: (_) => AuthSession(apiClient: apiClient, storage: storage)),
+        ChangeNotifierProvider<CartModel>.value(value: cart),
+      ],
+      child: const MaterialApp(home: ProductSearchScreen()),
+    ));
+
+    await tester.enterText(find.byKey(const Key('search_field')), 'cattle');
+    await tester.pump(const Duration(milliseconds: 350));
+    await tester.pumpAndSettle();
+
+    expect(cart.isEmpty, isTrue);
+    await tester.tap(find.text('Cattle Feed 50kg'));
+    await tester.pump(); // let the SnackBar animation start
+    await tester.pump(const Duration(seconds: 2)); // let it finish so it doesn't linger into other checks
+
+    expect(cart.isEmpty, isFalse);
+    expect(cart.lines.single.product.id, 'p1');
+    expect(find.text('1'), findsWidgets); // the cart badge showing 1 item
   });
 }

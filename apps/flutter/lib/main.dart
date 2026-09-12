@@ -8,6 +8,7 @@ import 'core/api_client.dart';
 import 'core/auth_session.dart';
 import 'core/secure_storage.dart';
 import 'features/auth/login_screen.dart';
+import 'features/pos/cart_model.dart';
 import 'features/pos/product_search_screen.dart';
 
 /// Resolves the API base URL for local development. An Android emulator
@@ -49,6 +50,7 @@ class FeedMateApp extends StatelessWidget {
         ChangeNotifierProvider<AuthSession>(
           create: (_) => AuthSession(apiClient: apiClient, storage: storage),
         ),
+        ChangeNotifierProvider<CartModel>(create: (_) => CartModel()),
       ],
       child: MaterialApp(
         title: 'Andipatti Animal Feed System',

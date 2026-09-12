@@ -139,3 +139,54 @@ func InsertPaymentIfNew(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, p *P
 	}
 	return true, nil
 }
+
+// ManualPayment is a receipt collected in person (cash in hand, a bank
+// transfer confirmed by other means) — there is no provider or intent to
+// attach it to, unlike a UPI PaymentRecord.
+type ManualPayment struct {
+	ID             uuid.UUID
+	CustomerID     uuid.UUID
+	Method         string
+	Amount         decimal.Decimal
+	IdempotencyKey string
+	Reference      string
+}
+
+// InsertManualPaymentIfNew is idempotent on (tenant_id, idempotency_key): a
+// cashier double-tapping "Record Receipt" (e.g. after a network blip on the
+// response) must not double-credit a customer's Khata. created=false with
+// no error means an identical request already succeeded — the caller must
+// treat that the same as a fresh success, not surface it as a failure.
+func InsertManualPaymentIfNew(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, p *ManualPayment) (created bool, err error) {
+	row := tx.QueryRow(ctx, `
+		INSERT INTO payments (tenant_id, payment_intent_id, provider, provider_payment_id, method, amount, status, received_at, raw_reference, idempotency_key)
+		VALUES ($1, NULL, 'MANUAL', NULL, $2, $3, 'SUCCESS', now(), jsonb_build_object('reference', $4::text), $5)
+		ON CONFLICT (tenant_id, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
+		RETURNING id
+	`, tenantID, p.Method, p.Amount, p.Reference, p.IdempotencyKey)
+	if err := row.Scan(&p.ID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+// FindManualPaymentByIdempotencyKey resolves what an earlier, already-
+// successful call with the same idempotency key actually did, so a retry
+// can report the same result instead of a confusing "nothing happened".
+func FindManualPaymentByIdempotencyKey(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, idempotencyKey string) (*ManualPayment, error) {
+	row := tx.QueryRow(ctx, `
+		SELECT id, method, amount FROM payments
+		WHERE tenant_id = $1 AND idempotency_key = $2
+	`, tenantID, idempotencyKey)
+	var p ManualPayment
+	if err := row.Scan(&p.ID, &p.Method, &p.Amount); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &p, nil
+}

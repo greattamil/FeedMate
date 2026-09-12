@@ -412,18 +412,62 @@ services-container health-check syntax under real GitHub Actions scheduling.
 Whoever first pushes this to GitHub should treat the first real run as the
 actual verification, not this description.
 
+## Phase 20 — Manual Khata Receipts (Cash/Bank) + Flutter Recording UI
+
+Phase 17 made the Khata ledger readable but not writable from the app — a
+UPI receipt posts automatically via the payment webhook (Phase 7), but a
+cashier physically handed cash by a farmer had no way to record it; paying
+down a balance required direct SQL/API. This phase closes that loop.
+
+**Design note**: `payment.CreateReceiptIntent`'s own doc comment states
+receipts "may generate a UPI payment link only through a configured
+payment/collection mechanism — never an ad hoc, unverified amount." A
+manual cash receipt does not violate this: the constraint is about not
+trusting a *client's claim* that an unconfirmed digital payment succeeded.
+Cash has no digital confirmation to wait for — the authenticated cashier's
+own action *is* the confirmation, identical to the trust boundary the
+system already accepts for a CASH tender at POS checkout (`pos.sell`
+permission, no provider involved). `RecordManualReceipt` therefore requires
+`METHOD` to be `CASH`, `BANK`, or `OTHER` — `UPI` is explicitly rejected
+and must go through the existing intent/webhook path.
+
+| Area | Status | Evidence |
+|---|---|---|
+| Migration `0017`: `payments.idempotency_key` (partial unique index) | **VERIFIED** | Applied to the dev database via the `migrate` compose profile |
+| `payment.RecordManualReceipt` (repository + service): posts ledger credit + balanced journal (Dr Cash/Bank/Other, Cr Accounts Receivable), idempotent on `idempotency_key` | **VERIFIED** | 3 new integration tests: balance reduction + a real posted journal row, a retried identical request resolving to the same payment id with the balance reduced only once, and UPI/zero-amount both rejected with `ErrValidation` |
+| `POST /api/v1/payments/receipts` | **VERIFIED, live** | Real `curl` call reduced "Test Farmer"'s balance by exactly ₹500.00; an identical retry (same `idempotency_key`) returned `duplicate: true` with the same `payment_id` and did not double-credit |
+| Flutter: "Record Receipt" FAB on the Khata detail screen, amount/method/reference dialog | **VERIFIED, live** | Installed on the Android emulator: recorded a real ₹265.00 cash receipt against "Test Farmer" — the snackbar confirmed it, the new ledger entry appeared at the top of the real list, and the outstanding balance dropped from ₹103,265.00 to ₹103,000.00, all confirmed against the live server |
+| 4 widget tests (`test/khata_test.dart`), mocked HTTP | **VERIFIED** | Covers a successful receipt refreshing the balance from a fresh server fetch (not a client-side subtraction) and client-side rejection of a zero amount before any network call |
+
+### A methodology note, not a product bug
+Writing this feature's own widget test initially failed with a confusing
+`Expected: not null, Actual: <null>` — the actual cause was a `TestFailure`
+thrown *inside* the mock HTTP handler's own `expect()` call (a wrong
+assertion comparing `Decimal("800.00")`'s serialized form to the literal
+string `"800.00"` — `Decimal.toString()` drops trailing zeros, the same
+formatting `pos_api.dart` already relies on for tender amounts, and the Go
+backend parses either representation to an identical numeric value). That
+`TestFailure` propagated through `ApiClient`'s generic `on Exception catch`
+network-error handling and was silently absorbed by the screen's own `on
+ApiError catch` block, masking the real assertion failure as an unrelated
+null-result symptom far from its cause. Fixed by comparing the parsed
+`Decimal` values instead of raw strings. Not a defect in shipped code —
+recorded here because the failure mode (a test's own broken assertion
+being swallowed by the very error-handling path it's supposed to be
+testing) is exactly the kind of thing worth remembering when a future test
+fails in a confusing way in this codebase.
+
 ## Not Yet Started
 
 Customer/supplier aging (30/60/90-day buckets) and margin reports,
 per-device cash session tracking (schema exists, not wired up), a real
 payment provider adapter (production gateway credentials are the external
-dependency — the interface and sandbox are done), a way to *record* a
-receipt against a customer's Khata from the app itself (the ledger is
-readable now — Phase 17 — but a receipt-entry screen posting a real
-`RECEIPT` row doesn't exist yet, so paying down a balance still requires
-direct SQL/API), idempotency/outbox infrastructure for external side
-effects (printer/WhatsApp), the rest of the Flutter app (supplier ledger
-screen, procurement/GRN screens, EOD/reports screens), a WhatsApp provider adapter,
+dependency — the interface and sandbox are done), idempotency/outbox
+infrastructure for external side effects (printer/WhatsApp), the rest of
+the Flutter app (a supplier-side equivalent of the Khata screen —
+suppliers have their own payable ledger from Phase 6/procurement but no
+Flutter view of it, procurement/GRN screens, EOD/reports screens), a
+WhatsApp provider adapter,
 hardware adapters (scale/printer/scanner), seed/config workflows, CI/CD
 running for real on GitHub's infrastructure (the workflow exists — Phase
 19 — but has never actually executed there; there is no `git remote`),
@@ -438,26 +482,27 @@ reporting → DevOps).
 
 **NOT READY**, but substantially further along than a first read of "Not Yet
 Started" suggests — that list is what's missing, not a summary of what
-exists. As of Phase 19: the Go backend has verified, tested business domain
+exists. As of Phase 20: the Go backend has verified, tested business domain
 logic for auth/RBAC, product search, inventory/batches, accounting, POS
 sales (cash + credit + credit-limit override), procurement/GRN, returns,
-supplier payables, UPI payment intents + webhooks, contra/buy-back, EOD cash
-reconciliation, reports, device self-registration, and a customer master API
-with a full ledger/Khata statement endpoint — all covered by integration
-tests against live PostgreSQL and exercised via real HTTP calls. The Flutter
-client is a real running app (not a mock): login, Tamil/phonetic product
-search, cart/checkout with cash and credit tenders, a customer picker, a
-Khata statement screen, encrypted offline storage with a working
-offline-sale-then-sync path, and an outbox review/retry screen — all
-verified live on an Android emulator, including with connectivity actually
-disabled. A CI workflow exists covering both stacks, though it has not yet
-run on real GitHub infrastructure (no `git remote` is configured — see
-Phase 19's honesty note).
+supplier payables, UPI payment intents + webhooks, manual cash/bank Khata
+receipts, contra/buy-back, EOD cash reconciliation, reports, device
+self-registration, and a customer master API with a full ledger/Khata
+statement endpoint — all covered by integration tests against live
+PostgreSQL and exercised via real HTTP calls. The Flutter client is a real
+running app (not a mock): login, Tamil/phonetic product search,
+cart/checkout with cash and credit tenders, a customer picker, a Khata
+statement screen with receipt recording, encrypted offline storage with a
+working offline-sale-then-sync path, and an outbox review/retry screen —
+all verified live on an Android emulator, including with connectivity
+actually disabled. A CI workflow exists covering both stacks, though it
+has not yet run on real GitHub infrastructure (no `git remote` is
+configured — see Phase 19's honesty note).
 
 What's still genuinely missing, and why this isn't production-ready: no
 real payment gateway (sandbox only), no WhatsApp integration, no hardware
-adapters (scanner/scale/printer), no aging/margin reports, no way to record
-a Khata receipt from the app itself, several Flutter screens still absent
-(procurement/GRN, EOD/reports), no backup/DR tooling, CI that has never
-actually executed, and the test suite is integration + widget level only —
-no E2E, chaos, load, or security test suites exist yet.
+adapters (scanner/scale/printer), no aging/margin reports, several Flutter
+screens still absent (a supplier-side Khata equivalent, procurement/GRN,
+EOD/reports), no backup/DR tooling, CI that has never actually executed,
+and the test suite is integration + widget level only — no E2E, chaos,
+load, or security test suites exist yet.

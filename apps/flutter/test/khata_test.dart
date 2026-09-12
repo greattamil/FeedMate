@@ -4,6 +4,7 @@
 // Go server is verified separately (see docs/IMPLEMENTATION_STATUS.md).
 import 'dart:convert';
 
+import 'package:decimal/decimal.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -110,5 +111,99 @@ void main() {
 
     expect(find.text('No ledger entries yet'), findsOneWidget);
     expect(find.text('Over credit limit'), findsNothing);
+  });
+
+  testWidgets('Record Receipt posts a manual receipt and refreshes the balance', (tester) async {
+    var getDetailCalls = 0;
+    String? sentIdempotencyKey;
+
+    final client = MockClient((request) async {
+      if (request.url.path == '/api/v1/customers/cust-3') {
+        getDetailCalls++;
+        final balance = getDetailCalls == 1 ? '5000.00' : '4200.00';
+        final available = getDetailCalls == 1 ? '0.00' : '800.00';
+        return _jsonOk({
+          'id': 'cust-3', 'customer_code': 'FARM003', 'name': 'Receipt Test Farmer',
+          'customer_type': 'FARMER', 'phone': null,
+          'credit_limit': '5000.00', 'outstanding_balance': balance,
+          'available_credit': available, 'risk_status': 'NORMAL',
+        });
+      }
+      if (request.url.path == '/api/v1/customers/cust-3/ledger') {
+        return _jsonOk({'entries': []});
+      }
+      if (request.url.path == '/api/v1/payments/receipts') {
+        final body = jsonDecode(request.body) as Map<String, dynamic>;
+        expect(body['customer_id'], 'cust-3');
+        // Decimal.toString() drops trailing zeros ("800.00" -> "800"), the
+        // same formatting pos_api.dart already relies on for tender amounts
+        // — the Go backend parses either representation to an identical
+        // decimal value, so this must compare numerically, not as strings.
+        expect(Decimal.parse(body['amount'] as String), Decimal.parse('800.00'));
+        expect(body['method'], 'CASH');
+        sentIdempotencyKey = body['idempotency_key'] as String;
+        return _jsonOk({'payment_id': 'pay-1', 'duplicate': false});
+      }
+      return http.Response('not found', 404);
+    });
+
+    await tester.pumpWidget(_wrapWithProviders(
+      httpClient: client,
+      child: const KhataDetailScreen(customerId: 'cust-3'),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('₹5000.00'), findsWidgets);
+
+    await tester.tap(find.byKey(const Key('record_receipt_fab')));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byKey(const Key('receipt_amount_field')), '800.00');
+    await tester.tap(find.byKey(const Key('receipt_submit_button')));
+    await tester.pumpAndSettle();
+
+    expect(sentIdempotencyKey, isNotNull);
+    expect(sentIdempotencyKey, isNotEmpty);
+    expect(find.textContaining('Receipt of ₹800.00 recorded'), findsOneWidget);
+    // The balance shown must come from a fresh fetch after recording, not a
+    // client-side subtraction — asserted by the mock returning a different
+    // balance on the second GET and that new value actually appearing.
+    expect(find.text('₹4200.00'), findsOneWidget);
+  });
+
+  testWidgets('Record Receipt rejects a zero amount client-side before calling the server', (tester) async {
+    var receiptCallCount = 0;
+    final client = MockClient((request) async {
+      if (request.url.path == '/api/v1/customers/cust-4') {
+        return _jsonOk({
+          'id': 'cust-4', 'customer_code': 'FARM004', 'name': 'Zero Amount Farmer',
+          'customer_type': 'FARMER', 'phone': null,
+          'credit_limit': '5000.00', 'outstanding_balance': '1000.00',
+          'available_credit': '4000.00', 'risk_status': 'NORMAL',
+        });
+      }
+      if (request.url.path == '/api/v1/customers/cust-4/ledger') {
+        return _jsonOk({'entries': []});
+      }
+      if (request.url.path == '/api/v1/payments/receipts') {
+        receiptCallCount++;
+        return _jsonOk({'payment_id': 'pay-2', 'duplicate': false});
+      }
+      return http.Response('not found', 404);
+    });
+
+    await tester.pumpWidget(_wrapWithProviders(
+      httpClient: client,
+      child: const KhataDetailScreen(customerId: 'cust-4'),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('record_receipt_fab')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('receipt_submit_button')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Enter a valid amount greater than zero'), findsOneWidget);
+    expect(receiptCallCount, 0);
   });
 }

@@ -293,3 +293,102 @@ func getOrderReference(t *testing.T, db *dbctx.DB, intentID uuid.UUID) string {
 	}
 	return ref
 }
+
+func TestRecordManualReceipt_CashReducesBalanceAndPostsBalancedJournal(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	f := seedFixture(t, db)
+	sandbox := paymentprovider.NewSandboxProvider("test-secret")
+	svc := payment.NewService(db, sandbox)
+
+	result, err := svc.RecordManualReceipt(context.Background(), f.tenantID, payment.RecordManualReceiptRequest{
+		CustomerID: f.customerID, Amount: decimal.RequireFromString("2000.00"), Method: "CASH",
+		Reference: "collected at shop", IdempotencyKey: "idem-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("record manual receipt: %v", err)
+	}
+	if result.Duplicate {
+		t.Fatal("expected a first-time receipt to not be reported as a duplicate")
+	}
+
+	balance := getBalance(t, db, f.customerID)
+	if !balance.Equal(decimal.RequireFromString("3000.00")) {
+		t.Fatalf("expected balance to drop from 5000.00 to 3000.00 after a 2000.00 cash receipt, got %s", balance)
+	}
+
+	// The deferred trigger fn_check_journal_balance enforces sum(debit) =
+	// sum(credit) at commit — reaching this point at all is itself
+	// confirmation the posted journal balanced.
+	var journalCount int
+	err = db.WithAdminTx(context.Background(), func(tx pgx.Tx) error {
+		return tx.QueryRow(context.Background(), `
+			SELECT count(*) FROM journal_entries WHERE tenant_id = $1 AND source_type = 'RECEIPT' AND source_id = $2
+		`, f.tenantID, result.PaymentID).Scan(&journalCount)
+	})
+	if err != nil {
+		t.Fatalf("query journal: %v", err)
+	}
+	if journalCount != 1 {
+		t.Fatalf("expected exactly 1 journal entry for this receipt, got %d", journalCount)
+	}
+}
+
+func TestRecordManualReceipt_RetryWithSameIdempotencyKeyDoesNotDoubleCredit(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	f := seedFixture(t, db)
+	sandbox := paymentprovider.NewSandboxProvider("test-secret")
+	svc := payment.NewService(db, sandbox)
+
+	idempotencyKey := "idem-" + uuid.NewString()
+	req := payment.RecordManualReceiptRequest{
+		CustomerID: f.customerID, Amount: decimal.RequireFromString("1000.00"), Method: "CASH",
+		IdempotencyKey: idempotencyKey,
+	}
+
+	first, err := svc.RecordManualReceipt(context.Background(), f.tenantID, req)
+	if err != nil {
+		t.Fatalf("first record: %v", err)
+	}
+	second, err := svc.RecordManualReceipt(context.Background(), f.tenantID, req)
+	if err != nil {
+		t.Fatalf("retried record: %v", err)
+	}
+
+	if !second.Duplicate {
+		t.Fatal("expected the retried request to be reported as a duplicate")
+	}
+	if first.PaymentID != second.PaymentID {
+		t.Fatalf("expected the retry to resolve to the same payment id, got %s vs %s", first.PaymentID, second.PaymentID)
+	}
+
+	balance := getBalance(t, db, f.customerID)
+	if !balance.Equal(decimal.RequireFromString("4000.00")) {
+		t.Fatalf("expected balance to drop by only 1000.00 once (5000.00 -> 4000.00) despite two calls, got %s", balance)
+	}
+}
+
+func TestRecordManualReceipt_RejectsUpiMethodAndNonPositiveAmount(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	f := seedFixture(t, db)
+	sandbox := paymentprovider.NewSandboxProvider("test-secret")
+	svc := payment.NewService(db, sandbox)
+
+	_, err := svc.RecordManualReceipt(context.Background(), f.tenantID, payment.RecordManualReceiptRequest{
+		CustomerID: f.customerID, Amount: decimal.RequireFromString("100.00"), Method: "UPI",
+		IdempotencyKey: "idem-" + uuid.NewString(),
+	})
+	if !errors.Is(err, payment.ErrValidation) {
+		t.Fatalf("expected ErrValidation for method UPI (must go through CreateReceiptIntent instead), got: %v", err)
+	}
+
+	_, err = svc.RecordManualReceipt(context.Background(), f.tenantID, payment.RecordManualReceiptRequest{
+		CustomerID: f.customerID, Amount: decimal.RequireFromString("0.00"), Method: "CASH",
+		IdempotencyKey: "idem-" + uuid.NewString(),
+	})
+	if !errors.Is(err, payment.ErrValidation) {
+		t.Fatalf("expected ErrValidation for a zero amount, got: %v", err)
+	}
+}

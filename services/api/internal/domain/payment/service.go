@@ -94,6 +94,73 @@ func (s *Service) CreateReceiptIntent(ctx context.Context, tenantID uuid.UUID, r
 	return &result, nil
 }
 
+type RecordManualReceiptRequest struct {
+	CustomerID     uuid.UUID
+	Amount         decimal.Decimal
+	Method         string // CASH, BANK, or OTHER — never UPI (that must go through CreateReceiptIntent/ProcessWebhook)
+	Reference      string
+	IdempotencyKey string
+}
+
+type RecordManualReceiptResult struct {
+	PaymentID uuid.UUID
+	Duplicate bool
+}
+
+var manualReceiptMethods = map[string]bool{"CASH": true, "BANK": true, "OTHER": true}
+
+// RecordManualReceipt posts a receipt collected in person — there is no
+// provider to confirm it, so unlike a UPI receipt (see ProcessWebhook) the
+// cashier's own authenticated action is the confirmation, the same trust
+// boundary already accepted for a CASH tender at POS checkout. Idempotent
+// on IdempotencyKey: a retried request (e.g. after a network timeout on the
+// response) returns the original result rather than posting twice.
+func (s *Service) RecordManualReceipt(ctx context.Context, tenantID uuid.UUID, req RecordManualReceiptRequest) (*RecordManualReceiptResult, error) {
+	if req.Amount.LessThanOrEqual(decimal.Zero) {
+		return nil, fmt.Errorf("%w: amount must be positive", ErrValidation)
+	}
+	if !manualReceiptMethods[req.Method] {
+		return nil, fmt.Errorf("%w: method must be one of CASH, BANK, OTHER", ErrValidation)
+	}
+	if req.IdempotencyKey == "" {
+		return nil, fmt.Errorf("%w: idempotency_key is required", ErrValidation)
+	}
+
+	var result RecordManualReceiptResult
+	err := s.db.WithTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
+		if _, err := customer.GetByID(ctx, tx, req.CustomerID); err != nil {
+			return fmt.Errorf("load customer: %w", err)
+		}
+
+		p := &ManualPayment{
+			CustomerID: req.CustomerID, Method: req.Method, Amount: req.Amount,
+			IdempotencyKey: req.IdempotencyKey, Reference: req.Reference,
+		}
+		created, err := InsertManualPaymentIfNew(ctx, tx, tenantID, p)
+		if err != nil {
+			return fmt.Errorf("insert manual payment: %w", err)
+		}
+		if !created {
+			existing, err := FindManualPaymentByIdempotencyKey(ctx, tx, tenantID, req.IdempotencyKey)
+			if err != nil {
+				return fmt.Errorf("resolve duplicate manual payment: %w", err)
+			}
+			result = RecordManualReceiptResult{PaymentID: existing.ID, Duplicate: true}
+			return nil
+		}
+
+		if err := postManualReceiptLedgerAndJournal(ctx, tx, tenantID, req.CustomerID, p.ID, req.Method, req.Amount); err != nil {
+			return fmt.Errorf("post receipt ledger/journal: %w", err)
+		}
+		result = RecordManualReceiptResult{PaymentID: p.ID, Duplicate: false}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 func (s *Service) GetIntentStatus(ctx context.Context, tenantID, intentID uuid.UUID) (string, error) {
 	var status string
 	err := s.db.WithTenantReadTx(ctx, tenantID, func(tx pgx.Tx) error {
@@ -253,4 +320,65 @@ func postReceiptLedgerAndJournal(ctx context.Context, tx pgx.Tx, tenantID, custo
 		{AccountID: receivableAccountID, Debit: decimal.Zero, Credit: amount, CustomerID: &customerID, Description: "Receivable settled"},
 	})
 	return err
+}
+
+// manualReceiptAccountCode mirrors pos.tenderAccountCode's mapping for the
+// same three methods a manual receipt supports — kept as its own small copy
+// rather than importing the pos package, to keep payment/pos free of a
+// cross-domain dependency for one switch statement.
+func manualReceiptAccountCode(method string) (code, name string) {
+	switch method {
+	case "CASH":
+		return "CASH", "Cash on Hand"
+	case "BANK":
+		return "BANK", "Bank Account"
+	default:
+		return "OTHER_SETTLEMENT", "Other Settlement"
+	}
+}
+
+// postManualReceiptLedgerAndJournal is postReceiptLedgerAndJournal's
+// counterpart for a receipt collected in person rather than confirmed by a
+// payment provider: same ledger/journal shape, but the debit lands in
+// whichever account the method (cash/bank/other) actually settles into
+// instead of always UPI Clearing.
+func postManualReceiptLedgerAndJournal(ctx context.Context, tx pgx.Tx, tenantID, customerID, paymentID uuid.UUID, method string, amount decimal.Decimal) error {
+	description := manualReceiptDescription(method)
+	if _, err := customer.PostLedgerEntry(ctx, tx, tenantID, customer.LedgerEntry{
+		CustomerID: customerID, DocumentType: "RECEIPT", DocumentID: paymentID,
+		Debit: decimal.Zero, Credit: amount, Description: description,
+	}); err != nil {
+		return err
+	}
+
+	financialYearID, err := accounting.GetActiveFinancialYear(ctx, tx, tenantID)
+	if err != nil {
+		return err
+	}
+	code, name := manualReceiptAccountCode(method)
+	settlementAccountID, err := accounting.GetOrCreateAccount(ctx, tx, tenantID, code, name, "ASSET")
+	if err != nil {
+		return err
+	}
+	receivableAccountID, err := accounting.GetOrCreateAccount(ctx, tx, tenantID, "ACCOUNTS_RECEIVABLE", "Trade Receivables", "ASSET")
+	if err != nil {
+		return err
+	}
+	journalNumber := "JRNL-RCPT-" + paymentID.String()[:8]
+	_, err = accounting.PostJournal(ctx, tx, tenantID, financialYearID, journalNumber, "RECEIPT", paymentID, description, []accounting.JournalLine{
+		{AccountID: settlementAccountID, Debit: amount, Credit: decimal.Zero, Description: description},
+		{AccountID: receivableAccountID, Debit: decimal.Zero, Credit: amount, CustomerID: &customerID, Description: "Receivable settled"},
+	})
+	return err
+}
+
+func manualReceiptDescription(method string) string {
+	switch method {
+	case "CASH":
+		return "Cash receipt"
+	case "BANK":
+		return "Bank receipt"
+	default:
+		return "Receipt"
+	}
 }

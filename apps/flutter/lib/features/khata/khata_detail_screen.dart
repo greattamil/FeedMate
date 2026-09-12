@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../../core/api_client.dart';
 import '../../core/api_error.dart';
 import '../pos/customer_api.dart';
+import 'receipt_api.dart';
 
 /// A customer's Khata statement: current credit position plus the itemized
 /// ledger behind it. The balance shown is always what the server just
@@ -57,11 +58,48 @@ class _KhataDetailScreenState extends State<KhataDetailScreen> {
     }
   }
 
+  Future<void> _recordReceipt() async {
+    final result = await showDialog<_ReceiptFormResult>(
+      context: context,
+      builder: (context) => const _RecordReceiptDialog(),
+    );
+    if (result == null) return;
+
+    try {
+      final api = ReceiptApi(context.read<ApiClient>());
+      final receiptResult = await api.recordReceipt(
+        customerId: widget.customerId,
+        amount: result.amount,
+        method: result.method,
+        reference: result.reference,
+      );
+      if (!mounted) return;
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(receiptResult.duplicate
+            ? 'This receipt was already recorded'
+            : 'Receipt of ₹${result.amount.toStringAsFixed(2)} recorded'),
+      ));
+    } on ApiError catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final detail = _detail;
     return Scaffold(
       appBar: AppBar(title: Text(detail?.name ?? 'Khata')),
+      floatingActionButton: detail == null
+          ? null
+          : FloatingActionButton.extended(
+              key: const Key('record_receipt_fab'),
+              onPressed: _recordReceipt,
+              icon: const Icon(Icons.add),
+              label: const Text('Record Receipt'),
+            ),
       body: RefreshIndicator(
         onRefresh: _load,
         child: _loading
@@ -157,6 +195,101 @@ class _KhataDetailScreenState extends State<KhataDetailScreen> {
           color: isDebit ? Colors.red : Colors.green,
         ),
       ),
+    );
+  }
+}
+
+class _ReceiptFormResult {
+  final Decimal amount;
+  final String method;
+  final String? reference;
+
+  _ReceiptFormResult({required this.amount, required this.method, this.reference});
+}
+
+/// Collects the details for a receipt collected in person. This dialog only
+/// gathers input — the server is what actually decides whether the amount
+/// is valid and posts the ledger/journal entries (see ReceiptApi).
+class _RecordReceiptDialog extends StatefulWidget {
+  const _RecordReceiptDialog();
+
+  @override
+  State<_RecordReceiptDialog> createState() => _RecordReceiptDialogState();
+}
+
+class _RecordReceiptDialogState extends State<_RecordReceiptDialog> {
+  final _amountController = TextEditingController();
+  final _referenceController = TextEditingController();
+  String _method = 'CASH';
+  String? _error;
+
+  @override
+  void dispose() {
+    _amountController.dispose();
+    _referenceController.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final amount = Decimal.tryParse(_amountController.text.trim());
+    if (amount == null || amount <= Decimal.zero) {
+      setState(() => _error = 'Enter a valid amount greater than zero');
+      return;
+    }
+    Navigator.of(context).pop(_ReceiptFormResult(
+      amount: amount,
+      method: _method,
+      reference: _referenceController.text.trim(),
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Record Receipt'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextField(
+            key: const Key('receipt_amount_field'),
+            controller: _amountController,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(labelText: 'Amount received'),
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            key: const Key('receipt_method_dropdown'),
+            initialValue: _method,
+            decoration: const InputDecoration(labelText: 'Method'),
+            items: const [
+              DropdownMenuItem(value: 'CASH', child: Text('Cash')),
+              DropdownMenuItem(value: 'BANK', child: Text('Bank Transfer')),
+              DropdownMenuItem(value: 'OTHER', child: Text('Other')),
+            ],
+            onChanged: (value) => setState(() => _method = value ?? 'CASH'),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            key: const Key('receipt_reference_field'),
+            controller: _referenceController,
+            decoration: const InputDecoration(labelText: 'Reference / note (optional)'),
+          ),
+          if (_error != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(_error!, style: const TextStyle(color: Colors.red)),
+            ),
+        ],
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
+        FilledButton(
+          key: const Key('receipt_submit_button'),
+          onPressed: _submit,
+          child: const Text('Record'),
+        ),
+      ],
     );
   }
 }

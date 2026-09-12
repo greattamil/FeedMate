@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 
+	"github.com/andipatti/feedmate/services/api/internal/domain/customer"
 	"github.com/andipatti/feedmate/services/api/internal/domain/payment"
 	"github.com/andipatti/feedmate/services/api/internal/reqctx"
 )
@@ -64,6 +65,67 @@ func (h *PaymentHandlers) CreateReceiptIntent(w http.ResponseWriter, r *http.Req
 		"intent_id":  result.IntentID.String(),
 		"qr_payload": result.QRPayload,
 		"status":     result.Status,
+	})
+}
+
+type recordManualReceiptRequest struct {
+	CustomerID     string `json:"customer_id"`
+	Amount         string `json:"amount"`
+	Method         string `json:"method"`
+	Reference      string `json:"reference,omitempty"`
+	IdempotencyKey string `json:"idempotency_key"`
+}
+
+// RecordManualReceipt posts a receipt collected in person (cash in hand, a
+// bank transfer confirmed by other means) against a customer's Khata. See
+// payment.Service.RecordManualReceipt for why this is safe without a
+// provider confirmation: the authenticated cashier's own action is the
+// confirmation, the same trust boundary already accepted for a CASH tender
+// at POS checkout.
+func (h *PaymentHandlers) RecordManualReceipt(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	claims, ok := reqctx.Claims(r.Context())
+	if !ok {
+		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		return
+	}
+
+	var req recordManualReceiptRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid request body")
+		return
+	}
+	customerID, err := uuid.Parse(req.CustomerID)
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "customer_id must be a valid UUID")
+		return
+	}
+	amount, err := decimal.NewFromString(req.Amount)
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "amount must be a valid decimal")
+		return
+	}
+
+	result, err := h.Payment.RecordManualReceipt(r.Context(), claims.TenantID, payment.RecordManualReceiptRequest{
+		CustomerID: customerID, Amount: amount, Method: req.Method,
+		Reference: req.Reference, IdempotencyKey: req.IdempotencyKey,
+	})
+	if err != nil {
+		if errors.Is(err, payment.ErrValidation) {
+			WriteError(w, reqID, CodeValidation, err.Error())
+			return
+		}
+		if errors.Is(err, customer.ErrNotFound) {
+			WriteError(w, reqID, CodeNotFound, "customer not found")
+			return
+		}
+		WriteError(w, reqID, CodeInternal, "failed to record receipt")
+		return
+	}
+
+	WriteJSON(w, http.StatusCreated, map[string]interface{}{
+		"payment_id": result.PaymentID.String(),
+		"duplicate":  result.Duplicate,
 	})
 }
 

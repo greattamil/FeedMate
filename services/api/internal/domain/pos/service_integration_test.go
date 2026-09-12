@@ -1,0 +1,392 @@
+//go:build integration
+
+// Integration tests against a real, migrated PostgreSQL database. Run with:
+//   go test -tags=integration ./internal/domain/pos/...
+// Requires DATABASE_URL (app_user) and DATABASE_ADMIN_URL (app_admin).
+package pos_test
+
+import (
+	"context"
+	"errors"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/shopspring/decimal"
+
+	"github.com/andipatti/feedmate/services/api/internal/dbctx"
+	"github.com/andipatti/feedmate/services/api/internal/domain/customer"
+	"github.com/andipatti/feedmate/services/api/internal/domain/inventory"
+	"github.com/andipatti/feedmate/services/api/internal/domain/pos"
+)
+
+func mustEnv(t *testing.T, key string) string {
+	t.Helper()
+	v := os.Getenv(key)
+	if v == "" {
+		t.Skipf("%s not set; skipping integration test", key)
+	}
+	return v
+}
+
+var (
+	uomBag = uuid.MustParse("00000000-0000-0000-0000-000000000104")
+	uomKG  = uuid.MustParse("00000000-0000-0000-0000-000000000101")
+)
+
+type fixture struct {
+	tenantID        uuid.UUID
+	financialYearID uuid.UUID
+	locationID      uuid.UUID
+	productID       uuid.UUID
+	batchID         uuid.UUID
+	customerID      uuid.UUID
+	deviceID        uuid.UUID
+	userID          uuid.UUID
+	sellingPrice    decimal.Decimal // per unit, excl. tax
+	cgstRate        decimal.Decimal
+	sgstRate        decimal.Decimal
+	initialQty      decimal.Decimal
+}
+
+// seedFixture creates a fully isolated tenant with everything needed to
+// finalize a sale: financial year, invoice document series, tax profile,
+// location, product, one batch with known stock, and a credit customer.
+func seedFixture(t *testing.T, db *dbctx.DB) *fixture {
+	t.Helper()
+	f := &fixture{
+		tenantID:        uuid.New(),
+		financialYearID: uuid.New(),
+		locationID:      uuid.New(),
+		productID:       uuid.New(),
+		batchID:         uuid.New(),
+		customerID:      uuid.New(),
+		deviceID:        uuid.New(),
+		userID:          uuid.New(),
+		sellingPrice:    decimal.RequireFromString("1200.00"),
+		cgstRate:        decimal.RequireFromString("2.5"),
+		sgstRate:        decimal.RequireFromString("2.5"),
+		initialQty:      decimal.RequireFromString("100"),
+	}
+	taxProfileID := uuid.New()
+
+	err := db.WithAdminTx(context.Background(), func(tx pgx.Tx) error {
+		ctx := context.Background()
+		execs := []struct {
+			sql  string
+			args []interface{}
+		}{
+			{`INSERT INTO tenants (id, legal_name, address_line1, city, state_code) VALUES ($1,'POS Test Tenant','1 St','Town','TN')`,
+				[]interface{}{f.tenantID}},
+			{`INSERT INTO financial_years (id, tenant_id, label, start_date, end_date, status) VALUES ($1,$2,'FYTEST','2026-01-01','2026-12-31','OPEN')`,
+				[]interface{}{f.financialYearID, f.tenantID}},
+			{`INSERT INTO tenant_settings (tenant_id, active_financial_year_id) VALUES ($1,$2)`,
+				[]interface{}{f.tenantID, f.financialYearID}},
+			{`INSERT INTO document_series (tenant_id, financial_year_id, document_type, prefix, next_number, padding) VALUES ($1,$2,'INVOICE','TST-',1,4)`,
+				[]interface{}{f.tenantID, f.financialYearID}},
+			{`INSERT INTO inventory_locations (id, tenant_id, code, name, location_type) VALUES ($1,$2,'LOC1','Test Location','SHOP')`,
+				[]interface{}{f.locationID, f.tenantID}},
+			{`INSERT INTO tax_profiles (id, tenant_id, code, description, supply_type, cgst_rate, sgst_rate, effective_from) VALUES ($1,$2,'GST5','GST 5%','INTRA_STATE',$3,$4,'2020-01-01')`,
+				[]interface{}{taxProfileID, f.tenantID, f.cgstRate, f.sgstRate}},
+			{`INSERT INTO products (id, tenant_id, sku, name, default_sale_uom_id, default_purchase_uom_id, base_inventory_uom_id, tax_profile_id, selling_price, batch_required, expiry_required)
+			  VALUES ($1,$2,$3,'Test Feed',$4,$4,$5,$6,$7,true,true)`,
+				[]interface{}{f.productID, f.tenantID, "SKU-" + uuid.NewString()[:8], uomBag, uomKG, taxProfileID, f.sellingPrice}},
+			{`INSERT INTO batches (id, tenant_id, product_id, batch_code, expiry_date, received_date, received_qty, available_qty, received_uom_id, unit_cost, location_id, quality_status, status)
+			  VALUES ($1,$2,$3,'B1','2030-01-01','2026-01-01',$4,$4,$5,'1000.00',$6,'ACCEPTED','ACTIVE')`,
+				[]interface{}{f.batchID, f.tenantID, f.productID, f.initialQty, uomBag, f.locationID}},
+			{`INSERT INTO stock_movements (tenant_id, product_id, batch_id, location_id, uom_id, quantity, signed_quantity, movement_type, source_type)
+			  VALUES ($1,$2,$3,$4,$5,$6,$6,'OPENING','OPENING_BALANCE')`,
+				[]interface{}{f.tenantID, f.productID, f.batchID, f.locationID, uomBag, f.initialQty}},
+			{`INSERT INTO stock_balances (tenant_id, product_id, batch_id, location_id, uom_id, on_hand_qty) VALUES ($1,$2,$3,$4,$5,$6)`,
+				[]interface{}{f.tenantID, f.productID, f.batchID, f.locationID, uomBag, f.initialQty}},
+			{`INSERT INTO customers (id, tenant_id, customer_code, name, customer_type, status) VALUES ($1,$2,'CUST1','Test Customer','FARMER','ACTIVE')`,
+				[]interface{}{f.customerID, f.tenantID}},
+			{`INSERT INTO customer_credit_profiles (customer_id, tenant_id, credit_limit) VALUES ($1,$2,'5000.00')`,
+				[]interface{}{f.customerID, f.tenantID}},
+			{`INSERT INTO devices (id, tenant_id, device_uuid, display_name, platform, status) VALUES ($1,$2,$3,'Test Device','ANDROID','ACTIVE')`,
+				[]interface{}{f.deviceID, f.tenantID, uuid.New()}},
+		}
+		for _, e := range execs {
+			if _, err := tx.Exec(ctx, e.sql, e.args...); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("seed fixture: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.WithAdminTx(context.Background(), func(tx pgx.Tx) error {
+			_, err := tx.Exec(context.Background(), `DELETE FROM tenants WHERE id = $1`, f.tenantID)
+			return err
+		})
+	})
+	return f
+}
+
+func availableQty(t *testing.T, db *dbctx.DB, f *fixture) decimal.Decimal {
+	t.Helper()
+	var qty decimal.Decimal
+	err := db.WithAdminTx(context.Background(), func(tx pgx.Tx) error {
+		return tx.QueryRow(context.Background(), `SELECT available_qty FROM batches WHERE id = $1`, f.batchID).Scan(&qty)
+	})
+	if err != nil {
+		t.Fatalf("read available qty: %v", err)
+	}
+	return qty
+}
+
+func journalBalance(t *testing.T, db *dbctx.DB, invoiceID uuid.UUID) (debit, credit decimal.Decimal) {
+	t.Helper()
+	err := db.WithAdminTx(context.Background(), func(tx pgx.Tx) error {
+		return tx.QueryRow(context.Background(), `
+			SELECT COALESCE(SUM(jl.debit),0), COALESCE(SUM(jl.credit),0)
+			FROM journal_entries je JOIN journal_lines jl ON jl.journal_entry_id = je.id
+			WHERE je.source_id = $1
+		`, invoiceID).Scan(&debit, &credit)
+	})
+	if err != nil {
+		t.Fatalf("read journal balance: %v", err)
+	}
+	return debit, credit
+}
+
+func TestFinalizeInvoice_CashSale(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	f := seedFixture(t, db)
+	svc := pos.NewService(db)
+
+	// 3 bags * 1200 = 3600 subtotal; 5% GST = 180; grand total 3780.
+	req := pos.FinalizeRequest{
+		ClientTransactionID: uuid.New(),
+		LocationID:          f.locationID,
+		Lines:               []pos.SaleLine{{ProductID: f.productID, Quantity: decimal.RequireFromString("3")}},
+		Tenders:             []pos.Tender{{Method: "CASH", Amount: decimal.RequireFromString("3780.00")}},
+	}
+
+	result, err := svc.FinalizeInvoice(context.Background(), f.tenantID, f.deviceID, f.userID, req)
+	if err != nil {
+		t.Fatalf("finalize: %v", err)
+	}
+	if !result.GrandTotal.Equal(decimal.RequireFromString("3780.00")) {
+		t.Fatalf("expected grand total 3780.00, got %s", result.GrandTotal)
+	}
+
+	if got := availableQty(t, db, f); !got.Equal(decimal.RequireFromString("97")) {
+		t.Fatalf("expected 97 remaining after selling 3 of 100, got %s", got)
+	}
+
+	debit, credit := journalBalance(t, db, result.InvoiceID)
+	if !debit.Equal(credit) {
+		t.Fatalf("journal not balanced: debit=%s credit=%s", debit, credit)
+	}
+	if !debit.Equal(decimal.RequireFromString("3780.00")) {
+		t.Fatalf("expected journal total 3780.00, got debit=%s", debit)
+	}
+
+	t.Run("replaying the same client_transaction_id returns the same invoice without double-deducting stock", func(t *testing.T) {
+		replay, err := svc.FinalizeInvoice(context.Background(), f.tenantID, f.deviceID, f.userID, req)
+		if err != nil {
+			t.Fatalf("replay: %v", err)
+		}
+		if !replay.Duplicate {
+			t.Fatal("expected Duplicate=true on replay")
+		}
+		if replay.InvoiceID != result.InvoiceID {
+			t.Fatalf("expected same invoice id on replay, got %s vs %s", replay.InvoiceID, result.InvoiceID)
+		}
+		if got := availableQty(t, db, f); !got.Equal(decimal.RequireFromString("97")) {
+			t.Fatalf("stock must not be double-deducted on replay, got %s", got)
+		}
+	})
+}
+
+func TestFinalizeInvoice_InsufficientStock(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	f := seedFixture(t, db)
+	svc := pos.NewService(db)
+
+	req := pos.FinalizeRequest{
+		ClientTransactionID: uuid.New(),
+		LocationID:          f.locationID,
+		Lines:               []pos.SaleLine{{ProductID: f.productID, Quantity: decimal.RequireFromString("500")}},
+		Tenders:             []pos.Tender{{Method: "CASH", Amount: decimal.RequireFromString("630000.00")}},
+	}
+	_, err := svc.FinalizeInvoice(context.Background(), f.tenantID, f.deviceID, f.userID, req)
+	if err == nil {
+		t.Fatal("expected insufficient stock error")
+	}
+	if !errors.Is(err, inventory.ErrInsufficientStock) {
+		t.Fatalf("expected insufficient stock error, got: %v", err)
+	}
+	if got := availableQty(t, db, f); !got.Equal(f.initialQty) {
+		t.Fatalf("stock must be unchanged after a rejected sale, got %s (expected %s)", got, f.initialQty)
+	}
+}
+
+func TestFinalizeInvoice_TenderMismatchRejected(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	f := seedFixture(t, db)
+	svc := pos.NewService(db)
+
+	req := pos.FinalizeRequest{
+		ClientTransactionID: uuid.New(),
+		LocationID:          f.locationID,
+		Lines:               []pos.SaleLine{{ProductID: f.productID, Quantity: decimal.RequireFromString("1")}},
+		Tenders:             []pos.Tender{{Method: "CASH", Amount: decimal.RequireFromString("100.00")}},
+	}
+	_, err := svc.FinalizeInvoice(context.Background(), f.tenantID, f.deviceID, f.userID, req)
+	if err == nil {
+		t.Fatal("expected tender mismatch error")
+	}
+}
+
+func TestFinalizeInvoice_CreditLimit(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	f := seedFixture(t, db)
+	svc := pos.NewService(db)
+
+	// 40 bags * 1260 (incl. tax) = 50400, far beyond the 5000 credit limit.
+	overLimitReq := pos.FinalizeRequest{
+		ClientTransactionID: uuid.New(),
+		LocationID:          f.locationID,
+		CustomerID:          &f.customerID,
+		Lines:               []pos.SaleLine{{ProductID: f.productID, Quantity: decimal.RequireFromString("40")}},
+		Tenders:             []pos.Tender{{Method: "CREDIT", Amount: decimal.RequireFromString("50400.00")}},
+	}
+
+	t.Run("rejected without an explicit override, even though the amount is large", func(t *testing.T) {
+		_, err := svc.FinalizeInvoice(context.Background(), f.tenantID, f.deviceID, f.userID, overLimitReq)
+		if err == nil {
+			t.Fatal("expected credit limit exceeded error")
+		}
+	})
+
+	t.Run("succeeds with an explicit reasoned override and leaves an audit trail", func(t *testing.T) {
+		reqWithOverride := overLimitReq
+		reqWithOverride.ClientTransactionID = uuid.New()
+		reqWithOverride.CreditOverride.Requested = true
+		reqWithOverride.CreditOverride.Reason = "test override reason"
+
+		result, err := svc.FinalizeInvoice(context.Background(), f.tenantID, f.deviceID, f.userID, reqWithOverride)
+		if err != nil {
+			t.Fatalf("finalize with override: %v", err)
+		}
+
+		balance, err := getOutstandingBalance(db, f.customerID)
+		if err != nil {
+			t.Fatalf("read balance: %v", err)
+		}
+		if !balance.Equal(decimal.RequireFromString("50400.00")) {
+			t.Fatalf("expected customer balance 50400.00, got %s", balance)
+		}
+
+		var overrideCount int
+		err = db.WithAdminTx(context.Background(), func(tx pgx.Tx) error {
+			return tx.QueryRow(context.Background(), `
+				SELECT count(*) FROM audit_logs WHERE entity_id = $1 AND action_code = 'CREDIT_OVERRIDE' AND reason = 'test override reason'
+			`, result.InvoiceID).Scan(&overrideCount)
+		})
+		if err != nil {
+			t.Fatalf("query audit log: %v", err)
+		}
+		if overrideCount != 1 {
+			t.Fatalf("expected exactly one CREDIT_OVERRIDE audit entry with the reason, got %d", overrideCount)
+		}
+	})
+
+	t.Run("rejected when override is requested but no reason is given", func(t *testing.T) {
+		reqNoReason := overLimitReq
+		reqNoReason.ClientTransactionID = uuid.New()
+		reqNoReason.CreditOverride.Requested = true
+		reqNoReason.CreditOverride.Reason = ""
+		_, err := svc.FinalizeInvoice(context.Background(), f.tenantID, f.deviceID, f.userID, reqNoReason)
+		if err == nil {
+			t.Fatal("expected validation error when override reason is missing")
+		}
+	})
+}
+
+func getOutstandingBalance(db *dbctx.DB, customerID uuid.UUID) (decimal.Decimal, error) {
+	var balance decimal.Decimal
+	err := db.WithAdminTx(context.Background(), func(tx pgx.Tx) error {
+		var err error
+		balance, err = customer.OutstandingBalance(context.Background(), tx, customerID)
+		return err
+	})
+	return balance, err
+}
+
+func connectTest(t *testing.T) *dbctx.DB {
+	t.Helper()
+	dsn := mustEnv(t, "DATABASE_URL")
+	adminDSN := mustEnv(t, "DATABASE_ADMIN_URL")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	db, err := dbctx.Connect(ctx, dsn, adminDSN)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	return db
+}
+
+// TestFinalizeInvoice_ConcurrentSalesNeverOversell exercises PRD A12: when two
+// devices race to sell the same limited batch concurrently, the server must
+// serialize stock allocation so exactly the available quantity is sold across
+// both requests combined — never more, and never a negative balance.
+func TestFinalizeInvoice_ConcurrentSalesNeverOversell(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	f := seedFixture(t, db)
+	svc := pos.NewService(db)
+
+	// Only 100 available; two concurrent requests each try to buy 60 (120 total).
+	// Exactly one should succeed in full, or they should split, but the sum
+	// sold must never exceed 100 and the batch must never go negative.
+	qtyPerRequest := decimal.RequireFromString("60")
+	unitPriceWithTax := decimal.RequireFromString("1260.00") // 1200 + 5% GST
+	amount := unitPriceWithTax.Mul(qtyPerRequest)
+
+	results := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			req := pos.FinalizeRequest{
+				ClientTransactionID: uuid.New(),
+				LocationID:          f.locationID,
+				Lines:               []pos.SaleLine{{ProductID: f.productID, Quantity: qtyPerRequest}},
+				Tenders:             []pos.Tender{{Method: "CASH", Amount: amount}},
+			}
+			_, err := svc.FinalizeInvoice(context.Background(), f.tenantID, f.deviceID, f.userID, req)
+			results <- err
+		}()
+	}
+
+	successCount := 0
+	for i := 0; i < 2; i++ {
+		if err := <-results; err == nil {
+			successCount++
+		} else if !errors.Is(err, inventory.ErrInsufficientStock) {
+			t.Fatalf("unexpected error from concurrent sale: %v", err)
+		}
+	}
+
+	// 100 available / 60 per request: only one of the two can succeed.
+	if successCount != 1 {
+		t.Fatalf("expected exactly 1 of 2 concurrent 60-unit sales to succeed against 100 available stock, got %d", successCount)
+	}
+
+	remaining := availableQty(t, db, f)
+	if remaining.LessThan(decimal.Zero) {
+		t.Fatalf("stock must never go negative, got %s", remaining)
+	}
+	if !remaining.Equal(decimal.RequireFromString("40")) {
+		t.Fatalf("expected 40 remaining (100 - 60), got %s", remaining)
+	}
+}

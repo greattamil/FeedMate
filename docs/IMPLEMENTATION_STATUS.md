@@ -84,15 +84,39 @@ Legend: `NOT_STARTED` / `IN_PROGRESS` / `IMPLEMENTED` / `TESTED` / `VERIFIED`
 
 Also confirmed during this phase: an apparently garbled Tamil string in a terminal-printed curl response turned out to be a Windows console codepage display artifact, not a real bug — verified by reading the response bytes directly in a script and comparing codepoints, which matched exactly. Worth recording so a future session doesn't mistake this class of terminal artifact for a real encoding bug.
 
+## Phase 4 — Inventory Ledger, Accounting Journal & POS Invoice Finalization
+
+This is the highest-risk transaction in the whole system (PRD A10: invoice
+finalization, stock movements, batch allocation, tender validation, customer
+ledger, and the accounting journal must all commit atomically or not at all),
+so it received the heaviest testing of any module so far.
+
+| Area | Status | Evidence |
+|---|---|---|
+| Stock ledger (`stock_movements` append-only + `stock_balances`/`batches.available_qty` projections) | **VERIFIED** | `internal/domain/inventory/repository.go`; `PostStockMovement` is the only function that touches inventory |
+| FEFO/FIFO batch allocation with row-level locking | **VERIFIED** | `inventory.AllocateForSale` uses `SELECT ... FOR UPDATE`; a real concurrency test (two goroutines racing for the same limited batch) confirms exactly the available quantity is sold and stock never goes negative |
+| Double-entry accounting journal, DB-enforced balance | **VERIFIED** | `internal/domain/accounting`; the `fn_check_journal_balance` deferred trigger from migration 0009 is exercised for real, and every finalized sale's journal was confirmed debit==credit against the live DB |
+| Customer Khata ledger (append-only, derived balance) | **VERIFIED** | `internal/domain/customer`; balance is `SUM(debit)-SUM(credit)`, never a mutable field |
+| POS invoice finalization (one atomic transaction: tax calc, batch allocation, stock posting, tenders, ledger, journal, audit) | **VERIFIED** | `internal/domain/pos/service.go`; exercised via real HTTP calls (3 bags @ 1200 + 5% GST = exactly 3780.00, confirmed against the DB) and a full integration test suite |
+| Tender-sum validation (must equal grand total) | **VERIFIED** | Rejected a 100/3780 mismatch with `VALIDATION_ERROR` |
+| Insufficient-stock rejection (no partial/negative stock) | **VERIFIED** | Rejected a 500-unit request against 97 available; confirmed stock unchanged after rejection |
+| Idempotent replay (same device + client_transaction_id) | **VERIFIED** | Replaying an identical finalize request returns the original invoice with `duplicate: true` and does not double-deduct stock |
+| Credit-limit enforcement with explicit, audited override | **VERIFIED** (after a real bug fix — see below) | Over-limit credit sales are rejected by default; only succeed with an explicit `override_credit_limit` + reason, gated on the `credit.override` permission, and produce a `CREDIT_OVERRIDE` audit log entry with the reason |
+| Invoice numbering (per financial year, row-locked series) | **VERIFIED** | `pos.AllocateInvoiceNumber` uses `SELECT ... FOR UPDATE` on `document_series` |
+
+### Real bug found and fixed this session (Phase 4)
+7. **Credit-limit override was silently automatic for any user whose role happened to include the `credit.override` permission** — the first version of the code treated "the caller's JWT carries this permission" as sufficient authorization to bypass a customer's credit limit, with no explicit per-sale decision and no recorded reason. In practice this meant any Owner-role POS session (which reasonably holds every permission) could blow through a customer's credit limit with zero friction and zero audit trail explaining why — directly contradicting PRD 10.1 ("over-limit credit requires configured owner/manager approval and records approver identity/reason"). Caught by manually testing a 40-bag credit sale against a ₹5,000 limit and watching it succeed silently. Fixed by requiring the client to explicitly send `override_credit_limit: true` plus a non-empty `override_reason`; the handler still checks the permission, but the permission alone is no longer sufficient. The override reason is now recorded in a dedicated `CREDIT_OVERRIDE` audit log entry and in the customer ledger description. Covered by three permanent integration test cases (rejected without override, succeeds with reasoned override + audit trail verified, rejected if override requested without a reason).
+
 ## Not Yet Started
 
-Remaining business domain modules (inventory/batches, procurement,
-POS/invoice finalization, Khata/accounting, payments, contra, EOD, reports),
-idempotency/outbox infrastructure, Flutter app (offline-first, SQLCipher,
-POS UI), payment/GST/WhatsApp provider adapters, hardware adapters
-(scale/printer/scanner), seed/config workflows, CI/CD, the rest of the test
-suites (E2E/offline/chaos/load), backup/DR tooling, and the remaining
-documentation set. These will be built in subsequent sessions, in the
+Remaining business domain modules (procurement/GRN with tare validation,
+sales returns/refunds, payment/UPI integration, contra/buy-back, cash
+sessions/EOD, reports/dashboards), idempotency/outbox infrastructure for
+external side effects (printer/WhatsApp), Flutter app (offline-first,
+SQLCipher, POS UI), payment/GST/WhatsApp provider adapters, hardware
+adapters (scale/printer/scanner), seed/config workflows, CI/CD, the rest of
+the test suites (E2E/offline/chaos/load), backup/DR tooling, and the
+remaining documentation set. These will be built in subsequent sessions, in the
 priority order set by the master specification (security → financial
 integrity → tenant isolation → inventory → payments → compliance → offline
 sync → API → backend → Flutter → hardware → UI → reporting → DevOps).

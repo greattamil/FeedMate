@@ -12,6 +12,7 @@ import (
 
 	"github.com/andipatti/feedmate/services/api/internal/domain/customer"
 	"github.com/andipatti/feedmate/services/api/internal/domain/payment"
+	"github.com/andipatti/feedmate/services/api/internal/domain/supplier"
 	"github.com/andipatti/feedmate/services/api/internal/reqctx"
 )
 
@@ -120,6 +121,64 @@ func (h *PaymentHandlers) RecordManualReceipt(w http.ResponseWriter, r *http.Req
 			return
 		}
 		WriteError(w, reqID, CodeInternal, "failed to record receipt")
+		return
+	}
+
+	WriteJSON(w, http.StatusCreated, map[string]interface{}{
+		"payment_id": result.PaymentID.String(),
+		"duplicate":  result.Duplicate,
+	})
+}
+
+type recordSupplierPaymentRequest struct {
+	SupplierID     string `json:"supplier_id"`
+	Amount         string `json:"amount"`
+	Method         string `json:"method"`
+	Reference      string `json:"reference,omitempty"`
+	IdempotencyKey string `json:"idempotency_key"`
+}
+
+// RecordSupplierPayment posts a payment settled in person (cash in hand, a
+// bank transfer confirmed by other means) against a supplier's payable
+// balance — the mirror image of RecordManualReceipt on the payable side.
+func (h *PaymentHandlers) RecordSupplierPayment(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	claims, ok := reqctx.Claims(r.Context())
+	if !ok {
+		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		return
+	}
+
+	var req recordSupplierPaymentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid request body")
+		return
+	}
+	supplierID, err := uuid.Parse(req.SupplierID)
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "supplier_id must be a valid UUID")
+		return
+	}
+	amount, err := decimal.NewFromString(req.Amount)
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "amount must be a valid decimal")
+		return
+	}
+
+	result, err := h.Payment.RecordSupplierPayment(r.Context(), claims.TenantID, payment.RecordSupplierPaymentRequest{
+		SupplierID: supplierID, Amount: amount, Method: req.Method,
+		Reference: req.Reference, IdempotencyKey: req.IdempotencyKey,
+	})
+	if err != nil {
+		if errors.Is(err, payment.ErrValidation) {
+			WriteError(w, reqID, CodeValidation, err.Error())
+			return
+		}
+		if errors.Is(err, supplier.ErrNotFound) {
+			WriteError(w, reqID, CodeNotFound, "supplier not found")
+			return
+		}
+		WriteError(w, reqID, CodeInternal, "failed to record payment")
 		return
 	}
 

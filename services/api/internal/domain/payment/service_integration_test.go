@@ -20,6 +20,7 @@ import (
 	"github.com/andipatti/feedmate/services/api/internal/dbctx"
 	"github.com/andipatti/feedmate/services/api/internal/domain/customer"
 	"github.com/andipatti/feedmate/services/api/internal/domain/payment"
+	"github.com/andipatti/feedmate/services/api/internal/domain/supplier"
 	"github.com/andipatti/feedmate/services/api/internal/paymentprovider"
 )
 
@@ -49,11 +50,12 @@ type fixture struct {
 	tenantID        uuid.UUID
 	financialYearID uuid.UUID
 	customerID      uuid.UUID
+	supplierID      uuid.UUID
 }
 
 func seedFixture(t *testing.T, db *dbctx.DB) *fixture {
 	t.Helper()
-	f := &fixture{tenantID: uuid.New(), financialYearID: uuid.New(), customerID: uuid.New()}
+	f := &fixture{tenantID: uuid.New(), financialYearID: uuid.New(), customerID: uuid.New(), supplierID: uuid.New()}
 	err := db.WithAdminTx(context.Background(), func(tx pgx.Tx) error {
 		ctx := context.Background()
 		execs := []struct {
@@ -74,6 +76,12 @@ func seedFixture(t *testing.T, db *dbctx.DB) *fixture {
 			{`INSERT INTO customer_ledger_entries (tenant_id, customer_id, document_type, document_id, debit, credit, description)
 			  VALUES ($1,$2,'OPENING_BALANCE',$3,'5000.00','0.00','Opening balance')`,
 				[]interface{}{f.tenantID, f.customerID, uuid.New()}},
+			{`INSERT INTO suppliers (id, tenant_id, supplier_code, legal_name, status) VALUES ($1,$2,'SUP1','Test Supplier','ACTIVE')`,
+				[]interface{}{f.supplierID, f.tenantID}},
+			// Seed an existing payable so a supplier payment has something to reduce.
+			{`INSERT INTO supplier_ledger_entries (tenant_id, supplier_id, document_type, document_id, debit, credit, description)
+			  VALUES ($1,$2,'OPENING_BALANCE',$3,'0.00','8000.00','Opening balance')`,
+				[]interface{}{f.tenantID, f.supplierID, uuid.New()}},
 		}
 		for _, e := range execs {
 			if _, err := tx.Exec(ctx, e.sql, e.args...); err != nil {
@@ -92,6 +100,20 @@ func seedFixture(t *testing.T, db *dbctx.DB) *fixture {
 		})
 	})
 	return f
+}
+
+func getSupplierBalance(t *testing.T, db *dbctx.DB, supplierID uuid.UUID) decimal.Decimal {
+	t.Helper()
+	var balance decimal.Decimal
+	err := db.WithAdminTx(context.Background(), func(tx pgx.Tx) error {
+		var err error
+		balance, err = supplier.OutstandingPayable(context.Background(), tx, supplierID)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("read supplier balance: %v", err)
+	}
+	return balance
 }
 
 func getBalance(t *testing.T, db *dbctx.DB, customerID uuid.UUID) decimal.Decimal {
@@ -386,6 +408,102 @@ func TestRecordManualReceipt_RejectsUpiMethodAndNonPositiveAmount(t *testing.T) 
 
 	_, err = svc.RecordManualReceipt(context.Background(), f.tenantID, payment.RecordManualReceiptRequest{
 		CustomerID: f.customerID, Amount: decimal.RequireFromString("0.00"), Method: "CASH",
+		IdempotencyKey: "idem-" + uuid.NewString(),
+	})
+	if !errors.Is(err, payment.ErrValidation) {
+		t.Fatalf("expected ErrValidation for a zero amount, got: %v", err)
+	}
+}
+
+func TestRecordSupplierPayment_CashReducesPayableAndPostsBalancedJournal(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	f := seedFixture(t, db)
+	sandbox := paymentprovider.NewSandboxProvider("test-secret")
+	svc := payment.NewService(db, sandbox)
+
+	result, err := svc.RecordSupplierPayment(context.Background(), f.tenantID, payment.RecordSupplierPaymentRequest{
+		SupplierID: f.supplierID, Amount: decimal.RequireFromString("3000.00"), Method: "CASH",
+		Reference: "paid at mill", IdempotencyKey: "idem-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("record supplier payment: %v", err)
+	}
+	if result.Duplicate {
+		t.Fatal("expected a first-time payment to not be reported as a duplicate")
+	}
+
+	balance := getSupplierBalance(t, db, f.supplierID)
+	if !balance.Equal(decimal.RequireFromString("5000.00")) {
+		t.Fatalf("expected payable to drop from 8000.00 to 5000.00 after a 3000.00 cash payment, got %s", balance)
+	}
+
+	var journalCount int
+	err = db.WithAdminTx(context.Background(), func(tx pgx.Tx) error {
+		return tx.QueryRow(context.Background(), `
+			SELECT count(*) FROM journal_entries WHERE tenant_id = $1 AND source_type = 'PAYMENT' AND source_id = $2
+		`, f.tenantID, result.PaymentID).Scan(&journalCount)
+	})
+	if err != nil {
+		t.Fatalf("query journal: %v", err)
+	}
+	if journalCount != 1 {
+		t.Fatalf("expected exactly 1 journal entry for this payment, got %d", journalCount)
+	}
+}
+
+func TestRecordSupplierPayment_RetryWithSameIdempotencyKeyDoesNotDoublePay(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	f := seedFixture(t, db)
+	sandbox := paymentprovider.NewSandboxProvider("test-secret")
+	svc := payment.NewService(db, sandbox)
+
+	idempotencyKey := "idem-" + uuid.NewString()
+	req := payment.RecordSupplierPaymentRequest{
+		SupplierID: f.supplierID, Amount: decimal.RequireFromString("1000.00"), Method: "CASH",
+		IdempotencyKey: idempotencyKey,
+	}
+
+	first, err := svc.RecordSupplierPayment(context.Background(), f.tenantID, req)
+	if err != nil {
+		t.Fatalf("first record: %v", err)
+	}
+	second, err := svc.RecordSupplierPayment(context.Background(), f.tenantID, req)
+	if err != nil {
+		t.Fatalf("retried record: %v", err)
+	}
+
+	if !second.Duplicate {
+		t.Fatal("expected the retried request to be reported as a duplicate")
+	}
+	if first.PaymentID != second.PaymentID {
+		t.Fatalf("expected the retry to resolve to the same payment id, got %s vs %s", first.PaymentID, second.PaymentID)
+	}
+
+	balance := getSupplierBalance(t, db, f.supplierID)
+	if !balance.Equal(decimal.RequireFromString("7000.00")) {
+		t.Fatalf("expected payable to drop by only 1000.00 once (8000.00 -> 7000.00) despite two calls, got %s", balance)
+	}
+}
+
+func TestRecordSupplierPayment_RejectsUpiMethodAndNonPositiveAmount(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	f := seedFixture(t, db)
+	sandbox := paymentprovider.NewSandboxProvider("test-secret")
+	svc := payment.NewService(db, sandbox)
+
+	_, err := svc.RecordSupplierPayment(context.Background(), f.tenantID, payment.RecordSupplierPaymentRequest{
+		SupplierID: f.supplierID, Amount: decimal.RequireFromString("100.00"), Method: "UPI",
+		IdempotencyKey: "idem-" + uuid.NewString(),
+	})
+	if !errors.Is(err, payment.ErrValidation) {
+		t.Fatalf("expected ErrValidation for method UPI, got: %v", err)
+	}
+
+	_, err = svc.RecordSupplierPayment(context.Background(), f.tenantID, payment.RecordSupplierPaymentRequest{
+		SupplierID: f.supplierID, Amount: decimal.RequireFromString("0.00"), Method: "CASH",
 		IdempotencyKey: "idem-" + uuid.NewString(),
 	})
 	if !errors.Is(err, payment.ErrValidation) {

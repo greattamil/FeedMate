@@ -140,12 +140,17 @@ func InsertPaymentIfNew(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, p *P
 	return true, nil
 }
 
-// ManualPayment is a receipt collected in person (cash in hand, a bank
-// transfer confirmed by other means) — there is no provider or intent to
-// attach it to, unlike a UPI PaymentRecord.
+// ManualPayment is a receipt or payment collected/settled in person (cash in
+// hand, a bank transfer confirmed by other means) — there is no provider or
+// intent to attach it to, unlike a UPI PaymentRecord. Which party it belongs
+// to (a customer receipt vs. a supplier payment) is determined entirely by
+// which ledger the caller posts alongside it (see
+// postManualReceiptLedgerAndJournal / postSupplierPaymentLedgerAndJournal) —
+// this table has no customer_id/supplier_id column of its own, matching how
+// UPI's PaymentRecord above only links to a payment_intent, never directly
+// to a customer.
 type ManualPayment struct {
 	ID             uuid.UUID
-	CustomerID     uuid.UUID
 	Method         string
 	Amount         decimal.Decimal
 	IdempotencyKey string

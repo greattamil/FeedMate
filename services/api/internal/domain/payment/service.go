@@ -14,6 +14,7 @@ import (
 	"github.com/andipatti/feedmate/services/api/internal/dbctx"
 	"github.com/andipatti/feedmate/services/api/internal/domain/accounting"
 	"github.com/andipatti/feedmate/services/api/internal/domain/customer"
+	"github.com/andipatti/feedmate/services/api/internal/domain/supplier"
 	"github.com/andipatti/feedmate/services/api/internal/paymentprovider"
 )
 
@@ -133,7 +134,7 @@ func (s *Service) RecordManualReceipt(ctx context.Context, tenantID uuid.UUID, r
 		}
 
 		p := &ManualPayment{
-			CustomerID: req.CustomerID, Method: req.Method, Amount: req.Amount,
+			Method: req.Method, Amount: req.Amount,
 			IdempotencyKey: req.IdempotencyKey, Reference: req.Reference,
 		}
 		created, err := InsertManualPaymentIfNew(ctx, tx, tenantID, p)
@@ -153,6 +154,72 @@ func (s *Service) RecordManualReceipt(ctx context.Context, tenantID uuid.UUID, r
 			return fmt.Errorf("post receipt ledger/journal: %w", err)
 		}
 		result = RecordManualReceiptResult{PaymentID: p.ID, Duplicate: false}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+type RecordSupplierPaymentRequest struct {
+	SupplierID     uuid.UUID
+	Amount         decimal.Decimal
+	Method         string // CASH, BANK, or OTHER
+	Reference      string
+	IdempotencyKey string
+}
+
+type RecordSupplierPaymentResult struct {
+	PaymentID uuid.UUID
+	Duplicate bool
+}
+
+// RecordSupplierPayment is RecordManualReceipt's mirror image on the payable
+// side: it decreases what the shop owes a supplier (a debit to the supplier
+// ledger, opposite of a customer receipt's credit — see
+// supplier.PostLedgerEntry) instead of increasing it. Same idempotency and
+// trust-boundary reasoning applies: paying a supplier cash in person has no
+// provider to confirm it, so the authenticated staff member's own action is
+// the confirmation.
+func (s *Service) RecordSupplierPayment(ctx context.Context, tenantID uuid.UUID, req RecordSupplierPaymentRequest) (*RecordSupplierPaymentResult, error) {
+	if req.Amount.LessThanOrEqual(decimal.Zero) {
+		return nil, fmt.Errorf("%w: amount must be positive", ErrValidation)
+	}
+	if !manualReceiptMethods[req.Method] {
+		return nil, fmt.Errorf("%w: method must be one of CASH, BANK, OTHER", ErrValidation)
+	}
+	if req.IdempotencyKey == "" {
+		return nil, fmt.Errorf("%w: idempotency_key is required", ErrValidation)
+	}
+
+	var result RecordSupplierPaymentResult
+	err := s.db.WithTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
+		if _, err := supplier.GetByID(ctx, tx, req.SupplierID); err != nil {
+			return fmt.Errorf("load supplier: %w", err)
+		}
+
+		p := &ManualPayment{
+			Method: req.Method, Amount: req.Amount,
+			IdempotencyKey: req.IdempotencyKey, Reference: req.Reference,
+		}
+		created, err := InsertManualPaymentIfNew(ctx, tx, tenantID, p)
+		if err != nil {
+			return fmt.Errorf("insert manual payment: %w", err)
+		}
+		if !created {
+			existing, err := FindManualPaymentByIdempotencyKey(ctx, tx, tenantID, req.IdempotencyKey)
+			if err != nil {
+				return fmt.Errorf("resolve duplicate manual payment: %w", err)
+			}
+			result = RecordSupplierPaymentResult{PaymentID: existing.ID, Duplicate: true}
+			return nil
+		}
+
+		if err := postSupplierPaymentLedgerAndJournal(ctx, tx, tenantID, req.SupplierID, p.ID, req.Method, req.Amount); err != nil {
+			return fmt.Errorf("post payment ledger/journal: %w", err)
+		}
+		result = RecordSupplierPaymentResult{PaymentID: p.ID, Duplicate: false}
 		return nil
 	})
 	if err != nil {
@@ -381,4 +448,49 @@ func manualReceiptDescription(method string) string {
 	default:
 		return "Receipt"
 	}
+}
+
+func manualPaymentDescription(method string) string {
+	switch method {
+	case "CASH":
+		return "Cash payment"
+	case "BANK":
+		return "Bank payment"
+	default:
+		return "Payment"
+	}
+}
+
+// postSupplierPaymentLedgerAndJournal is postManualReceiptLedgerAndJournal's
+// mirror on the payable side: a debit to the supplier ledger (decreasing
+// what the shop owes — see supplier.PostLedgerEntry) and a journal Dr
+// Accounts Payable / Cr whichever account the method actually settles from.
+func postSupplierPaymentLedgerAndJournal(ctx context.Context, tx pgx.Tx, tenantID, supplierID, paymentID uuid.UUID, method string, amount decimal.Decimal) error {
+	description := manualPaymentDescription(method)
+	if _, err := supplier.PostLedgerEntry(ctx, tx, tenantID, supplier.LedgerEntry{
+		SupplierID: supplierID, DocumentType: "PAYMENT", DocumentID: paymentID,
+		Debit: amount, Credit: decimal.Zero, Description: description,
+	}); err != nil {
+		return err
+	}
+
+	financialYearID, err := accounting.GetActiveFinancialYear(ctx, tx, tenantID)
+	if err != nil {
+		return err
+	}
+	code, name := manualReceiptAccountCode(method)
+	settlementAccountID, err := accounting.GetOrCreateAccount(ctx, tx, tenantID, code, name, "ASSET")
+	if err != nil {
+		return err
+	}
+	payableAccountID, err := accounting.GetOrCreateAccount(ctx, tx, tenantID, "ACCOUNTS_PAYABLE", "Trade Payables", "LIABILITY")
+	if err != nil {
+		return err
+	}
+	journalNumber := "JRNL-PMT-" + paymentID.String()[:8]
+	_, err = accounting.PostJournal(ctx, tx, tenantID, financialYearID, journalNumber, "PAYMENT", paymentID, description, []accounting.JournalLine{
+		{AccountID: payableAccountID, Debit: amount, Credit: decimal.Zero, SupplierID: &supplierID, Description: "Payable settled"},
+		{AccountID: settlementAccountID, Debit: decimal.Zero, Credit: amount, Description: description},
+	})
+	return err
 }

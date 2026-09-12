@@ -26,6 +26,7 @@ import (
 	"github.com/andipatti/feedmate/services/api/internal/domain/product"
 	"github.com/andipatti/feedmate/services/api/internal/domain/reports"
 	"github.com/andipatti/feedmate/services/api/internal/domain/returns"
+	"github.com/andipatti/feedmate/services/api/internal/domain/supplier"
 	"github.com/andipatti/feedmate/services/api/internal/httpapi"
 	appmw "github.com/andipatti/feedmate/services/api/internal/middleware"
 	"github.com/andipatti/feedmate/services/api/internal/paymentprovider"
@@ -61,6 +62,7 @@ func main() {
 	locationSvc := location.NewService(db)
 	devicePairingSvc := devicepairing.NewService(db)
 	customerSvc := customer.NewService(db)
+	supplierSvc := supplier.NewService(db)
 
 	var provider paymentprovider.Provider
 	switch cfg.PaymentProvider {
@@ -85,6 +87,7 @@ func main() {
 	locationHandlers := &httpapi.LocationHandlers{Location: locationSvc}
 	deviceHandlers := &httpapi.DeviceHandlers{DevicePairing: devicePairingSvc}
 	customerHandlers := &httpapi.CustomerHandlers{Customer: customerSvc}
+	supplierHandlers := &httpapi.SupplierHandlers{Supplier: supplierSvc}
 
 	r := chi.NewRouter()
 	r.Use(appmw.RequestID)
@@ -131,6 +134,7 @@ func main() {
 			r.With(appmw.RequirePermission("pos.sell")).Post("/payments/receipt-intents", paymentHandlers.CreateReceiptIntent)
 			r.With(appmw.RequirePermission("pos.sell")).Get("/payments/intents/{id}", paymentHandlers.GetIntentStatus)
 			r.With(appmw.RequirePermission("pos.sell")).Post("/payments/receipts", paymentHandlers.RecordManualReceipt)
+			r.With(appmw.RequirePermission("supplier.manage")).Post("/payments/supplier-payments", paymentHandlers.RecordSupplierPayment)
 
 			r.With(appmw.RequirePermission("contra.approve")).Post("/contra", contraHandlers.PostContra)
 
@@ -150,8 +154,13 @@ func main() {
 			r.With(appmw.RequirePermission("credit.configure")).Post("/customers", customerHandlers.Create)
 			r.With(appmw.RequirePermission("credit.configure")).Put("/customers/{id}/credit-limit", customerHandlers.SetCreditLimit)
 
-			// Further authenticated routes (inventory, suppliers, etc.) are
-			// registered here as each domain module is implemented.
+			r.Get("/suppliers", supplierHandlers.List)
+			r.Get("/suppliers/{id}", supplierHandlers.Get)
+			r.Get("/suppliers/{id}/ledger", supplierHandlers.Ledger)
+			r.With(appmw.RequirePermission("supplier.manage")).Post("/suppliers", supplierHandlers.Create)
+
+			// Further authenticated routes (inventory, etc.) are registered
+			// here as each domain module is implemented.
 		})
 	})
 

@@ -299,12 +299,26 @@ than an oversight.
 Server restarted with the new routes live at `127.0.0.1:8081` (the address
 the Android emulator's app talks to via `10.0.2.2:8081`).
 
+## Phase 15 — Flutter Customer Picker & CREDIT Tender
+
+The Flutter POS cart only supported a single full-amount CASH tender, so the
+backend's credit-sale path (Phase 4) and the new customer API (Phase 14) were
+never reachable from the client. This phase wires a real customer picker and
+a CASH/CREDIT tender toggle into the cart screen.
+
+| Area | Status | Evidence |
+|---|---|---|
+| `CustomerApi.search()` wrapping `GET /api/v1/customers` | **VERIFIED** | 2 widget tests (mocked HTTP) + live on the emulator: picker listed real customers from Phase 14's test data (`Test Farmer` / FARM001, `Smoke Test Customer`) |
+| `CustomerPickerScreen` (search field, tap to select, pops the selection) | **VERIFIED** | Exercised live on the emulator end to end |
+| Cart screen: CASH/CREDIT `SegmentedButton`, customer-picker row appears only for CREDIT | **VERIFIED** | Live on the emulator; also asserted by `test/cart_credit_test.dart` |
+| `PosApi.finalizeCreditSale()` (CREDIT tender + customer_id) | **VERIFIED** | Real invoice `INV-2627-00008` finalized live against the running server |
+| Credit-limit-exceeded → override-reason dialog → retry with `override_credit_limit`+`override_reason` | **VERIFIED, live, twice** | The widget test mocks a 409 `CREDIT_LIMIT_EXCEEDED` then a successful retry; separately, the *real* server rejected a real over-limit sale live on the emulator (Test Farmer's accumulated test balance exceeded their ₹5,000 limit), the dialog appeared with the server's real message, and after entering a reason and confirming, the sale was finalized for real — confirmed by re-fetching the customer afterward and seeing `outstanding_balance` grow by exactly the sale total (101,560.00 → 102,662.50) |
+
+No new backend bugs found — the backend's credit-override contract (permission alone insufficient; requires an explicit reason) worked exactly as designed the first time it was driven from a real client. Split tenders (cash+UPI+credit combined in one sale) remain out of scope for the UI.
+
 ## Not Yet Started
 
-The Flutter POS cart still only supports a single full-amount CASH tender —
-there is no customer picker wired into checkout yet to actually exercise a
-CREDIT sale end-to-end from the client (the backend has supported this since
-Phase 4). Offline-first SQLCipher storage (repeatedly mandated as P0 in the
+Offline-first SQLCipher storage (repeatedly mandated as P0 in the
 architecture spec) has not been started. Customer/supplier aging (30/60/90-day buckets) and margin reports,
 per-device cash session tracking (schema exists, not wired up), a real
 payment provider adapter (production gateway credentials are the external

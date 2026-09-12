@@ -7,16 +7,17 @@ import 'package:provider/provider.dart';
 import '../../core/api_client.dart';
 import '../../core/api_error.dart';
 import 'cart_model.dart';
+import 'customer_api.dart';
+import 'customer_picker_screen.dart';
 import 'pos_api.dart';
 
 /// Cart/checkout screen: shows the cart, fetches a live server-computed
 /// quote whenever it changes (never computes tax/totals itself — see
 /// pos_api.dart), and finalizes a real invoice via the API on checkout.
 ///
-/// Scope note: this only supports a single CASH tender for the full amount.
-/// Split tenders (cash+UPI+credit) and a customer picker for Khata sales are
-/// not yet wired into the UI, though the backend already supports both (see
-/// docs/IMPLEMENTATION_STATUS.md).
+/// Supports a single full-amount tender, either CASH or CREDIT against a
+/// selected customer's Khata. Split tenders (cash+UPI+credit in one sale)
+/// are not yet wired into the UI, though the backend already supports it.
 class CartScreen extends StatefulWidget {
   const CartScreen({super.key});
 
@@ -32,6 +33,8 @@ class _CartScreenState extends State<CartScreen> {
   List<LocationInfo> _locations = [];
   String? _selectedLocationId;
   Timer? _debounce;
+  String _tenderMethod = 'CASH';
+  CustomerSummary? _selectedCustomer;
 
   @override
   void initState() {
@@ -92,12 +95,25 @@ class _CartScreenState extends State<CartScreen> {
     }
   }
 
-  Future<void> _checkout() async {
+  Future<void> _pickCustomer() async {
+    final selected = await Navigator.of(context).push<CustomerSummary>(
+      MaterialPageRoute(builder: (_) => const CustomerPickerScreen()),
+    );
+    if (selected != null && mounted) {
+      setState(() => _selectedCustomer = selected);
+    }
+  }
+
+  Future<void> _checkout({bool overrideCreditLimit = false, String? overrideReason}) async {
     final cart = context.read<CartModel>();
     final quote = _quote;
     if (quote == null || cart.isEmpty) return;
     if (_selectedLocationId == null) {
       setState(() => _error = 'Select a location before checkout');
+      return;
+    }
+    if (_tenderMethod == 'CREDIT' && _selectedCustomer == null) {
+      setState(() => _error = 'Select a customer for a credit sale');
       return;
     }
 
@@ -107,16 +123,26 @@ class _CartScreenState extends State<CartScreen> {
     });
     try {
       final api = PosApi(context.read<ApiClient>());
-      final result = await api.finalizeCashSale(
-        lines: cart.lines,
-        locationId: _selectedLocationId!,
-        amount: quote.grandTotal,
-      );
+      final result = _tenderMethod == 'CREDIT'
+          ? await api.finalizeCreditSale(
+              lines: cart.lines,
+              locationId: _selectedLocationId!,
+              amount: quote.grandTotal,
+              customerId: _selectedCustomer!.id,
+              overrideCreditLimit: overrideCreditLimit,
+              overrideReason: overrideReason,
+            )
+          : await api.finalizeCashSale(
+              lines: cart.lines,
+              locationId: _selectedLocationId!,
+              amount: quote.grandTotal,
+            );
       if (!mounted) return;
       cart.clear();
       setState(() {
         _quote = null;
         _checkingOut = false;
+        _selectedCustomer = null;
       });
       await showDialog<void>(
         context: context,
@@ -131,10 +157,51 @@ class _CartScreenState extends State<CartScreen> {
       if (mounted) Navigator.of(context).pop();
     } on ApiError catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = e.message;
-        _checkingOut = false;
-      });
+      setState(() => _checkingOut = false);
+      if (e.code == 'CREDIT_LIMIT_EXCEEDED') {
+        await _promptCreditOverride(e.message);
+      } else {
+        setState(() => _error = e.message);
+      }
+    }
+  }
+
+  /// A sale that exceeds the customer's credit limit is rejected by the
+  /// server unless the cashier supplies an explicit reason (see
+  /// pos.ErrCreditLimitExceeded / pos_handlers.go) — permission to override
+  /// is checked server-side; this dialog only collects the required reason.
+  Future<void> _promptCreditOverride(String serverMessage) async {
+    final reasonController = TextEditingController();
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Credit Limit Exceeded'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(serverMessage),
+            const SizedBox(height: 12),
+            TextField(
+              key: const Key('override_reason_field'),
+              controller: reasonController,
+              decoration: const InputDecoration(labelText: 'Reason for override'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(reasonController.text.trim()),
+            child: const Text('Override & Charge'),
+          ),
+        ],
+      ),
+    );
+    if (reason != null && reason.isNotEmpty) {
+      await _checkout(overrideCreditLimit: true, overrideReason: reason);
+    } else if (mounted) {
+      setState(() => _error = 'Credit sale cancelled: limit exceeded');
     }
   }
 
@@ -205,6 +272,37 @@ class _CartScreenState extends State<CartScreen> {
                 onChanged: (value) => setState(() => _selectedLocationId = value),
               ),
             ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                Expanded(
+                  child: SegmentedButton<String>(
+                    key: const Key('tender_method_toggle'),
+                    segments: const [
+                      ButtonSegment(value: 'CASH', label: Text('Cash')),
+                      ButtonSegment(value: 'CREDIT', label: Text('Credit (Khata)')),
+                    ],
+                    selected: {_tenderMethod},
+                    onSelectionChanged: (selection) => setState(() => _tenderMethod = selection.first),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (_tenderMethod == 'CREDIT')
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: ListTile(
+                key: const Key('customer_picker_tile'),
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.person_outline),
+                title: Text(_selectedCustomer?.name ?? 'Select customer'),
+                subtitle: _selectedCustomer != null ? Text(_selectedCustomer!.customerCode) : null,
+                trailing: const Icon(Icons.chevron_right),
+                onTap: _pickCustomer,
+              ),
+            ),
           if (_error != null)
             Padding(
               padding: const EdgeInsets.all(12),
@@ -227,10 +325,10 @@ class _CartScreenState extends State<CartScreen> {
                 ),
                 FilledButton(
                   key: const Key('checkout_button'),
-                  onPressed: (_quote != null && !_checkingOut) ? _checkout : null,
+                  onPressed: (_quote != null && !_checkingOut) ? () => _checkout() : null,
                   child: _checkingOut
                       ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Text('Charge Cash'),
+                      : Text(_tenderMethod == 'CREDIT' ? 'Charge to Khata' : 'Charge Cash'),
                 ),
               ],
             ),

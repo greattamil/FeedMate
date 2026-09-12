@@ -94,14 +94,58 @@ class PosApi {
     required Decimal amount,
     String? customerId,
   }) async {
+    return _finalize(
+      lines: lines,
+      locationId: locationId,
+      tenders: [
+        {'method': 'CASH', 'amount': amount.toString()},
+      ],
+      customerId: customerId,
+    );
+  }
+
+  /// A CREDIT sale requires a customer (the receivable is posted against
+  /// their Khata ledger — see customer.PostLedgerEntry). If the sale would
+  /// push the customer over their configured credit limit, the server
+  /// rejects it unless the cashier supplies an explicit override reason and
+  /// holds the credit.override permission — permission alone is never
+  /// sufficient (see docs/IMPLEMENTATION_STATUS.md's credit-override fix).
+  Future<FinalizeResult> finalizeCreditSale({
+    required List<CartLine> lines,
+    required String locationId,
+    required Decimal amount,
+    required String customerId,
+    bool overrideCreditLimit = false,
+    String? overrideReason,
+  }) async {
+    return _finalize(
+      lines: lines,
+      locationId: locationId,
+      tenders: [
+        {'method': 'CREDIT', 'amount': amount.toString()},
+      ],
+      customerId: customerId,
+      overrideCreditLimit: overrideCreditLimit,
+      overrideReason: overrideReason,
+    );
+  }
+
+  Future<FinalizeResult> _finalize({
+    required List<CartLine> lines,
+    required String locationId,
+    required List<Map<String, dynamic>> tenders,
+    String? customerId,
+    bool overrideCreditLimit = false,
+    String? overrideReason,
+  }) async {
     final body = {
       'client_transaction_id': const Uuid().v4(),
       'location_id': locationId,
       'lines': _linesPayload(lines),
-      'tenders': [
-        {'method': 'CASH', 'amount': amount.toString()},
-      ],
+      'tenders': tenders,
       if (customerId != null) 'customer_id': customerId,
+      if (overrideCreditLimit) 'override_credit_limit': true,
+      if (overrideReason != null) 'override_reason': overrideReason,
     };
     final response = await client.postAuthed('/api/v1/pos/invoices', body);
     return FinalizeResult.fromJson(response);

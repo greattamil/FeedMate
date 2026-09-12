@@ -14,6 +14,7 @@ import (
 
 	"github.com/andipatti/feedmate/services/api/internal/config"
 	"github.com/andipatti/feedmate/services/api/internal/dbctx"
+	"github.com/andipatti/feedmate/services/api/internal/domain/contra"
 	"github.com/andipatti/feedmate/services/api/internal/domain/identity"
 	"github.com/andipatti/feedmate/services/api/internal/domain/payment"
 	"github.com/andipatti/feedmate/services/api/internal/domain/pos"
@@ -49,6 +50,7 @@ func main() {
 	posSvc := pos.NewService(db)
 	procurementSvc := procurement.NewService(db)
 	returnsSvc := returns.NewService(db)
+	contraSvc := contra.NewService(db)
 
 	var provider paymentprovider.Provider
 	switch cfg.PaymentProvider {
@@ -67,6 +69,7 @@ func main() {
 	procurementHandlers := &httpapi.ProcurementHandlers{Procurement: procurementSvc}
 	returnsHandlers := &httpapi.ReturnsHandlers{Returns: returnsSvc}
 	paymentHandlers := &httpapi.PaymentHandlers{Payment: paymentSvc}
+	contraHandlers := &httpapi.ContraHandlers{Contra: contraSvc}
 
 	r := chi.NewRouter()
 	r.Use(appmw.RequestID)
@@ -102,8 +105,10 @@ func main() {
 			r.With(appmw.RequirePermission("pos.sell")).Post("/payments/receipt-intents", paymentHandlers.CreateReceiptIntent)
 			r.With(appmw.RequirePermission("pos.sell")).Get("/payments/intents/{id}", paymentHandlers.GetIntentStatus)
 
-			// Further authenticated routes (customers, inventory, contra, EOD,
-			// etc.) are registered here as each domain module is implemented.
+			r.With(appmw.RequirePermission("contra.approve")).Post("/contra", contraHandlers.PostContra)
+
+			// Further authenticated routes (customers, inventory, EOD, etc.)
+			// are registered here as each domain module is implemented.
 		})
 	})
 

@@ -153,12 +153,23 @@ Payment/UPI integration is intentionally scoped to **Khata receipt collection** 
 
 No new bugs were found in this phase; all 5 webhook integration tests (including the adversarial forged-signature, duplicate-delivery, and amount-mismatch cases) passed on the first run, and the same flow was independently re-verified over real HTTP end to end.
 
+## Phase 8 — Contra / Buy-Back
+
+| Area | Status | Evidence |
+|---|---|---|
+| Contra posting (atomic: inventory receipt + receivable reduction + balanced journal) | **VERIFIED** | `internal/domain/contra/service.go`; 3 integration tests passing against a live DB |
+| Commodity received creates a real batch, exactly like a GRN | **VERIFIED** | 100kg of maize at a configured valuation correctly appears as sellable stock |
+| Customer receivable reduced by the approved value | **VERIFIED** | A ₹10,000 opening receivable correctly drops to ₹8,500 after a ₹1,500 contra |
+| Rejected/quarantined intake never enters sellable stock | **VERIFIED** | Same quality-status handling as GRN and returns — a `REJECTED` line contributes zero to available stock |
+| No arbitrary valuation | **VERIFIED** | Negative valuation is rejected outright; posting requires `contra.approve`, which is the approval control itself (no separate draft/approve workflow in this implementation — documented as a scope simplification) |
+
+No new bugs found; all 3 tests passed on the first run, reusing the same two-pass validate-then-write structure and the same quality-status quarantine pattern established in procurement and returns.
+
 ## Not Yet Started
 
-Remaining business domain modules (contra/buy-back, cash sessions/EOD,
-reports/dashboards), a real payment provider adapter (production gateway
-credentials are the external dependency — the interface and sandbox are
-done),
+Remaining business domain modules (cash sessions/EOD, reports/dashboards), a
+real payment provider adapter (production gateway credentials are the
+external dependency — the interface and sandbox are done),
 idempotency/outbox infrastructure for external side effects (printer/
 WhatsApp), Flutter app (offline-first, SQLCipher, POS UI), payment/GST/
 WhatsApp provider adapters, hardware adapters (scale/printer/scanner), seed/

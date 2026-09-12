@@ -13,20 +13,25 @@ import 'package:http/testing.dart';
 import 'package:provider/provider.dart';
 
 import 'package:feedmate_app/core/api_client.dart';
+import 'package:feedmate_app/core/local_db.dart';
 import 'package:feedmate_app/core/secure_storage.dart';
 import 'package:feedmate_app/features/pos/cart_model.dart';
 import 'package:feedmate_app/features/pos/cart_screen.dart';
 import 'package:feedmate_app/features/pos/product.dart';
 
+import 'fake_local_db.dart';
+
 Widget _wrapCartScreen({required http.Client httpClient, required CartModel cart}) {
   final storage = SecureStorage(store: InMemoryKeyValueStore());
   storage.saveTokens(accessToken: 'tok', refreshToken: 'ref', tenantId: 'tenant-123');
   final apiClient = ApiClient(baseUrl: 'http://test.invalid', storage: storage, httpClient: httpClient);
+  final localDb = FakeLocalDatabase();
   return MultiProvider(
     providers: [
       Provider<SecureStorage>.value(value: storage),
       Provider<ApiClient>.value(value: apiClient),
       ChangeNotifierProvider<CartModel>.value(value: cart),
+      Provider<LocalDatabase>.value(value: localDb),
     ],
     child: const MaterialApp(home: CartScreen()),
   );

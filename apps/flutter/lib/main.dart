@@ -1,14 +1,20 @@
+import 'dart:async';
 import 'dart:io' show Platform;
 
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'core/api_client.dart';
 import 'core/auth_session.dart';
+import 'core/local_db.dart';
+import 'core/local_db_sqlcipher.dart';
 import 'core/secure_storage.dart';
+import 'core/sync_service.dart';
 import 'features/auth/login_screen.dart';
 import 'features/pos/cart_model.dart';
+import 'features/pos/product_repository.dart';
 import 'features/pos/product_search_screen.dart';
 
 /// Resolves the API base URL for local development. An Android emulator
@@ -22,8 +28,11 @@ String _defaultApiBaseUrl() {
   return 'http://127.0.0.1:8081';
 }
 
-void main() {
-  runApp(FeedMateApp(apiBaseUrl: _defaultApiBaseUrl()));
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final storage = SecureStorage();
+  final localDb = await openEncryptedLocalDatabase(storage);
+  runApp(FeedMateApp(apiBaseUrl: _defaultApiBaseUrl(), storageOverride: storage, localDbOverride: localDb));
 }
 
 class FeedMateApp extends StatelessWidget {
@@ -36,12 +45,20 @@ class FeedMateApp extends StatelessWidget {
   /// wraps real platform secure storage.
   final SecureStorage? storageOverride;
 
-  const FeedMateApp({super.key, required this.apiBaseUrl, this.storageOverride});
+  /// Overridable for tests, which can't open a real SQLCipher database (the
+  /// native plugin channel isn't available under `flutter test`) — pass a
+  /// LocalDatabase built on sqflite_common_ffi instead. Production always
+  /// gets one from main(), opened before runApp so it's ready before any
+  /// screen needs it.
+  final LocalDatabase? localDbOverride;
+
+  const FeedMateApp({super.key, required this.apiBaseUrl, this.storageOverride, this.localDbOverride});
 
   @override
   Widget build(BuildContext context) {
     final storage = storageOverride ?? SecureStorage();
     final apiClient = ApiClient(baseUrl: apiBaseUrl, storage: storage);
+    final localDb = localDbOverride;
 
     return MultiProvider(
       providers: [
@@ -51,14 +68,55 @@ class FeedMateApp extends StatelessWidget {
           create: (_) => AuthSession(apiClient: apiClient, storage: storage),
         ),
         ChangeNotifierProvider<CartModel>(create: (_) => CartModel()),
+        if (localDb != null) ...[
+          Provider<LocalDatabase>.value(value: localDb),
+          Provider<ProductRepository>(create: (_) => ProductRepository(client: apiClient, localDb: localDb)),
+          Provider<SyncService>(create: (_) => SyncService(client: apiClient, localDb: localDb)),
+        ],
       ],
       child: MaterialApp(
         title: 'Andipatti Animal Feed System',
         theme: ThemeData(colorSchemeSeed: Colors.green, useMaterial3: true),
-        home: const _SessionGate(),
+        home: localDb != null ? const _ConnectivitySyncGate(child: _SessionGate()) : const _SessionGate(),
       ),
     );
   }
+}
+
+/// Automatically drains the offline outbox whenever connectivity is
+/// (re)established, in addition to the manual sync button on the search
+/// screen — so a queued sale doesn't just sit there until someone remembers
+/// to tap sync.
+class _ConnectivitySyncGate extends StatefulWidget {
+  final Widget child;
+  const _ConnectivitySyncGate({required this.child});
+
+  @override
+  State<_ConnectivitySyncGate> createState() => _ConnectivitySyncGateState();
+}
+
+class _ConnectivitySyncGateState extends State<_ConnectivitySyncGate> {
+  StreamSubscription<List<ConnectivityResult>>? _subscription;
+
+  @override
+  void initState() {
+    super.initState();
+    final syncService = context.read<SyncService>();
+    _subscription = Connectivity().onConnectivityChanged.listen((results) {
+      if (results.any((r) => r != ConnectivityResult.none)) {
+        syncService.syncPendingInvoices();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _subscription?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
 
 /// Shows a loading indicator while restoring any persisted session, then

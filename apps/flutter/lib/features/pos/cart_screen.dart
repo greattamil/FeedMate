@@ -1,11 +1,14 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:decimal/decimal.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../core/api_client.dart';
 import '../../core/api_error.dart';
+import '../../core/local_db.dart';
 import 'cart_model.dart';
 import 'customer_api.dart';
 import 'customer_picker_screen.dart';
@@ -18,6 +21,16 @@ import 'pos_api.dart';
 /// Supports a single full-amount tender, either CASH or CREDIT against a
 /// selected customer's Khata. Split tenders (cash+UPI+credit in one sale)
 /// are not yet wired into the UI, though the backend already supports it.
+///
+/// Offline: if the live quote call fails on a network error, the screen
+/// shows a locally estimated total (from cached selling prices, tax
+/// excluded) and switches to CASH-only. Checkout in that state does not call
+/// finalize at all — it queues a sale *intent* (lines/location/tender
+/// method) to the on-device outbox and lets SyncService materialize the real
+/// priced invoice once a connection exists, because only the server can
+/// compute the total the tender actually has to match (see sync_service.dart).
+/// CREDIT is unavailable offline: a credit sale's limit check needs the
+/// customer's live balance, which by definition isn't available offline.
 class CartScreen extends StatefulWidget {
   const CartScreen({super.key});
 
@@ -29,6 +42,7 @@ class _CartScreenState extends State<CartScreen> {
   QuoteResult? _quote;
   bool _quoting = false;
   bool _checkingOut = false;
+  bool _offline = false;
   String? _error;
   List<LocationInfo> _locations = [];
   String? _selectedLocationId;
@@ -44,9 +58,14 @@ class _CartScreenState extends State<CartScreen> {
   }
 
   Future<void> _loadLocations() async {
+    final localDb = context.read<LocalDatabase>();
     try {
       final api = PosApi(context.read<ApiClient>());
       final locations = await api.listLocations();
+      await localDb.setCache(
+        'locations',
+        jsonEncode(locations.map((l) => {'id': l.id, 'name': l.name}).toList()),
+      );
       if (!mounted) return;
       setState(() {
         _locations = locations;
@@ -55,6 +74,20 @@ class _CartScreenState extends State<CartScreen> {
         }
       });
     } on ApiError catch (e) {
+      if (e.code == 'NETWORK_ERROR') {
+        final cached = await localDb.getCache('locations');
+        if (cached != null) {
+          final locations = (jsonDecode(cached) as List<dynamic>)
+              .map((l) => LocationInfo(id: l['id'] as String, name: l['name'] as String))
+              .toList();
+          if (!mounted) return;
+          setState(() {
+            _locations = locations;
+            if (locations.length == 1) _selectedLocationId = locations.first.id;
+          });
+          return;
+        }
+      }
       if (!mounted) return;
       setState(() => _error = 'Failed to load locations: ${e.message}');
     }
@@ -84,15 +117,34 @@ class _CartScreenState extends State<CartScreen> {
       if (!mounted) return;
       setState(() {
         _quote = quote;
+        _offline = false;
         _quoting = false;
       });
     } on ApiError catch (e) {
       if (!mounted) return;
+      final offline = e.code == 'NETWORK_ERROR';
       setState(() {
-        _error = e.message;
+        _quote = null;
+        _offline = offline;
+        _error = offline ? null : e.message;
         _quoting = false;
+        if (offline) _tenderMethod = 'CASH'; // credit needs a live balance check
       });
     }
+  }
+
+  /// A rough, tax-exclusive estimate from cached selling prices — shown only
+  /// so the cashier isn't checking out blind while offline. Never sent to
+  /// the server: the queued intent carries quantities only, and the real
+  /// total is whatever the server computes at sync time.
+  Decimal? _estimatedOfflineTotal(CartModel cart) {
+    Decimal total = Decimal.zero;
+    for (final line in cart.lines) {
+      final price = line.product.sellingPrice;
+      if (price == null) return null;
+      total += price * line.quantity;
+    }
+    return total;
   }
 
   Future<void> _pickCustomer() async {
@@ -106,8 +158,7 @@ class _CartScreenState extends State<CartScreen> {
 
   Future<void> _checkout({bool overrideCreditLimit = false, String? overrideReason}) async {
     final cart = context.read<CartModel>();
-    final quote = _quote;
-    if (quote == null || cart.isEmpty) return;
+    if (cart.isEmpty) return;
     if (_selectedLocationId == null) {
       setState(() => _error = 'Select a location before checkout');
       return;
@@ -116,6 +167,14 @@ class _CartScreenState extends State<CartScreen> {
       setState(() => _error = 'Select a customer for a credit sale');
       return;
     }
+
+    if (_offline) {
+      await _queueOfflineSale(cart);
+      return;
+    }
+
+    final quote = _quote;
+    if (quote == null) return;
 
     setState(() {
       _checkingOut = true;
@@ -160,10 +219,58 @@ class _CartScreenState extends State<CartScreen> {
       setState(() => _checkingOut = false);
       if (e.code == 'CREDIT_LIMIT_EXCEEDED') {
         await _promptCreditOverride(e.message);
+      } else if (e.code == 'NETWORK_ERROR') {
+        // Connectivity dropped between the last successful quote and
+        // tapping checkout — fall back to queuing rather than losing the
+        // sale outright.
+        setState(() => _offline = true);
+        await _queueOfflineSale(cart);
       } else {
         setState(() => _error = e.message);
       }
     }
+  }
+
+  Future<void> _queueOfflineSale(CartModel cart) async {
+    setState(() {
+      _checkingOut = true;
+      _error = null;
+    });
+    final localDb = context.read<LocalDatabase>();
+    final clientTransactionId = const Uuid().v4();
+    final intent = {
+      'client_transaction_id': clientTransactionId,
+      'location_id': _selectedLocationId,
+      'tender_method': 'CASH',
+      'customer_id': null,
+      'lines': cart.lines
+          .map((l) => {'product_id': l.product.id, 'quantity': l.quantity.toString()})
+          .toList(),
+    };
+    await localDb.enqueueInvoice(clientTransactionId: clientTransactionId, payloadJson: jsonEncode(intent));
+    if (!mounted) return;
+    final estimate = _estimatedOfflineTotal(cart);
+    cart.clear();
+    setState(() {
+      _checkingOut = false;
+      _quote = null;
+    });
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Sale Queued (Offline)'),
+        content: Text(
+          'No connection — this sale will be priced and sent to the server '
+          'automatically once online.\n\n'
+          '${estimate != null ? "Estimated total: ₹${estimate.toStringAsFixed(2)}\n\n" : ""}'
+          'Use the sync button on the search screen to sync manually.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('OK')),
+        ],
+      ),
+    );
+    if (mounted) Navigator.of(context).pop();
   }
 
   /// A sale that exceeds the customer's credit limit is rejected by the
@@ -214,11 +321,24 @@ class _CartScreenState extends State<CartScreen> {
   @override
   Widget build(BuildContext context) {
     final cart = context.watch<CartModel>();
+    final estimate = _offline ? _estimatedOfflineTotal(cart) : null;
+    final canCheckout = !_checkingOut && !cart.isEmpty && (_quote != null || (_offline && _selectedLocationId != null));
 
     return Scaffold(
       appBar: AppBar(title: const Text('Cart')),
       body: Column(
         children: [
+          if (_offline)
+            Container(
+              key: const Key('offline_checkout_banner'),
+              width: double.infinity,
+              color: Colors.amber.shade100,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              child: const Text(
+                'Offline — sale will be queued and priced when back online',
+                style: TextStyle(fontSize: 12),
+              ),
+            ),
           Expanded(
             child: cart.isEmpty
                 ? const Center(child: Text('Cart is empty'))
@@ -281,16 +401,18 @@ class _CartScreenState extends State<CartScreen> {
                     key: const Key('tender_method_toggle'),
                     segments: const [
                       ButtonSegment(value: 'CASH', label: Text('Cash')),
-                      ButtonSegment(value: 'CREDIT', label: Text('Credit (Khata)')),
+                      ButtonSegment(value: 'CREDIT', label: Text('Credit (Khata)'), enabled: true),
                     ],
                     selected: {_tenderMethod},
-                    onSelectionChanged: (selection) => setState(() => _tenderMethod = selection.first),
+                    onSelectionChanged: _offline
+                        ? null
+                        : (selection) => setState(() => _tenderMethod = selection.first),
                   ),
                 ),
               ],
             ),
           ),
-          if (_tenderMethod == 'CREDIT')
+          if (_tenderMethod == 'CREDIT' && !_offline)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: ListTile(
@@ -318,17 +440,21 @@ class _CartScreenState extends State<CartScreen> {
                         ? 'Calculating…'
                         : _quote != null
                             ? 'Total: ₹${_quote!.grandTotal.toStringAsFixed(2)}'
-                            : 'Total: —',
+                            : (estimate != null
+                                ? 'Estimated: ₹${estimate.toStringAsFixed(2)}'
+                                : 'Total: —'),
                     style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                     key: const Key('cart_total'),
                   ),
                 ),
                 FilledButton(
                   key: const Key('checkout_button'),
-                  onPressed: (_quote != null && !_checkingOut) ? () => _checkout() : null,
+                  onPressed: canCheckout ? () => _checkout() : null,
                   child: _checkingOut
                       ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                      : Text(_tenderMethod == 'CREDIT' ? 'Charge to Khata' : 'Charge Cash'),
+                      : Text(_offline
+                          ? 'Queue Sale (Offline)'
+                          : (_tenderMethod == 'CREDIT' ? 'Charge to Khata' : 'Charge Cash')),
                 ),
               ],
             ),

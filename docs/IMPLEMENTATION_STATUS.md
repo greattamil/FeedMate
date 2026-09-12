@@ -316,17 +316,50 @@ a CASH/CREDIT tender toggle into the cart screen.
 
 No new backend bugs found — the backend's credit-override contract (permission alone insufficient; requires an explicit reason) worked exactly as designed the first time it was driven from a real client. Split tenders (cash+UPI+credit combined in one sale) remain out of scope for the UI.
 
+## Phase 16 — Flutter Offline-First Storage (SQLCipher) & Sale Sync
+
+The architecture spec repeatedly mandates SQLCipher-encrypted offline
+storage as P0; the app previously had none — any network interruption
+simply broke product search and checkout outright. This phase adds a real
+encrypted on-device store, a read-through product cache, and an offline
+sale-intent outbox with server-authoritative re-pricing on sync.
+
+**Design decision, made after hitting a real architectural conflict:** the
+backend's `FinalizeInvoice` requires the tender amount to exactly equal its
+own computed grand total (`pos.ErrTenderMismatch`), and the offline cache
+has no tax-profile data to replicate that computation client-side. So an
+offline sale is queued as an *intent* (product ids/quantities, location,
+tender method — no total) rather than a priced invoice; `SyncService`
+re-quotes for real once online and finalizes with whatever the server says
+*at sync time*, giving the exact same pricing guarantee an online sale
+already has. CREDIT is unavailable offline (a credit-limit check needs a
+live balance).
+
+| Area | Status | Evidence |
+|---|---|---|
+| `SqlLocalDatabase` (SQLCipher via `sqflite_sqlcipher`, passphrase in platform keystore via `SecureStorage.getOrCreateLocalDbPassphrase`) | **VERIFIED** | Real APK installed on the emulator; `libsqlcipher.so` loaded (confirmed in logcat) and the app started normally, meaning the encrypted DB opened successfully before `runApp` |
+| `LocalDatabase` interface + `products_cache`/`outbox_invoices`/`kv_cache` schema | **VERIFIED** | 7 real tests in `test/local_db_test.dart` against sqflite_common_ffi (plain `test()`, not `testWidgets` — see below) |
+| `ProductRepository`: live search always hits the server and refreshes the cache; only a network failure falls back to cache | **VERIFIED** | 3 unit tests (`test/product_repository_test.dart`) + live on the emulator: WiFi/data disabled via `adb shell svc wifi/data disable`, search for "cattle" showed the amber "Offline — showing cached products" banner and returned the exact 2 previously-cached products tagged `CACHED` |
+| Cart screen: offline detection, tax-exclusive estimated total from cached prices, CREDIT tender disabled offline | **VERIFIED, live** | Same offline session: cart showed "Estimated: ₹2100.00" (2× cached ₹1050, no tax) and a disabled CREDIT segment |
+| Offline checkout queues a sale intent instead of calling finalize | **VERIFIED, live** | "Sale Queued (Offline)" dialog appeared; the intent was written to the encrypted outbox (not lost) |
+| `SyncService.syncPendingInvoices()`: re-quotes each queued intent for real, finalizes with the fresh server total | **VERIFIED, live** | Went back online, tapped the new sync button — real invoice `INV-2627-00011` created server-side at **₹2205.00** (the server's authoritative 2100 + 5% tax), correctly *higher* than the offline-estimated ₹2100.00, confirmed via `psql` against the live database. 3 more unit tests (`test/sync_service_test.dart`) cover the re-quote-not-resend contract, a non-retryable rejection being parked `FAILED` (not lost, not retried forever), and a still-offline attempt leaving the intent `PENDING` |
+| Pending-sync badge + manual "Sync now" button on the search screen; automatic sync on connectivity regain (`connectivity_plus`) | **VERIFIED, live** | Badge showed "1" while offline, cleared to none after a successful manual sync |
+| Location list also cached (`kv_cache`) so checkout's location selector still works offline | **VERIFIED, live** | First offline session before any cache existed correctly left checkout disabled with no crash; after one online visit to the cart screen the location cached, and offline checkout became available on the next attempt |
+
+### Real bugs found and fixed this session
+14. **Real sqflite I/O does not resolve inside `flutter_test`'s fake-async widget-pump zone.** Wiring the real SQLCipher-compatible `sqflite_common_ffi` database directly into a `testWidgets` test didn't fail — it hung indefinitely, confirmed by running it standalone and watching it exceed a 100s+ timeout with no error. Root cause: `tester.pump()`/`pumpAndSettle()` step a `FakeAsync` zone that only advances synthetic time and flushes microtasks; it never yields to the real OS event loop that genuine native/FFI I/O depends on. Fixed by splitting `LocalDatabase` into an abstract interface with two implementations: `SqlLocalDatabase` (the real one, tested for real with plain non-widget `test()`s in `local_db_test.dart`) and `FakeLocalDatabase` (a pure in-memory Dart implementation used by every `testWidgets` test instead).
+15. **sqflite's connection-caching-by-path silently leaked state across tests.** `sqflite_common_ffi`'s `databaseFactoryFfi` caches an opened `Database` by its path string; every test opening `inMemoryDatabasePath` (`":memory:"`) got back the *same* cached connection and its leftover data from earlier tests in the same run — two tests failed with counts off by exactly what an earlier test had left behind (e.g. an idempotency test's `tx-1` was already `SYNCED` from a prior test's use of the same id). Fixed with `OpenDatabaseOptions(singleInstance: false)` so each test gets a genuinely isolated in-memory database.
+
 ## Not Yet Started
 
-Offline-first SQLCipher storage (repeatedly mandated as P0 in the
-architecture spec) has not been started. Customer/supplier aging (30/60/90-day buckets) and margin reports,
+Customer/supplier aging (30/60/90-day buckets) and margin reports,
 per-device cash session tracking (schema exists, not wired up), a real
 payment provider adapter (production gateway credentials are the external
 dependency — the interface and sandbox are done), idempotency/outbox
 infrastructure for external side effects (printer/WhatsApp), the rest of the
-Flutter app (offline-first SQLCipher storage, POS cart/checkout screens,
-device self-registration, Khata/customer screens, procurement/GRN screens,
-EOD/reports screens), WhatsApp provider adapter, hardware adapters (scale/
+Flutter app (Khata/customer screens, procurement/GRN screens,
+EOD/reports screens, a settings screen to review/retry FAILED outbox
+entries), WhatsApp provider adapter, hardware adapters (scale/
 printer/scanner), seed/config workflows, CI/CD, the rest of the test suites
 (E2E/offline/chaos/load), backup/DR tooling, and the remaining documentation
 set. These will be built in subsequent sessions, in the priority order set

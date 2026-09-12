@@ -3,14 +3,16 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../core/api_client.dart';
 import '../../core/api_error.dart';
 import '../../core/auth_session.dart';
+import '../../core/local_db.dart';
+import '../../core/sync_service.dart';
 import '../auth/generate_pairing_code_screen.dart';
 import '../auth/login_screen.dart';
 import 'cart_model.dart';
 import 'cart_screen.dart';
 import 'product.dart';
+import 'product_repository.dart';
 
 /// Product search, backed by the real Go backend's ranked search endpoint
 /// (barcode > SKU > exact name > alias > fuzzy — see PRD A4). Tapping a
@@ -27,7 +29,34 @@ class _ProductSearchScreenState extends State<ProductSearchScreen> {
   Timer? _debounce;
   List<Product> _results = [];
   bool _loading = false;
+  bool _fromCache = false;
   String? _error;
+  int _pendingSyncCount = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshPendingSyncCount();
+  }
+
+  Future<void> _refreshPendingSyncCount() async {
+    final localDb = context.read<LocalDatabase>();
+    final count = await localDb.pendingInvoiceCount();
+    if (!mounted) return;
+    setState(() => _pendingSyncCount = count);
+  }
+
+  Future<void> _syncNow() async {
+    final syncService = context.read<SyncService>();
+    final result = await syncService.syncPendingInvoices();
+    if (!mounted) return;
+    await _refreshPendingSyncCount();
+    final message = result.synced == 0 && result.failed == 0
+        ? (result.remaining > 0 ? 'Still offline — nothing synced' : 'Nothing to sync')
+        : 'Synced ${result.synced} sale(s)'
+            '${result.failed > 0 ? ', ${result.failed} need review' : ''}';
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
 
   void _onQueryChanged(String query) {
     _debounce?.cancel();
@@ -47,15 +76,12 @@ class _ProductSearchScreenState extends State<ProductSearchScreen> {
       _error = null;
     });
     try {
-      final client = context.read<ApiClient>();
-      final encoded = Uri.encodeQueryComponent(query);
-      final response = await client.getAuthed('/api/v1/products/search?q=$encoded');
-      final results = (response['results'] as List<dynamic>? ?? [])
-          .map((e) => Product.fromSearchResult(e as Map<String, dynamic>))
-          .toList();
+      final repository = context.read<ProductRepository>();
+      final result = await repository.search(query);
       if (!mounted) return;
       setState(() {
-        _results = results;
+        _results = result.products;
+        _fromCache = result.fromCache;
         _loading = false;
       });
     } on ApiError catch (e) {
@@ -89,6 +115,17 @@ class _ProductSearchScreenState extends State<ProductSearchScreen> {
       appBar: AppBar(
         title: Text(session.displayName ?? 'Product Search'),
         actions: [
+          IconButton(
+            key: const Key('sync_button'),
+            tooltip: 'Sync pending sales',
+            icon: Badge(
+              key: const Key('pending_sync_badge'),
+              label: Text('$_pendingSyncCount'),
+              isLabelVisible: _pendingSyncCount > 0,
+              child: const Icon(Icons.sync),
+            ),
+            onPressed: _syncNow,
+          ),
           if (session.hasPermission('device.manage'))
             IconButton(
               key: const Key('pair_device_button'),
@@ -107,10 +144,11 @@ class _ProductSearchScreenState extends State<ProductSearchScreen> {
               isLabelVisible: !cart.isEmpty,
               child: const Icon(Icons.shopping_cart),
             ),
-            onPressed: () {
-              Navigator.of(context).push(
+            onPressed: () async {
+              await Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const CartScreen()),
               );
+              await _refreshPendingSyncCount();
             },
           ),
           IconButton(
@@ -142,6 +180,14 @@ class _ProductSearchScreenState extends State<ProductSearchScreen> {
             ),
           ),
           if (_loading) const LinearProgressIndicator(),
+          if (_fromCache)
+            Container(
+              key: const Key('offline_cache_banner'),
+              width: double.infinity,
+              color: Colors.amber.shade100,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              child: const Text('Offline — showing cached products', style: TextStyle(fontSize: 12)),
+            ),
           if (_error != null)
             Padding(
               padding: const EdgeInsets.all(12),

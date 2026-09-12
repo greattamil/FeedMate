@@ -59,6 +59,7 @@ class SecureStorage {
   static const _keyRefreshToken = 'refresh_token';
   static const _keyTenantId = 'tenant_id';
   static const _keyDeviceUuid = 'device_uuid';
+  static const _keyLocalDbPassphrase = 'local_db_passphrase';
 
   Future<void> saveTokens({
     required String accessToken,
@@ -98,4 +99,16 @@ class SecureStorage {
   /// of a fresh random UUID the backend has never seen. Never call this from
   /// production code.
   Future<void> seedDeviceUuidForTesting(String uuid) => _store.write(_keyDeviceUuid, uuid);
+
+  /// Returns the SQLCipher passphrase for the offline database, generating a
+  /// cryptographically random one on first launch. Held only in the platform
+  /// keystore-backed secure storage — never derived from anything guessable
+  /// (device UUID, a user password) and never logged. See local_db_sqlcipher.dart.
+  Future<String> getOrCreateLocalDbPassphrase() async {
+    final existing = await _store.read(_keyLocalDbPassphrase);
+    if (existing != null) return existing;
+    final generated = const Uuid().v4() + const Uuid().v4();
+    await _store.write(_keyLocalDbPassphrase, generated);
+    return generated;
+  }
 }

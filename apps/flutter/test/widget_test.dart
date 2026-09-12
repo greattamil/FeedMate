@@ -11,17 +11,24 @@ import 'package:provider/provider.dart';
 
 import 'package:feedmate_app/core/api_client.dart';
 import 'package:feedmate_app/core/auth_session.dart';
+import 'package:feedmate_app/core/local_db.dart';
 import 'package:feedmate_app/core/secure_storage.dart';
+import 'package:feedmate_app/core/sync_service.dart';
 import 'package:feedmate_app/features/auth/login_screen.dart';
 import 'package:feedmate_app/features/pos/cart_model.dart';
+import 'package:feedmate_app/features/pos/product_repository.dart';
 import 'package:feedmate_app/features/pos/product_search_screen.dart';
+
+import 'fake_local_db.dart';
 
 Widget _wrapWithProviders({
   required http.Client httpClient,
   required Widget child,
+  LocalDatabase? localDb,
 }) {
   final storage = SecureStorage(store: InMemoryKeyValueStore());
   final apiClient = ApiClient(baseUrl: 'http://test.invalid', storage: storage, httpClient: httpClient);
+  final db = localDb ?? FakeLocalDatabase();
   return MultiProvider(
     providers: [
       Provider<SecureStorage>.value(value: storage),
@@ -30,6 +37,9 @@ Widget _wrapWithProviders({
         create: (_) => AuthSession(apiClient: apiClient, storage: storage),
       ),
       ChangeNotifierProvider<CartModel>(create: (_) => CartModel()),
+      Provider<LocalDatabase>.value(value: db),
+      Provider<ProductRepository>(create: (_) => ProductRepository(client: apiClient, localDb: db)),
+      Provider<SyncService>(create: (_) => SyncService(client: apiClient, localDb: db)),
     ],
     child: MaterialApp(home: child),
   );
@@ -118,6 +128,7 @@ void main() {
     final storage = SecureStorage(store: InMemoryKeyValueStore());
     await storage.saveTokens(accessToken: 'tok', refreshToken: 'ref', tenantId: 'tenant-123');
     final apiClient = ApiClient(baseUrl: 'http://test.invalid', storage: storage, httpClient: client);
+    final localDb = FakeLocalDatabase();
 
     await tester.pumpWidget(MultiProvider(
       providers: [
@@ -125,6 +136,9 @@ void main() {
         Provider<ApiClient>.value(value: apiClient),
         ChangeNotifierProvider<AuthSession>(create: (_) => AuthSession(apiClient: apiClient, storage: storage)),
         ChangeNotifierProvider<CartModel>(create: (_) => CartModel()),
+        Provider<LocalDatabase>.value(value: localDb),
+        Provider<ProductRepository>(create: (_) => ProductRepository(client: apiClient, localDb: localDb)),
+        Provider<SyncService>(create: (_) => SyncService(client: apiClient, localDb: localDb)),
       ],
       child: const MaterialApp(home: ProductSearchScreen()),
     ));
@@ -163,6 +177,7 @@ void main() {
     await storage.saveTokens(accessToken: 'tok', refreshToken: 'ref', tenantId: 'tenant-123');
     final apiClient = ApiClient(baseUrl: 'http://test.invalid', storage: storage, httpClient: client);
     final cart = CartModel();
+    final localDb = FakeLocalDatabase();
 
     await tester.pumpWidget(MultiProvider(
       providers: [
@@ -170,6 +185,9 @@ void main() {
         Provider<ApiClient>.value(value: apiClient),
         ChangeNotifierProvider<AuthSession>(create: (_) => AuthSession(apiClient: apiClient, storage: storage)),
         ChangeNotifierProvider<CartModel>.value(value: cart),
+        Provider<LocalDatabase>.value(value: localDb),
+        Provider<ProductRepository>(create: (_) => ProductRepository(client: apiClient, localDb: localDb)),
+        Provider<SyncService>(create: (_) => SyncService(client: apiClient, localDb: localDb)),
       ],
       child: const MaterialApp(home: ProductSearchScreen()),
     ));

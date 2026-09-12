@@ -41,12 +41,17 @@ dependencies:
   decimal: ^3.1.1
   intl: ^0.19.0
   provider: ^6.1.2
+  sqflite_sqlcipher: ^3.1.0+1
+  sqflite_common: ^2.5.0
+  path: ^1.9.0
+  connectivity_plus: ^6.1.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   integration_test:
     sdk: flutter
+  sqflite_common_ffi: ^2.3.4+4
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is

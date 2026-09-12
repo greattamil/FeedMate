@@ -480,6 +480,32 @@ supplier payments, and the Flutter screens for both.
 ### A real bug found live, unrelated to this phase's own feature, but blocking it
 While verifying the new supplier icon's permission gate (`supplier.manage`) after a cold app restart, the icon — and the owner's display name — had silently disappeared, despite the same account being used throughout the session. Root cause: `AuthSession.restoreSession()` only ever restored `tenantId` from persisted storage and flipped straight to `loggedIn`; it never restored `displayName` or `permissions`, which only ever got populated by a fresh password login. Any real device that stays logged in across an app restart (the normal case for a POS terminal) would silently lose every permission-gated feature — not just the one just added, but existing ones too (e.g. the device-pairing icon) — while still showing as authenticated. Fixed on both ends: `restoreSession()` now exchanges the stored refresh token for a fresh access token via the existing `/api/v1/auth/refresh` endpoint (mirroring what `ApiClient` already does mid-session on a 401) rather than trusting the stale persisted token blindly; and the backend's `identity.Service.Refresh` was found to never populate `DisplayName` in the first place (it only ever fetched permissions, not the user record) — fixed with a new `GetUserByID` lookup, with the handler updated to serialize it. Verified live: after a real app restart, the owner's name and every permission-gated icon reappeared correctly, confirmed with a new integration test asserting `Refresh` carries both, and 3 new Flutter unit tests covering the valid-refresh, expired-refresh, and no-stored-session paths.
 
+## Phase 22 — Flutter End-of-Day Screen
+
+The EOD backend (open/close/reopen a cash session, PRD 12.2) has existed
+since early in the project with a complete, tested API, but no Flutter
+screen ever called it — the only way to open/close a day was `curl`. This
+phase adds `EodScreen`: open with an opening float, close by counting the
+physical cash drawer (the server computes expected cash from the
+accounting journal, never a client-side running total), and reopen a
+closed day with a reason.
+
+| Area | Status | Evidence |
+|---|---|---|
+| `EodApi` wrapping `GET/POST /api/v1/eod*` | **VERIFIED** | Exercises the existing, already-tested backend — no backend changes this phase |
+| `EodScreen`: not-opened / OPEN / CLOSED / REOPENED states, "Open Day", "Close Day" (with the variance-reason retry dialog when counted cash doesn't match expected), "Reopen Day" | **VERIFIED, live** | Installed on the Android emulator and walked through the full real lifecycle against the live server: opened with a ₹2,000.00 float, attempted to close with a mismatched count and received the server's real rejection (a genuine computed variance of -₹14,147.50, reflecting the tenant's actual accumulated cash-sale history from this session's other live tests — not a fixture), supplied a reason and closed successfully, then reopened with a second reason — every number shown was the server's own computation, confirmed on-screen at each step |
+| 3 widget tests (`test/eod_test.dart`, mocked HTTP) | **VERIFIED** | Covers open, the close→reject-for-missing-reason→retry-and-succeed sequence (assumes the cash amount is pre-filled on retry so the cashier doesn't recount), and reopen |
+
+No new backend bugs found — this phase was pure Flutter UI on top of an
+already-solid, already-tested API. One minor formatting fix caught by the
+close-retry test failing on the first attempt: the retry dialog's
+pre-filled cash amount used `Decimal.toString()` (drops trailing zeros,
+e.g. "2500" instead of "2500.00") instead of `toStringAsFixed(2)` — the
+same class of formatting inconsistency documented in Phase 11's bug #10
+and again in Phase 20's methodology note, now a recognizable pattern to
+watch for whenever a `Decimal` is put into a text field or compared as a
+string rather than as a numeric value.
+
 ## Not Yet Started
 
 Customer/supplier aging (30/60/90-day buckets) and margin reports,
@@ -487,8 +513,9 @@ per-device cash session tracking (schema exists, not wired up), a real
 payment provider adapter (production gateway credentials are the external
 dependency — the interface and sandbox are done), idempotency/outbox
 infrastructure for external side effects (printer/WhatsApp), the rest of
-the Flutter app (procurement/GRN screens, EOD/reports screens), a
-WhatsApp provider adapter,
+the Flutter app (procurement/GRN screens, a reports/dashboard screen —
+the sales-summary/stock-on-hand/customer-balances/EOD-history endpoints
+from Phase 10 have no Flutter view yet), a WhatsApp provider adapter,
 hardware adapters (scale/printer/scanner), seed/config workflows, CI/CD
 running for real on GitHub's infrastructure (the workflow exists — Phase
 19 — but has never actually executed there; there is no `git remote`),
@@ -503,7 +530,7 @@ reporting → DevOps).
 
 **NOT READY**, but substantially further along than a first read of "Not Yet
 Started" suggests — that list is what's missing, not a summary of what
-exists. As of Phase 21: the Go backend has verified, tested business domain
+exists. As of Phase 22: the Go backend has verified, tested business domain
 logic for auth/RBAC (including session-restore carrying real permissions,
 not just a login flag), product search, inventory/batches, accounting, POS
 sales (cash + credit + credit-limit override), procurement/GRN, returns,
@@ -514,17 +541,19 @@ integration tests against live PostgreSQL and exercised via real HTTP
 calls. The Flutter client is a real running app (not a mock): login,
 Tamil/phonetic product search, cart/checkout with cash and credit tenders,
 a customer picker, a Khata statement screen with receipt recording, a
-supplier payable screen with payment recording, encrypted offline storage
-with a working offline-sale-then-sync path, and an outbox review/retry
-screen — all verified live on an Android emulator, including with
-connectivity actually disabled and across a real app restart. A CI
-workflow exists covering both stacks, though it has not yet run on real
-GitHub infrastructure (no `git remote` is configured — see Phase 19's
-honesty note).
+supplier payable screen with payment recording, an end-of-day cash
+reconciliation screen, encrypted offline storage with a working
+offline-sale-then-sync path, and an outbox review/retry screen — all
+verified live on an Android emulator, including with connectivity
+actually disabled and across a real app restart. A CI workflow exists
+covering both stacks, though it has not yet run on real GitHub
+infrastructure (no `git remote` is configured — see Phase 19's honesty
+note).
 
 What's still genuinely missing, and why this isn't production-ready: no
 real payment gateway (sandbox only), no WhatsApp integration, no hardware
 adapters (scanner/scale/printer), no aging/margin reports, several Flutter
-screens still absent (procurement/GRN, EOD/reports), no backup/DR tooling,
-CI that has never actually executed, and the test suite is integration +
-widget level only — no E2E, chaos, load, or security test suites exist yet.
+screens still absent (procurement/GRN, a reports/dashboard view), no
+backup/DR tooling, CI that has never actually executed, and the test
+suite is integration + widget level only — no E2E, chaos, load, or
+security test suites exist yet.

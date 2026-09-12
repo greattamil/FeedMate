@@ -8,6 +8,7 @@ import '../../core/auth_session.dart';
 import '../../core/local_db.dart';
 import '../auth/generate_pairing_code_screen.dart';
 import '../auth/login_screen.dart';
+import '../eod/eod_screen.dart';
 import '../khata/khata_customer_list_screen.dart';
 import '../supplier/supplier_list_screen.dart';
 import '../sync/outbox_screen.dart';
@@ -141,6 +142,17 @@ class _ProductSearchScreenState extends State<ProductSearchScreen> {
               onPressed: () {
                 Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const SupplierListScreen()),
+                );
+              },
+            ),
+          if (session.hasPermission('cash.eod_close'))
+            IconButton(
+              key: const Key('eod_button'),
+              icon: const Icon(Icons.point_of_sale_outlined),
+              tooltip: 'End of Day',
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const EodScreen()),
                 );
               },
             ),

@@ -18,6 +18,7 @@ import (
 	"github.com/andipatti/feedmate/services/api/internal/domain/contra"
 	"github.com/andipatti/feedmate/services/api/internal/domain/customer"
 	"github.com/andipatti/feedmate/services/api/internal/domain/devicepairing"
+	"github.com/andipatti/feedmate/services/api/internal/domain/docseries"
 	"github.com/andipatti/feedmate/services/api/internal/domain/eod"
 	"github.com/andipatti/feedmate/services/api/internal/domain/identity"
 	"github.com/andipatti/feedmate/services/api/internal/domain/location"
@@ -64,6 +65,7 @@ func main() {
 	reportsSvc := reports.NewService(db)
 	auditLogSvc := auditlog.NewService(db)
 	stockCountSvc := stockcount.NewService(db)
+	docSeriesSvc := docseries.NewService(db)
 	locationSvc := location.NewService(db)
 	devicePairingSvc := devicepairing.NewService(db)
 	customerSvc := customer.NewService(db)
@@ -93,6 +95,7 @@ func main() {
 	reportsHandlers := &httpapi.ReportsHandlers{Reports: reportsSvc}
 	auditLogHandlers := &httpapi.AuditLogHandlers{AuditLog: auditLogSvc}
 	stockCountHandlers := &httpapi.StockCountHandlers{StockCount: stockCountSvc}
+	docSeriesHandlers := &httpapi.DocSeriesHandlers{DocSeries: docSeriesSvc}
 	locationHandlers := &httpapi.LocationHandlers{Location: locationSvc}
 	deviceHandlers := &httpapi.DeviceHandlers{DevicePairing: devicePairingSvc}
 	customerHandlers := &httpapi.CustomerHandlers{Customer: customerSvc}
@@ -195,6 +198,14 @@ func main() {
 			r.With(appmw.RequirePermission("stock.count")).Post("/stock-counts/{id}/lines", stockCountHandlers.RecordCount)
 			r.With(appmw.RequirePermission("stock.count")).Post("/stock-counts/{id}/post", stockCountHandlers.PostCount)
 			r.With(appmw.RequirePermission("stock.count")).Post("/stock-counts/{id}/cancel", stockCountHandlers.CancelCount)
+
+			r.With(appmw.RequirePermission("tenant.admin")).Get("/financial-years", docSeriesHandlers.ListFinancialYears)
+			r.With(appmw.RequirePermission("tenant.admin")).Post("/financial-years", docSeriesHandlers.CreateFinancialYear)
+			r.With(appmw.RequirePermission("tenant.admin")).Post("/financial-years/{id}/close", docSeriesHandlers.CloseFinancialYear)
+			r.With(appmw.RequirePermission("tenant.admin")).Get("/financial-years/{id}/document-series", docSeriesHandlers.ListDocumentSeries)
+			r.With(appmw.RequirePermission("tenant.admin")).Post("/financial-years/{id}/document-series", docSeriesHandlers.CreateDocumentSeries)
+			r.With(appmw.RequirePermission("tenant.admin")).Post("/financial-years/{id}/document-series/seed-defaults", docSeriesHandlers.SeedDefaultSeries)
+			r.With(appmw.RequirePermission("tenant.admin")).Post("/document-series/{id}/status", docSeriesHandlers.SetDocumentSeriesActive)
 
 			r.Get("/customers", customerHandlers.List)
 			r.Get("/customers/{id}", customerHandlers.Get)

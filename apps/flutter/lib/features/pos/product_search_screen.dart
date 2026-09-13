@@ -14,6 +14,7 @@ import '../auth/device_management_screen.dart';
 import '../auth/generate_pairing_code_screen.dart';
 import '../auth/login_screen.dart';
 import '../contra/contra_screen.dart';
+import '../docseries/doc_series_screen.dart';
 import '../eod/eod_screen.dart';
 import '../khata/khata_customer_list_screen.dart';
 import '../procurement/grn_history_screen.dart';
@@ -32,7 +33,7 @@ import 'invoice_history_screen.dart';
 import 'product.dart';
 import 'product_repository.dart';
 
-enum _MenuAction { khata, suppliers, grn, grnHistory, returnSale, contra, products, masterData, invoiceHistory, reports, eod, pairDevice, manageDevices, auditLog, staff, stockCounts }
+enum _MenuAction { khata, suppliers, grn, grnHistory, returnSale, contra, products, masterData, invoiceHistory, reports, eod, pairDevice, manageDevices, auditLog, staff, stockCounts, docSeries }
 
 /// Modernized POS Counter & Product Catalog for FeedMate.
 /// Backed by ranked search (barcode > SKU > exact name > alias > fuzzy).
@@ -229,6 +230,11 @@ class _ProductSearchScreenState extends State<ProductSearchScreen> {
                     MaterialPageRoute(builder: (_) => const AuditLogScreen()),
                   );
                   break;
+                case _MenuAction.docSeries:
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const DocSeriesScreen()),
+                  );
+                  break;
                 case _MenuAction.staff:
                   Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => const StaffListScreen()),
@@ -374,6 +380,15 @@ class _ProductSearchScreenState extends State<ProductSearchScreen> {
                   child: ListTile(
                     leading: Icon(Icons.devices_other_outlined),
                     title: Text('Manage Devices'),
+                  ),
+                ),
+              if (session.hasPermission('tenant.admin'))
+                const PopupMenuItem(
+                  key: Key('menu_item_doc_series'),
+                  value: _MenuAction.docSeries,
+                  child: ListTile(
+                    leading: Icon(Icons.calendar_month_outlined),
+                    title: Text('Financial Years'),
                   ),
                 ),
               if (session.hasPermission('tenant.admin'))

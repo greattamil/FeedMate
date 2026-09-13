@@ -893,6 +893,26 @@ Full Flutter suite: 88 tests, all passing. Full Go integration suite: 15
 packages, all passing (the fixed package included). `flutter analyze`/
 `go vet` clean. No live emulator verification performed for this phase.
 
+## Phase 40 — Financial Year & Document Series Admin (Backend + Flutter)
+
+The exact recurring failure mode documented repeatedly in this file
+(Phases 24/25: a missing `document_series` row surfacing only as an opaque
+`INTERNAL_ERROR` at the moment a cashier tries to finalize a sale) had no
+admin UI to prevent it — both `financial_years` and `document_series` had
+to be seeded by hand with raw SQL. This phase closes that gap.
+
+| Area | Status | Evidence |
+|---|---|---|
+| New `docseries` domain package: `CreateFinancialYear` auto-closes any other currently-OPEN year (`accounting.GetActiveFinancialYear` resolves "the" active year by most-recent-start among `OPEN` rows — ambiguous the moment two are open at once); `CreateDocumentSeries` likewise deactivates any prior active series of the same document type within a year, for the identical reason (`AllocateInvoiceNumber` et al. take whatever a plain `WHERE ... AND active` happens to return first) | **VERIFIED** | New integration tests `TestCreateFinancialYear_ClosesAnyPriorOpenYear` and `TestCreateDocumentSeries_DeactivatesPriorActiveSeriesOfSameType` prove both invariants end-to-end, including confirming `accounting.GetActiveFinancialYear` (the real function every posting path calls) resolves to the newly-opened year afterward — not a reimplementation of that check |
+| `SeedDefaultSeries`: the one-click fix — creates an active series for every core document type (INVOICE/GRN/RETURN/CONTRA/RECEIPT) missing one in a financial year, safe to re-run (never duplicates or disturbs an already-active series) | **VERIFIED** | `TestSeedDefaultSeries_CoversCoreDocumentTypesAndNeverDuplicates` seeds a fresh year, re-seeds it (asserts zero new rows created), then confirms a real invoice number could now be allocated against it |
+| `GET/POST /api/v1/financial-years`, `POST .../{id}/close`, `GET/POST .../{id}/document-series`, `POST .../{id}/document-series/seed-defaults`, `POST /api/v1/document-series/{id}/status` — all gated `tenant.admin` | **VERIFIED** | `go build`/`go vet` clean |
+| `DocSeriesScreen`: pick a financial year, see its series, "New Year" (date-pickers, auto-closes the prior year), "Seed Defaults" (one tap), "Add Series" (custom prefix/padding/starting number), and a per-series active/inactive switch | **VERIFIED** | Wired into the overflow menu gated on `tenant.admin` |
+| 4 new widget tests (`test/doc_series_test.dart`) | **VERIFIED** | Shows year + series, opening a new year posts the exact dates, seeding reports the created count, adding a custom series posts the exact fields |
+
+Full Flutter suite: 92 tests, all passing. Full Go integration suite: 16
+packages, all passing. `flutter analyze`/`go vet` clean. No live emulator
+verification performed for this phase.
+
 ## Not Yet Started
 
 Customer/supplier aging (30/60/90-day buckets) and margin reports,

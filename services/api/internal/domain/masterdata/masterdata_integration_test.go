@@ -7,6 +7,7 @@ package masterdata_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -25,6 +26,19 @@ func mustEnv(t *testing.T, key string) string {
 		t.Skipf("%s not set; skipping integration test", key)
 	}
 	return v
+}
+
+func connectTest(t *testing.T) *dbctx.DB {
+	t.Helper()
+	dsn := mustEnv(t, "DATABASE_URL")
+	adminDSN := mustEnv(t, "DATABASE_ADMIN_URL")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	db, err := dbctx.Connect(ctx, dsn, adminDSN)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	return db
 }
 
 func seedTenant(t *testing.T, db *dbctx.DB) uuid.UUID {
@@ -127,4 +141,77 @@ func TestMasterDataLists(t *testing.T) {
 			t.Fatalf("expected tenant isolation to hide the other tenant's category, got %+v", otherCategories)
 		}
 	})
+}
+
+func TestCreateCategory_AndDeactivate(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	tenantID := seedTenant(t, db)
+	svc := masterdata.NewService(db)
+
+	created, err := svc.CreateCategory(context.Background(), tenantID, "Poultry Feed", "கோழி தீவனம்")
+	if err != nil {
+		t.Fatalf("create category: %v", err)
+	}
+	if created.Name != "Poultry Feed" {
+		t.Fatalf("expected name 'Poultry Feed', got %q", created.Name)
+	}
+
+	categories, err := svc.ListCategories(context.Background(), tenantID)
+	if err != nil {
+		t.Fatalf("list categories: %v", err)
+	}
+	if len(categories) != 1 || categories[0].ID != created.ID {
+		t.Fatalf("expected the newly created category to be listed, got %+v", categories)
+	}
+
+	if _, err := svc.CreateCategory(context.Background(), tenantID, "", ""); !errors.Is(err, masterdata.ErrValidation) {
+		t.Fatalf("expected ErrValidation for an empty name, got: %v", err)
+	}
+
+	if err := svc.SetCategoryActive(context.Background(), tenantID, created.ID, false); err != nil {
+		t.Fatalf("deactivate category: %v", err)
+	}
+	afterDeactivate, err := svc.ListCategories(context.Background(), tenantID)
+	if err != nil {
+		t.Fatalf("list categories after deactivate: %v", err)
+	}
+	if len(afterDeactivate) != 0 {
+		t.Fatalf("expected the deactivated category to be excluded from the active-only list, got %+v", afterDeactivate)
+	}
+
+	if err := svc.SetCategoryActive(context.Background(), tenantID, uuid.New(), true); !errors.Is(err, masterdata.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for a nonexistent category, got: %v", err)
+	}
+}
+
+func TestCreateBrand_AndDeactivate(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	tenantID := seedTenant(t, db)
+	svc := masterdata.NewService(db)
+
+	created, err := svc.CreateBrand(context.Background(), tenantID, "Godrej Agrovet", "")
+	if err != nil {
+		t.Fatalf("create brand: %v", err)
+	}
+
+	brands, err := svc.ListBrands(context.Background(), tenantID)
+	if err != nil {
+		t.Fatalf("list brands: %v", err)
+	}
+	if len(brands) != 1 || brands[0].ID != created.ID {
+		t.Fatalf("expected the newly created brand to be listed, got %+v", brands)
+	}
+
+	if err := svc.SetBrandActive(context.Background(), tenantID, created.ID, false); err != nil {
+		t.Fatalf("deactivate brand: %v", err)
+	}
+	afterDeactivate, err := svc.ListBrands(context.Background(), tenantID)
+	if err != nil {
+		t.Fatalf("list brands after deactivate: %v", err)
+	}
+	if len(afterDeactivate) != 0 {
+		t.Fatalf("expected the deactivated brand to be excluded from the active-only list, got %+v", afterDeactivate)
+	}
 }

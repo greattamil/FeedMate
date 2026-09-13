@@ -18,6 +18,7 @@ import '../eod/eod_screen.dart';
 import '../khata/khata_customer_list_screen.dart';
 import '../procurement/grn_history_screen.dart';
 import '../procurement/grn_screen.dart';
+import '../products/master_data_screen.dart';
 import '../products/product_list_screen.dart';
 import '../reports/reports_screen.dart';
 import '../returns/return_screen.dart';
@@ -30,7 +31,7 @@ import 'invoice_history_screen.dart';
 import 'product.dart';
 import 'product_repository.dart';
 
-enum _MenuAction { khata, suppliers, grn, grnHistory, returnSale, contra, products, invoiceHistory, reports, eod, pairDevice, manageDevices, auditLog, staff }
+enum _MenuAction { khata, suppliers, grn, grnHistory, returnSale, contra, products, masterData, invoiceHistory, reports, eod, pairDevice, manageDevices, auditLog, staff }
 
 /// Modernized POS Counter & Product Catalog for FeedMate.
 /// Backed by ranked search (barcode > SKU > exact name > alias > fuzzy).
@@ -192,6 +193,11 @@ class _ProductSearchScreenState extends State<ProductSearchScreen> {
                     MaterialPageRoute(builder: (_) => const ProductListScreen()),
                   );
                   break;
+                case _MenuAction.masterData:
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const MasterDataScreen()),
+                  );
+                  break;
                 case _MenuAction.invoiceHistory:
                   Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => const InvoiceHistoryScreen()),
@@ -272,6 +278,15 @@ class _ProductSearchScreenState extends State<ProductSearchScreen> {
                   child: ListTile(
                     leading: Icon(Icons.assignment_return_outlined),
                     title: Text('Sales Return'),
+                  ),
+                ),
+              if (session.hasPermission('product.manage'))
+                const PopupMenuItem(
+                  key: Key('menu_item_master_data'),
+                  value: _MenuAction.masterData,
+                  child: ListTile(
+                    leading: Icon(Icons.category_outlined),
+                    title: Text('Categories & Brands'),
                   ),
                 ),
               if (session.hasPermission('contra.approve'))

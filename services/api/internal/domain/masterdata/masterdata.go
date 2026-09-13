@@ -1,18 +1,28 @@
 // Package masterdata wraps the small, mostly-static lookup tables a product
-// master-data form needs (categories, brands, UOMs, tax profiles). These are
-// read-only from the API's perspective today — there is no create/edit UI
-// for them yet, only for products that reference them — so this package
-// intentionally only exposes List, not full CRUD.
+// master-data form needs (categories, brands, UOMs, tax profiles). UOMs and
+// tax profiles stay list-only here — UOMs are a largely-fixed global seed
+// (see ListUOMs) and tax profiles carry GST-compliance implications (rate
+// history, HSN mapping) that deserve a dedicated flow, not a quick add
+// button. Categories and brands, by contrast, are the two lookups a shop
+// owner routinely needs to extend as they onboard new product lines, so
+// those two get full create/deactivate support.
 package masterdata
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
 
 	"github.com/andipatti/feedmate/services/api/internal/dbctx"
+)
+
+var (
+	ErrValidation = errors.New("validation error")
+	ErrNotFound   = errors.New("not found")
 )
 
 type Service struct {
@@ -71,6 +81,45 @@ func (s *Service) ListCategories(ctx context.Context, tenantID uuid.UUID) ([]Cat
 	return out, err
 }
 
+// CreateCategory adds a new product category. Never a hard delete anywhere
+// in this package — SetCategoryActive flips the `active` flag instead,
+// since historical products may already reference a category by id.
+func (s *Service) CreateCategory(ctx context.Context, tenantID uuid.UUID, name, localName string) (*Category, error) {
+	if name == "" {
+		return nil, fmt.Errorf("%w: name is required", ErrValidation)
+	}
+	var c Category
+	err := s.db.WithTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
+		var localNamePtr *string
+		if localName != "" {
+			localNamePtr = &localName
+		}
+		return tx.QueryRow(ctx, `
+			INSERT INTO categories (tenant_id, name, local_name) VALUES ($1,$2,$3)
+			RETURNING id, name
+		`, tenantID, name, localNamePtr).Scan(&c.ID, &c.Name)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+// SetCategoryActive activates or deactivates a category — never a hard
+// delete, since historical products may reference it by id.
+func (s *Service) SetCategoryActive(ctx context.Context, tenantID, id uuid.UUID, active bool) error {
+	return s.db.WithTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `UPDATE categories SET active = $2, updated_at = now() WHERE id = $1`, id, active)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrNotFound
+		}
+		return nil
+	})
+}
+
 func (s *Service) ListBrands(ctx context.Context, tenantID uuid.UUID) ([]Brand, error) {
 	var out []Brand
 	err := s.db.WithTenantReadTx(ctx, tenantID, func(tx pgx.Tx) error {
@@ -89,6 +138,42 @@ func (s *Service) ListBrands(ctx context.Context, tenantID uuid.UUID) ([]Brand, 
 		return rows.Err()
 	})
 	return out, err
+}
+
+// CreateBrand adds a new product brand (see CreateCategory's doc comment —
+// same never-hard-delete convention via SetBrandActive).
+func (s *Service) CreateBrand(ctx context.Context, tenantID uuid.UUID, name, localName string) (*Brand, error) {
+	if name == "" {
+		return nil, fmt.Errorf("%w: name is required", ErrValidation)
+	}
+	var b Brand
+	err := s.db.WithTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
+		var localNamePtr *string
+		if localName != "" {
+			localNamePtr = &localName
+		}
+		return tx.QueryRow(ctx, `
+			INSERT INTO brands (tenant_id, name, local_name) VALUES ($1,$2,$3)
+			RETURNING id, name
+		`, tenantID, name, localNamePtr).Scan(&b.ID, &b.Name)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &b, nil
+}
+
+func (s *Service) SetBrandActive(ctx context.Context, tenantID, id uuid.UUID, active bool) error {
+	return s.db.WithTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `UPDATE brands SET active = $2, updated_at = now() WHERE id = $1`, id, active)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrNotFound
+		}
+		return nil
+	})
 }
 
 // ListUOMs includes tenant-specific UOMs plus the global (tenant_id IS NULL)

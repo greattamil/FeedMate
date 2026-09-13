@@ -850,6 +850,27 @@ Full Flutter suite: 83 tests, all passing. Full Go integration suite: 14
 packages, all passing. `flutter analyze`/`go vet` clean. No live emulator
 verification performed for this phase.
 
+## Phase 38 — Category & Brand Admin (Backend + Flutter)
+
+The `masterdata` package was explicitly read-only ("there is no create/edit
+UI for them yet" — its own doc comment). Added create/deactivate for
+categories and brands specifically (the two lookups a shop owner routinely
+extends when onboarding new product lines); UOMs stay list-only (a
+largely-fixed global seed) and tax profiles stay list-only (GST-compliance
+implications deserve a dedicated flow, not a quick add button) — both
+documented as a deliberate scope decision in the package's own doc comment.
+
+| Area | Status | Evidence |
+|---|---|---|
+| `masterdata.Service.CreateCategory`/`SetCategoryActive`/`CreateBrand`/`SetBrandActive` — never a hard delete, since historical products may reference either by id | **VERIFIED** | New integration tests `TestCreateCategory_AndDeactivate` and `TestCreateBrand_AndDeactivate`, both run against live PostgreSQL |
+| `POST /api/v1/categories`, `POST /api/v1/categories/{id}/status`, `POST /api/v1/brands`, `POST /api/v1/brands/{id}/status`, all gated `product.manage` (the existing `GET` list routes stay open to any authenticated user, unchanged) | **VERIFIED** | `go build`/`go vet` clean |
+| `MasterDataScreen`: two tabs (Categories/Brands), each with a live list, an add-FAB that follows the active tab, and a deactivate action with confirmation | **VERIFIED** | Wired into the overflow menu gated on `product.manage` |
+| 3 new widget tests (`test/master_data_test.dart`) | **VERIFIED** | Both tabs list correctly, add posts the exact name and refreshes, deactivate requires confirmation and posts the exact status body |
+
+Full Flutter suite: 86 tests, all passing. Full Go integration suite: 14
+packages, all passing. `flutter analyze`/`go vet` clean. No live emulator
+verification performed for this phase.
+
 ## Not Yet Started
 
 Customer/supplier aging (30/60/90-day buckets) and margin reports,

@@ -236,6 +236,30 @@ class ProductAdminApi {
         .toList();
   }
 
+  Future<MasterDataOption> createCategory({required String name, String? localName}) async {
+    final response = await client.postAuthed('/api/v1/categories', {
+      'name': name,
+      if (localName != null && localName.isNotEmpty) 'local_name': localName,
+    });
+    return MasterDataOption(id: response['id'] as String, label: response['name'] as String);
+  }
+
+  Future<void> setCategoryActive(String categoryId, bool active) async {
+    await client.postAuthed('/api/v1/categories/$categoryId/status', {'active': active});
+  }
+
+  Future<MasterDataOption> createBrand({required String name, String? localName}) async {
+    final response = await client.postAuthed('/api/v1/brands', {
+      'name': name,
+      if (localName != null && localName.isNotEmpty) 'local_name': localName,
+    });
+    return MasterDataOption(id: response['id'] as String, label: response['name'] as String);
+  }
+
+  Future<void> setBrandActive(String brandId, bool active) async {
+    await client.postAuthed('/api/v1/brands/$brandId/status', {'active': active});
+  }
+
   Future<List<MasterDataOption>> listUoms() async {
     final response = await client.getAuthed('/api/v1/uoms');
     return (response['uoms'] as List<dynamic>)

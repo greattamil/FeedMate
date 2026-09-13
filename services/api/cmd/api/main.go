@@ -131,7 +131,11 @@ func main() {
 			r.With(appmw.RequirePermission("product.manage")).Post("/products/{id}/status", productHandlers.SetStatus)
 
 			r.Get("/categories", masterDataHandlers.ListCategories)
+			r.With(appmw.RequirePermission("product.manage")).Post("/categories", masterDataHandlers.CreateCategory)
+			r.With(appmw.RequirePermission("product.manage")).Post("/categories/{id}/status", masterDataHandlers.SetCategoryActive)
 			r.Get("/brands", masterDataHandlers.ListBrands)
+			r.With(appmw.RequirePermission("product.manage")).Post("/brands", masterDataHandlers.CreateBrand)
+			r.With(appmw.RequirePermission("product.manage")).Post("/brands/{id}/status", masterDataHandlers.SetBrandActive)
 			r.Get("/uoms", masterDataHandlers.ListUOMs)
 			r.Get("/tax-profiles", masterDataHandlers.ListTaxProfiles)
 

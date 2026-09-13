@@ -66,6 +66,38 @@ class CloseSessionResult {
 
 String formatBusinessDate(DateTime date) => DateFormat('yyyy-MM-dd').format(date);
 
+/// One manual cash in/out logged against the day's drawer (PAYOUT/EXPENSE/
+/// DEPOSIT/WITHDRAWAL/ADJUSTMENT — never SALE/REFUND, which are always
+/// derived from the accounting journal instead).
+class CashMovement {
+  final String id;
+  final String movementType;
+  final String direction; // IN or OUT
+  final Decimal amount;
+  final String? reason;
+  final DateTime createdAt;
+
+  CashMovement({
+    required this.id,
+    required this.movementType,
+    required this.direction,
+    required this.amount,
+    required this.reason,
+    required this.createdAt,
+  });
+
+  factory CashMovement.fromJson(Map<String, dynamic> json) {
+    return CashMovement(
+      id: json['id'] as String,
+      movementType: json['movement_type'] as String,
+      direction: json['direction'] as String,
+      amount: Decimal.parse(json['amount'] as String),
+      reason: json['reason'] as String?,
+      createdAt: DateTime.parse(json['created_at'] as String),
+    );
+  }
+}
+
 /// Wraps the end-of-day cash reconciliation endpoints. See
 /// services/api/internal/httpapi/eod_handlers.go — the server is the sole
 /// authority on expected cash (derived from the accounting journal's CASH
@@ -116,5 +148,32 @@ class EodApi {
       if (businessDate != null) 'business_date': formatBusinessDate(businessDate),
     };
     await client.postAuthed('/api/v1/eod/reopen', body);
+  }
+
+  Future<void> recordCashMovement({
+    required String movementType,
+    required String direction,
+    required Decimal amount,
+    String? reason,
+    DateTime? businessDate,
+  }) async {
+    final body = {
+      'movement_type': movementType,
+      'direction': direction,
+      'amount': amount.toStringAsFixed(2),
+      if (reason != null && reason.isNotEmpty) 'reason': reason,
+      if (businessDate != null) 'business_date': formatBusinessDate(businessDate),
+    };
+    await client.postAuthed('/api/v1/eod/cash-movements', body);
+  }
+
+  Future<List<CashMovement>> listCashMovements({DateTime? businessDate}) async {
+    final path = businessDate != null
+        ? '/api/v1/eod/cash-movements?business_date=${formatBusinessDate(businessDate)}'
+        : '/api/v1/eod/cash-movements';
+    final response = await client.getAuthed(path);
+    return (response['movements'] as List<dynamic>)
+        .map((m) => CashMovement.fromJson(m as Map<String, dynamic>))
+        .toList();
   }
 }

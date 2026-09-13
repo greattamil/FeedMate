@@ -52,6 +52,9 @@ void main() {
         }
         return _notFound();
       }
+      if (request.url.path == '/api/v1/eod/cash-movements' && request.method == 'GET') {
+        return _jsonOk({'movements': []});
+      }
       if (request.url.path == '/api/v1/eod/open') {
         final body = jsonDecode(request.body) as Map<String, dynamic>;
         sentOpeningCash = body['opening_cash'] as String;
@@ -87,6 +90,9 @@ void main() {
           'session_id': 's1', 'business_date': '2026-09-12', 'opening_cash': '2000.00',
           'cash_sales': '0.00', 'cash_refunds': '0.00', 'expected_cash': '0.00', 'status': 'OPEN',
         });
+      }
+      if (request.url.path == '/api/v1/eod/cash-movements' && request.method == 'GET') {
+        return _jsonOk({'movements': []});
       }
       if (request.url.path == '/api/v1/eod/close') {
         closeAttempts++;
@@ -147,6 +153,9 @@ void main() {
           'actual_cash': '7000.00', 'variance': '0.00', 'status': status,
         });
       }
+      if (request.url.path == '/api/v1/eod/cash-movements' && request.method == 'GET') {
+        return _jsonOk({'movements': []});
+      }
       if (request.url.path == '/api/v1/eod/reopen') {
         final body = jsonDecode(request.body) as Map<String, dynamic>;
         sentReopenReason = body['reason'] as String;
@@ -170,5 +179,86 @@ void main() {
 
     expect(sentReopenReason, 'Late credit sale needs posting');
     expect(find.text('REOPENED'), findsOneWidget);
+  });
+
+  testWidgets('recording cash out posts the movement and shows it in the log', (tester) async {
+    var movements = <Map<String, dynamic>>[];
+    Map<String, dynamic>? postedBody;
+
+    final client = MockClient((request) async {
+      if (request.url.path == '/api/v1/eod' && request.method == 'GET') {
+        return _jsonOk({
+          'session_id': 's1', 'business_date': '2026-09-12', 'opening_cash': '2000.00',
+          'cash_sales': '0.00', 'cash_refunds': '0.00', 'expected_cash': '0.00', 'status': 'OPEN',
+        });
+      }
+      if (request.url.path == '/api/v1/eod/cash-movements' && request.method == 'GET') {
+        return _jsonOk({'movements': movements});
+      }
+      if (request.url.path == '/api/v1/eod/cash-movements' && request.method == 'POST') {
+        postedBody = jsonDecode(request.body) as Map<String, dynamic>;
+        movements = [
+          {
+            'id': 'mv-1', 'movement_type': postedBody!['movement_type'], 'direction': postedBody!['direction'],
+            'amount': postedBody!['amount'], 'reason': postedBody!['reason'], 'created_at': '2026-09-12T10:00:00+05:30',
+          }
+        ];
+        return _jsonOk({'movement_id': 'mv-1'});
+      }
+      return http.Response('not found', 404);
+    });
+
+    await tester.pumpWidget(_wrap(httpClient: client));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('cash_movement_button')));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byKey(const Key('cash_movement_amount_field')), '300.00');
+    await tester.enterText(find.byKey(const Key('cash_movement_reason_field')), 'Tea and snacks');
+    await tester.tap(find.byKey(const Key('cash_movement_submit_button')));
+    await tester.pumpAndSettle();
+
+    expect(postedBody, isNotNull);
+    expect(postedBody!['movement_type'], 'EXPENSE');
+    expect(postedBody!['direction'], 'OUT');
+    expect(postedBody!['amount'], '300.00');
+    expect(postedBody!['reason'], 'Tea and snacks');
+
+    expect(find.textContaining('Cash out of ₹300.00 recorded'), findsOneWidget);
+    expect(find.text('Cash Movements Today'), findsOneWidget);
+    expect(find.textContaining('EXPENSE'), findsOneWidget);
+    expect(find.text('-₹300.00'), findsOneWidget);
+  });
+
+  testWidgets('cash movement form rejects a non-positive amount client-side', (tester) async {
+    var postCount = 0;
+    final client = MockClient((request) async {
+      if (request.url.path == '/api/v1/eod' && request.method == 'GET') {
+        return _jsonOk({
+          'session_id': 's1', 'business_date': '2026-09-12', 'opening_cash': '2000.00',
+          'cash_sales': '0.00', 'cash_refunds': '0.00', 'expected_cash': '0.00', 'status': 'OPEN',
+        });
+      }
+      if (request.url.path == '/api/v1/eod/cash-movements' && request.method == 'GET') {
+        return _jsonOk({'movements': []});
+      }
+      if (request.url.path == '/api/v1/eod/cash-movements' && request.method == 'POST') {
+        postCount++;
+        return _jsonOk({'movement_id': 'mv-x'});
+      }
+      return http.Response('not found', 404);
+    });
+
+    await tester.pumpWidget(_wrap(httpClient: client));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('cash_movement_button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('cash_movement_submit_button')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Enter a valid amount greater than zero'), findsOneWidget);
+    expect(postCount, 0);
   });
 }

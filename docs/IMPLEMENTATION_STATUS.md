@@ -769,6 +769,29 @@ exactly.
 Full Flutter suite: 71 tests, all passing. `flutter analyze` clean. No
 live emulator verification performed for this phase.
 
+## Phase 34 — Cash In/Out / Petty Cash (Backend + Flutter)
+
+The single biggest silent gap found: `eod.Service.CloseSession` had a
+hardcoded `cashPayouts := decimal.Zero // no payout/expense module yet`,
+and the `cash_sessions`/`cash_movements` tables existed in the schema but
+were never written to by anything — `eod_sessions.cash_session_id` was
+always left `NULL`. Any shop that took cash out of the drawer for a petty
+expense had no way to record it, so EOD close would always show a
+"missing" variance for that amount with no explanation attached.
+
+| Area | Status | Evidence |
+|---|---|---|
+| `eod.InsertOpenSession` now also creates a linked `cash_sessions` row per device/business-date, wiring up the previously-dormant table | **VERIFIED** | All 6 pre-existing EOD integration tests still pass unchanged after this wiring change, plus the reports package's own EOD test (both call sites updated for the new `deviceID` parameter) |
+| `eod.Service.RecordCashMovement` / `ListCashMovements` (PAYOUT/EXPENSE/DEPOSIT/WITHDRAWAL/ADJUSTMENT, direction IN/OUT, requires the session still OPEN — SALE/REFUND rejected since those must stay journal-derived) | **VERIFIED** | New integration tests `TestEOD_CashMovementsAffectExpectedCash` (a 300 OUT expense + 50 IN adjustment nets to -250 in expected cash, reconciling exactly) and `TestEOD_CashMovement_RejectsInvalidInputAndClosedSession` |
+| `CloseSession`'s expected-cash formula now actually subtracts `GetCashMovementNetOut` instead of the hardcoded zero | **VERIFIED** | Same test confirms the closed session's `expected_cash` reflects the real net movement |
+| `POST /api/v1/eod/cash-movements` and `GET /api/v1/eod/cash-movements`, both gated `cash.eod_close` | **VERIFIED** | `go build`/`go vet` clean |
+| "Cash In / Out" button on `EodScreen` (visible only while OPEN) plus a running "Cash Movements Today" log | **VERIFIED** | Direction toggle changes the available movement-type list (EXPENSE/PAYOUT/WITHDRAWAL/ADJUSTMENT for OUT, DEPOSIT/ADJUSTMENT for IN) |
+| 2 new widget tests | **VERIFIED** | Recording an expense posts the exact body and appears in the log; non-positive amount rejected client-side. The 3 pre-existing EOD widget tests needed their mocks extended with a `GET /eod/cash-movements` handler (the screen now fetches it alongside the session) — all still pass |
+
+Full Flutter suite: 73 tests, all passing. Full Go integration suite: 13
+packages, all passing. `flutter analyze`/`go vet` clean. No live emulator
+verification performed for this phase.
+
 ## Not Yet Started
 
 Customer/supplier aging (30/60/90-day buckets) and margin reports,

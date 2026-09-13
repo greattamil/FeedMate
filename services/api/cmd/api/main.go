@@ -158,6 +158,8 @@ func main() {
 			r.With(appmw.RequirePermission("cash.eod_close")).Post("/eod/close", eodHandlers.CloseSession)
 			r.With(appmw.RequirePermission("eod.reopen")).Post("/eod/reopen", eodHandlers.ReopenSession)
 			r.With(appmw.RequirePermission("cash.eod_close")).Get("/eod", eodHandlers.GetSession)
+			r.With(appmw.RequirePermission("cash.eod_close")).Post("/eod/cash-movements", eodHandlers.RecordCashMovement)
+			r.With(appmw.RequirePermission("cash.eod_close")).Get("/eod/cash-movements", eodHandlers.ListCashMovements)
 
 			r.With(appmw.RequirePermission("report.view")).Get("/reports/sales-summary", reportsHandlers.SalesSummary)
 			r.With(appmw.RequirePermission("report.view")).Get("/reports/stock-on-hand", reportsHandlers.StockOnHand)

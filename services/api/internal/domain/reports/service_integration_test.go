@@ -271,7 +271,7 @@ func TestEODHistory_ReflectsClosedSession(t *testing.T) {
 	eodSvc := eod.NewService(db)
 	reportsSvc := reports.NewService(db)
 
-	if _, err := eodSvc.OpenSession(context.Background(), f.tenantID, f.userID, f.businessDate, decimal.RequireFromString("500.00")); err != nil {
+	if _, err := eodSvc.OpenSession(context.Background(), f.tenantID, f.deviceID, f.userID, f.businessDate, decimal.RequireFromString("500.00")); err != nil {
 		t.Fatalf("open session: %v", err)
 	}
 	if _, err := eodSvc.CloseSession(context.Background(), f.tenantID, f.userID, f.businessDate, decimal.RequireFromString("500.00"), ""); err != nil {

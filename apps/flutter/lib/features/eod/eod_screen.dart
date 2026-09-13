@@ -24,6 +24,7 @@ class EodScreen extends StatefulWidget {
 
 class _EodScreenState extends State<EodScreen> {
   EodSession? _session;
+  List<CashMovement> _movements = [];
   bool _loading = true;
   bool _notOpened = false;
   String? _error;
@@ -45,9 +46,11 @@ class _EodScreenState extends State<EodScreen> {
     try {
       final api = EodApi(context.read<ApiClient>());
       final session = await api.getSession();
+      final movements = await api.listCashMovements();
       if (!mounted) return;
       setState(() {
         _session = session;
+        _movements = movements;
         _loading = false;
       });
     } on ApiError catch (e) {
@@ -56,6 +59,7 @@ class _EodScreenState extends State<EodScreen> {
         setState(() {
           _notOpened = true;
           _session = null;
+          _movements = [];
           _loading = false;
         });
       } else {
@@ -64,6 +68,33 @@ class _EodScreenState extends State<EodScreen> {
           _loading = false;
         });
       }
+    }
+  }
+
+  Future<void> _recordCashMovement() async {
+    final result = await showDialog<_CashMovementFormResult>(
+      context: context,
+      builder: (context) => const _CashMovementDialog(),
+    );
+    if (result == null) return;
+
+    try {
+      final api = EodApi(context.read<ApiClient>());
+      await api.recordCashMovement(
+        movementType: result.movementType,
+        direction: result.direction,
+        amount: result.amount,
+        reason: result.reason,
+      );
+      if (!mounted) return;
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('${result.direction == 'IN' ? 'Cash in' : 'Cash out'} of ₹${result.amount.toStringAsFixed(2)} recorded'),
+      ));
+    } on ApiError catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
     }
   }
 
@@ -374,6 +405,62 @@ class _EodScreenState extends State<EodScreen> {
           ),
         ),
 
+        if (session.status == 'OPEN') ...[
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              key: const Key('cash_movement_button'),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                side: const BorderSide(color: AppColors.primary, width: 1.5),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+              onPressed: _recordCashMovement,
+              icon: const Icon(Icons.swap_vert_rounded, color: AppColors.primary, size: 20),
+              label: const Text('Cash In / Out', style: TextStyle(color: AppColors.primary, fontSize: 15, fontWeight: FontWeight.bold)),
+            ),
+          ),
+        ],
+        if (_movements.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: AppDecorations.card(color: AppColors.surface),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Cash Movements Today', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+                const SizedBox(height: 8),
+                ..._movements.map((m) => Padding(
+                      key: Key('cash_movement_${m.id}'),
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              '${m.movementType}${m.reason != null ? " · ${m.reason}" : ""}',
+                              style: const TextStyle(fontSize: 13, color: AppColors.textSecondary),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          Text(
+                            '${m.direction == 'OUT' ? '-' : '+'}₹${m.amount.toStringAsFixed(2)}',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                              color: m.direction == 'OUT' ? AppColors.danger : AppColors.success,
+                            ),
+                          ),
+                        ],
+                      ),
+                    )),
+              ],
+            ),
+          ),
+        ],
+
         const SizedBox(height: 16),
 
         if (session.status == 'OPEN')
@@ -535,6 +622,115 @@ class _ReasonDialogState extends State<_ReasonDialog> {
           style: FilledButton.styleFrom(backgroundColor: AppColors.primary),
           onPressed: () => Navigator.of(context).pop(_controller.text.trim()),
           child: const Text('Confirm'),
+        ),
+      ],
+    );
+  }
+}
+
+class _CashMovementFormResult {
+  final String movementType;
+  final String direction;
+  final Decimal amount;
+  final String? reason;
+
+  _CashMovementFormResult({required this.movementType, required this.direction, required this.amount, this.reason});
+}
+
+/// Collects one manual cash in/out. The server is what actually enforces
+/// the session is still OPEN and folds this into expected cash at close
+/// time (see eod.Service.RecordCashMovement / CloseSession).
+class _CashMovementDialog extends StatefulWidget {
+  const _CashMovementDialog();
+
+  @override
+  State<_CashMovementDialog> createState() => _CashMovementDialogState();
+}
+
+class _CashMovementDialogState extends State<_CashMovementDialog> {
+  final _amountController = TextEditingController();
+  final _reasonController = TextEditingController();
+  String _direction = 'OUT';
+  String _movementType = 'EXPENSE';
+  String? _error;
+
+  static const _outTypes = ['EXPENSE', 'PAYOUT', 'WITHDRAWAL', 'ADJUSTMENT'];
+  static const _inTypes = ['DEPOSIT', 'ADJUSTMENT'];
+
+  @override
+  void dispose() {
+    _amountController.dispose();
+    _reasonController.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final amount = Decimal.tryParse(_amountController.text.trim());
+    if (amount == null || amount <= Decimal.zero) {
+      setState(() => _error = 'Enter a valid amount greater than zero');
+      return;
+    }
+    Navigator.of(context).pop(_CashMovementFormResult(
+      movementType: _movementType,
+      direction: _direction,
+      amount: amount,
+      reason: _reasonController.text.trim(),
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final types = _direction == 'OUT' ? _outTypes : _inTypes;
+    if (!types.contains(_movementType)) _movementType = types.first;
+    return AlertDialog(
+      title: const Text('Cash In / Out'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SegmentedButton<String>(
+            key: const Key('cash_movement_direction_toggle'),
+            segments: const [
+              ButtonSegment(value: 'OUT', icon: Icon(Icons.remove_circle_outline, size: 16), label: Text('Cash Out')),
+              ButtonSegment(value: 'IN', icon: Icon(Icons.add_circle_outline, size: 16), label: Text('Cash In')),
+            ],
+            selected: {_direction},
+            onSelectionChanged: (selection) => setState(() => _direction = selection.first),
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            key: const Key('cash_movement_type_dropdown'),
+            initialValue: types.contains(_movementType) ? _movementType : types.first,
+            decoration: const InputDecoration(labelText: 'Type'),
+            items: types.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
+            onChanged: (v) => setState(() => _movementType = v ?? types.first),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            key: const Key('cash_movement_amount_field'),
+            controller: _amountController,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(labelText: 'Amount'),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            key: const Key('cash_movement_reason_field'),
+            controller: _reasonController,
+            decoration: const InputDecoration(labelText: 'Reason / note'),
+          ),
+          if (_error != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(_error!, style: const TextStyle(color: Colors.red)),
+            ),
+        ],
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
+        FilledButton(
+          key: const Key('cash_movement_submit_button'),
+          onPressed: _submit,
+          child: const Text('Record'),
         ),
       ],
     );

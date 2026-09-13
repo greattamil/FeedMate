@@ -36,7 +36,7 @@ func normalizeDate(t time.Time) time.Time {
 // UNIQUE(tenant_id, business_date) constraint is the ultimate guard against
 // opening the same business date twice — this check just gives a clean
 // error before hitting that constraint.
-func (s *Service) OpenSession(ctx context.Context, tenantID, userID uuid.UUID, businessDate time.Time, openingCash decimal.Decimal) (uuid.UUID, error) {
+func (s *Service) OpenSession(ctx context.Context, tenantID, deviceID, userID uuid.UUID, businessDate time.Time, openingCash decimal.Decimal) (uuid.UUID, error) {
 	if openingCash.LessThan(decimal.Zero) {
 		return uuid.Nil, fmt.Errorf("%w: opening cash cannot be negative", ErrValidation)
 	}
@@ -49,7 +49,7 @@ func (s *Service) OpenSession(ctx context.Context, tenantID, userID uuid.UUID, b
 		} else if !errors.Is(err, ErrNotFound) {
 			return err
 		}
-		id, err := InsertOpenSession(ctx, tx, tenantID, businessDate, openingCash)
+		id, err := InsertOpenSession(ctx, tx, tenantID, deviceID, businessDate, openingCash)
 		if err != nil {
 			return err
 		}
@@ -60,6 +60,67 @@ func (s *Service) OpenSession(ctx context.Context, tenantID, userID uuid.UUID, b
 		return uuid.Nil, err
 	}
 	return sessionID, nil
+}
+
+// RecordCashMovement logs a manual cash in/out against the open session for
+// businessDate — e.g. petty cash taken out for an expense, or extra change
+// brought into the drawer. Requires the session to still be OPEN: once
+// closed, expected cash is frozen and a correction must go through the
+// audited ReopenSession path instead of silently editing history.
+func (s *Service) RecordCashMovement(ctx context.Context, tenantID, userID uuid.UUID, businessDate time.Time, movementType, direction string, amount decimal.Decimal, reason string) (uuid.UUID, error) {
+	if amount.LessThanOrEqual(decimal.Zero) {
+		return uuid.Nil, fmt.Errorf("%w: amount must be positive", ErrValidation)
+	}
+	if direction != "IN" && direction != "OUT" {
+		return uuid.Nil, fmt.Errorf("%w: direction must be IN or OUT", ErrValidation)
+	}
+	switch movementType {
+	case "PAYOUT", "EXPENSE", "DEPOSIT", "WITHDRAWAL", "ADJUSTMENT":
+	default:
+		return uuid.Nil, fmt.Errorf("%w: invalid movement_type %q", ErrValidation, movementType)
+	}
+	businessDate = normalizeDate(businessDate)
+
+	var movementID uuid.UUID
+	err := s.db.WithTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
+		session, err := GetSessionByDate(ctx, tx, businessDate)
+		if err != nil {
+			return err
+		}
+		if session.Status != "OPEN" {
+			return fmt.Errorf("%w: current status is %s", ErrSessionNotOpen, session.Status)
+		}
+		if session.CashSessionID == nil {
+			return fmt.Errorf("no cash session is linked to this EOD session")
+		}
+		id, err := InsertCashMovement(ctx, tx, tenantID, *session.CashSessionID, movementType, direction, amount, reason, userID)
+		if err != nil {
+			return err
+		}
+		movementID = id
+		return nil
+	})
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return movementID, nil
+}
+
+func (s *Service) ListCashMovements(ctx context.Context, tenantID uuid.UUID, businessDate time.Time) ([]CashMovementRecord, error) {
+	businessDate = normalizeDate(businessDate)
+	var movements []CashMovementRecord
+	err := s.db.WithTenantReadTx(ctx, tenantID, func(tx pgx.Tx) error {
+		session, err := GetSessionByDate(ctx, tx, businessDate)
+		if err != nil {
+			return err
+		}
+		if session.CashSessionID == nil {
+			return nil
+		}
+		movements, err = ListCashMovements(ctx, tx, *session.CashSessionID)
+		return err
+	})
+	return movements, err
 }
 
 type CloseResult struct {
@@ -96,7 +157,13 @@ func (s *Service) CloseSession(ctx context.Context, tenantID, userID uuid.UUID, 
 		if err != nil {
 			return fmt.Errorf("compute cash journal totals: %w", err)
 		}
-		cashPayouts := decimal.Zero // no payout/expense module yet; reserved for future use
+		cashPayouts := decimal.Zero
+		if session.CashSessionID != nil {
+			cashPayouts, err = GetCashMovementNetOut(ctx, tx, *session.CashSessionID)
+			if err != nil {
+				return fmt.Errorf("compute cash movement totals: %w", err)
+			}
+		}
 		expectedCash := session.OpeningCash.Add(cashSales).Sub(cashRefunds).Sub(cashPayouts)
 		variance := actualCash.Sub(expectedCash)
 

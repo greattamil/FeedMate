@@ -140,7 +140,7 @@ func TestEOD_CashSaleReconcilesExactly(t *testing.T) {
 	posSvc := pos.NewService(db)
 	eodSvc := eod.NewService(db)
 
-	sessionID, err := eodSvc.OpenSession(context.Background(), f.tenantID, f.userID, f.businessDate, decimal.RequireFromString("1000.00"))
+	sessionID, err := eodSvc.OpenSession(context.Background(), f.tenantID, f.deviceID, f.userID, f.businessDate, decimal.RequireFromString("1000.00"))
 	if err != nil {
 		t.Fatalf("open session: %v", err)
 	}
@@ -171,6 +171,84 @@ func TestEOD_CashSaleReconcilesExactly(t *testing.T) {
 	}
 }
 
+func TestEOD_CashMovementsAffectExpectedCash(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	f := seedFixture(t, db)
+	posSvc := pos.NewService(db)
+	eodSvc := eod.NewService(db)
+
+	if _, err := eodSvc.OpenSession(context.Background(), f.tenantID, f.deviceID, f.userID, f.businessDate, decimal.RequireFromString("1000.00")); err != nil {
+		t.Fatalf("open session: %v", err)
+	}
+
+	_, err := posSvc.FinalizeInvoice(context.Background(), f.tenantID, f.deviceID, f.userID, pos.FinalizeRequest{
+		ClientTransactionID: uuid.New(), LocationID: f.locationID,
+		Lines:   []pos.SaleLine{{ProductID: f.productID, Quantity: decimal.RequireFromString("2")}},
+		Tenders: []pos.Tender{{Method: "CASH", Amount: decimal.RequireFromString("2520.00")}},
+	})
+	if err != nil {
+		t.Fatalf("finalize sale: %v", err)
+	}
+
+	// Cash out 300 for a petty expense, cash in 50 extra change.
+	if _, err := eodSvc.RecordCashMovement(context.Background(), f.tenantID, f.userID, f.businessDate, "EXPENSE", "OUT", decimal.RequireFromString("300.00"), "Tea and snacks"); err != nil {
+		t.Fatalf("record expense: %v", err)
+	}
+	if _, err := eodSvc.RecordCashMovement(context.Background(), f.tenantID, f.userID, f.businessDate, "ADJUSTMENT", "IN", decimal.RequireFromString("50.00"), "Extra change added"); err != nil {
+		t.Fatalf("record adjustment: %v", err)
+	}
+
+	movements, err := eodSvc.ListCashMovements(context.Background(), f.tenantID, f.businessDate)
+	if err != nil {
+		t.Fatalf("list cash movements: %v", err)
+	}
+	if len(movements) != 2 {
+		t.Fatalf("expected 2 movements, got %d", len(movements))
+	}
+
+	// Expected cash = 1000 opening + 2520 cash sales - net movement (300 out - 50 in = 250) = 3270.
+	result, err := eodSvc.CloseSession(context.Background(), f.tenantID, f.userID, f.businessDate, decimal.RequireFromString("3270.00"), "")
+	if err != nil {
+		t.Fatalf("close session: %v", err)
+	}
+	if !result.ExpectedCash.Equal(decimal.RequireFromString("3270.00")) {
+		t.Fatalf("expected expected_cash 3270.00, got %s", result.ExpectedCash)
+	}
+	if !result.Variance.IsZero() {
+		t.Fatalf("expected zero variance, got %s", result.Variance)
+	}
+}
+
+func TestEOD_CashMovement_RejectsInvalidInputAndClosedSession(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	f := seedFixture(t, db)
+	eodSvc := eod.NewService(db)
+
+	if _, err := eodSvc.OpenSession(context.Background(), f.tenantID, f.deviceID, f.userID, f.businessDate, decimal.Zero); err != nil {
+		t.Fatalf("open session: %v", err)
+	}
+
+	if _, err := eodSvc.RecordCashMovement(context.Background(), f.tenantID, f.userID, f.businessDate, "EXPENSE", "OUT", decimal.Zero, "x"); !errors.Is(err, eod.ErrValidation) {
+		t.Fatalf("expected ErrValidation for zero amount, got: %v", err)
+	}
+	if _, err := eodSvc.RecordCashMovement(context.Background(), f.tenantID, f.userID, f.businessDate, "EXPENSE", "SIDEWAYS", decimal.RequireFromString("10.00"), "x"); !errors.Is(err, eod.ErrValidation) {
+		t.Fatalf("expected ErrValidation for invalid direction, got: %v", err)
+	}
+	if _, err := eodSvc.RecordCashMovement(context.Background(), f.tenantID, f.userID, f.businessDate, "SALE", "OUT", decimal.RequireFromString("10.00"), "x"); !errors.Is(err, eod.ErrValidation) {
+		t.Fatalf("expected ErrValidation for a SALE movement type (must be derived from the journal, not manual), got: %v", err)
+	}
+
+	if _, err := eodSvc.CloseSession(context.Background(), f.tenantID, f.userID, f.businessDate, decimal.Zero, ""); err != nil {
+		t.Fatalf("close session: %v", err)
+	}
+
+	if _, err := eodSvc.RecordCashMovement(context.Background(), f.tenantID, f.userID, f.businessDate, "EXPENSE", "OUT", decimal.RequireFromString("10.00"), "x"); !errors.Is(err, eod.ErrSessionNotOpen) {
+		t.Fatalf("expected ErrSessionNotOpen after close, got: %v", err)
+	}
+}
+
 func TestEOD_MismatchRequiresReasonThenSucceeds(t *testing.T) {
 	db := connectTest(t)
 	defer db.Close()
@@ -178,7 +256,7 @@ func TestEOD_MismatchRequiresReasonThenSucceeds(t *testing.T) {
 	posSvc := pos.NewService(db)
 	eodSvc := eod.NewService(db)
 
-	if _, err := eodSvc.OpenSession(context.Background(), f.tenantID, f.userID, f.businessDate, decimal.RequireFromString("500.00")); err != nil {
+	if _, err := eodSvc.OpenSession(context.Background(), f.tenantID, f.deviceID, f.userID, f.businessDate, decimal.RequireFromString("500.00")); err != nil {
 		t.Fatalf("open session: %v", err)
 	}
 	_, err := posSvc.FinalizeInvoice(context.Background(), f.tenantID, f.deviceID, f.userID, pos.FinalizeRequest{
@@ -216,7 +294,7 @@ func TestEOD_CashRefundReducesExpectedCash(t *testing.T) {
 	returnsSvc := returns.NewService(db)
 	eodSvc := eod.NewService(db)
 
-	if _, err := eodSvc.OpenSession(context.Background(), f.tenantID, f.userID, f.businessDate, decimal.Zero); err != nil {
+	if _, err := eodSvc.OpenSession(context.Background(), f.tenantID, f.deviceID, f.userID, f.businessDate, decimal.Zero); err != nil {
 		t.Fatalf("open session: %v", err)
 	}
 
@@ -259,10 +337,10 @@ func TestEOD_DoubleOpenRejected(t *testing.T) {
 	f := seedFixture(t, db)
 	eodSvc := eod.NewService(db)
 
-	if _, err := eodSvc.OpenSession(context.Background(), f.tenantID, f.userID, f.businessDate, decimal.Zero); err != nil {
+	if _, err := eodSvc.OpenSession(context.Background(), f.tenantID, f.deviceID, f.userID, f.businessDate, decimal.Zero); err != nil {
 		t.Fatalf("first open: %v", err)
 	}
-	_, err := eodSvc.OpenSession(context.Background(), f.tenantID, f.userID, f.businessDate, decimal.Zero)
+	_, err := eodSvc.OpenSession(context.Background(), f.tenantID, f.deviceID, f.userID, f.businessDate, decimal.Zero)
 	if !errors.Is(err, eod.ErrSessionExists) {
 		t.Fatalf("expected ErrSessionExists on double-open, got: %v", err)
 	}
@@ -274,7 +352,7 @@ func TestEOD_CloseAlreadyClosedRejected(t *testing.T) {
 	f := seedFixture(t, db)
 	eodSvc := eod.NewService(db)
 
-	if _, err := eodSvc.OpenSession(context.Background(), f.tenantID, f.userID, f.businessDate, decimal.Zero); err != nil {
+	if _, err := eodSvc.OpenSession(context.Background(), f.tenantID, f.deviceID, f.userID, f.businessDate, decimal.Zero); err != nil {
 		t.Fatalf("open: %v", err)
 	}
 	if _, err := eodSvc.CloseSession(context.Background(), f.tenantID, f.userID, f.businessDate, decimal.Zero, ""); err != nil {
@@ -292,7 +370,7 @@ func TestEOD_ReopenThenCloseAgain(t *testing.T) {
 	f := seedFixture(t, db)
 	eodSvc := eod.NewService(db)
 
-	if _, err := eodSvc.OpenSession(context.Background(), f.tenantID, f.userID, f.businessDate, decimal.Zero); err != nil {
+	if _, err := eodSvc.OpenSession(context.Background(), f.tenantID, f.deviceID, f.userID, f.businessDate, decimal.Zero); err != nil {
 		t.Fatalf("open: %v", err)
 	}
 	if _, err := eodSvc.CloseSession(context.Background(), f.tenantID, f.userID, f.businessDate, decimal.Zero, ""); err != nil {

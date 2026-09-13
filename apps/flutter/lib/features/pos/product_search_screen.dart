@@ -11,6 +11,7 @@ import '../../core/theme/app_decorations.dart';
 import '../../core/theme/app_typography.dart';
 import '../auth/generate_pairing_code_screen.dart';
 import '../auth/login_screen.dart';
+import '../contra/contra_screen.dart';
 import '../eod/eod_screen.dart';
 import '../khata/khata_customer_list_screen.dart';
 import '../procurement/grn_screen.dart';
@@ -24,7 +25,7 @@ import 'cart_screen.dart';
 import 'product.dart';
 import 'product_repository.dart';
 
-enum _MenuAction { khata, suppliers, grn, returnSale, products, reports, eod, pairDevice }
+enum _MenuAction { khata, suppliers, grn, returnSale, contra, products, reports, eod, pairDevice }
 
 /// Modernized POS Counter & Product Catalog for FeedMate.
 /// Backed by ranked search (barcode > SKU > exact name > alias > fuzzy).
@@ -171,6 +172,11 @@ class _ProductSearchScreenState extends State<ProductSearchScreen> {
                     MaterialPageRoute(builder: (_) => const ReturnScreen()),
                   );
                   break;
+                case _MenuAction.contra:
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const ContraScreen()),
+                  );
+                  break;
                 case _MenuAction.products:
                   Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => const ProductListScreen()),
@@ -227,6 +233,15 @@ class _ProductSearchScreenState extends State<ProductSearchScreen> {
                   child: ListTile(
                     leading: Icon(Icons.assignment_return_outlined),
                     title: Text('Sales Return'),
+                  ),
+                ),
+              if (session.hasPermission('contra.approve'))
+                const PopupMenuItem(
+                  key: Key('menu_item_contra'),
+                  value: _MenuAction.contra,
+                  child: ListTile(
+                    leading: Icon(Icons.undo_rounded),
+                    title: Text('Contra / Buy-Back'),
                   ),
                 ),
               if (session.hasPermission('product.manage'))

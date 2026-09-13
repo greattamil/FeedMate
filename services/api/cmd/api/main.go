@@ -14,6 +14,7 @@ import (
 
 	"github.com/andipatti/feedmate/services/api/internal/config"
 	"github.com/andipatti/feedmate/services/api/internal/dbctx"
+	"github.com/andipatti/feedmate/services/api/internal/domain/auditlog"
 	"github.com/andipatti/feedmate/services/api/internal/domain/contra"
 	"github.com/andipatti/feedmate/services/api/internal/domain/customer"
 	"github.com/andipatti/feedmate/services/api/internal/domain/devicepairing"
@@ -60,6 +61,7 @@ func main() {
 	contraSvc := contra.NewService(db)
 	eodSvc := eod.NewService(db)
 	reportsSvc := reports.NewService(db)
+	auditLogSvc := auditlog.NewService(db)
 	locationSvc := location.NewService(db)
 	devicePairingSvc := devicepairing.NewService(db)
 	customerSvc := customer.NewService(db)
@@ -86,6 +88,7 @@ func main() {
 	contraHandlers := &httpapi.ContraHandlers{Contra: contraSvc}
 	eodHandlers := &httpapi.EODHandlers{EOD: eodSvc}
 	reportsHandlers := &httpapi.ReportsHandlers{Reports: reportsSvc}
+	auditLogHandlers := &httpapi.AuditLogHandlers{AuditLog: auditLogSvc}
 	locationHandlers := &httpapi.LocationHandlers{Location: locationSvc}
 	deviceHandlers := &httpapi.DeviceHandlers{DevicePairing: devicePairingSvc}
 	customerHandlers := &httpapi.CustomerHandlers{Customer: customerSvc}
@@ -165,6 +168,8 @@ func main() {
 			r.With(appmw.RequirePermission("report.view")).Get("/reports/stock-on-hand", reportsHandlers.StockOnHand)
 			r.With(appmw.RequirePermission("report.view")).Get("/reports/customer-balances", reportsHandlers.CustomerBalances)
 			r.With(appmw.RequirePermission("report.view")).Get("/reports/eod-history", reportsHandlers.EODHistory)
+
+			r.With(appmw.RequirePermission("tenant.admin")).Get("/audit-logs", auditLogHandlers.List)
 
 			r.Get("/customers", customerHandlers.List)
 			r.Get("/customers/{id}", customerHandlers.Get)

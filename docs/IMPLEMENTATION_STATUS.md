@@ -582,6 +582,69 @@ temporary debug logging. While fixing it, proactively seeded `CONTRA` and
 and would otherwise fail the same way the first time anyone tries them
 live.
 
+## Phase 26 — Flutter UI Redesign (Theme System, Dashboard, App Shell)
+
+A visual redesign of the entire Flutter client: a shared design system
+(`core/theme`: colors, typography, decorations/shadows), a genuinely live
+`HomeDashboardScreen` (today's sales and Khata receivables pulled from the
+reports API, EOD session status, pending-sync alerts, permission-gated
+quick-action tiles), and an `AppShell` providing adaptive navigation
+(bottom nav on phones, a `NavigationRail` on tablets) as the new post-login
+landing experience. Every existing screen was restyled against the shared
+theme.
+
+Two real bugs were found and fixed while reviewing this redesign before
+committing it:
+
+1. **Critical**: `LoginScreen` still routed straight to the old bare
+   `ProductSearchScreen` after a successful login, completely bypassing
+   the new dashboard/shell — every actual login (not just a cold restart
+   with an already-restored session, which does go through `AppShell` via
+   `_SessionGate`) never saw the redesign at all. Fixed to route to
+   `AppShell`.
+2. `AppShell`'s Suppliers/Reports tabs silently fell back to showing the
+   Counter screen for a user without those permissions, so the tab bar
+   would highlight "Suppliers" while displaying unrelated content.
+   Rebuilt the tab list to be constructed dynamically per session, only
+   including tabs the user actually has permission for — matching how the
+   overflow menu already behaves elsewhere in the app.
+
+| Area | Status | Evidence |
+|---|---|---|
+| Theme system, `HomeDashboardScreen`, `AppShell` | **VERIFIED, live** | Installed on the Android emulator: login correctly lands on the dashboard with real KPI data (today's gross sales, Khata receivables matching the known over-limit test customer), all bottom-nav tabs render and navigate correctly gated by permission, and the Counter tab's overflow menu (Khata/Suppliers/GRN/Sales Return/Reports/EOD/Pair Device) still works unchanged |
+| `test/widget_test.dart`'s post-login assertion, updated for the new architecture | **VERIFIED** | `ProductSearchScreen` is now a mounted-but-inactive bottom-nav tab rather than the visible screen after login — `find.byType` skips it by default (`skipOffstage: true`), which is `IndexedStack`-inactive-child behavior, not a product bug; the test now checks for `HomeDashboardScreen` as the active screen and asserts `ProductSearchScreen` with `skipOffstage: false` |
+
+`flutter analyze` clean, all 47 tests pass.
+
+## Phase 27 — Product Master-Data CRUD (Create/Edit/Update/Deactivate/List)
+
+The last explicitly-requested gap: there was no way to browse, edit,
+deactivate, or manage master product data at all — only point-of-sale
+search and a one-time create existed, and none of the supporting
+category/brand/UOM/tax-profile lookups were exposed anywhere. Built the
+full set: backend CRUD + master-data endpoints, and four new Flutter
+screens (list, create/edit form, detail).
+
+| Area | Status | Evidence |
+|---|---|---|
+| `product.Update`, `product.SetActive`, `product.List`, `product.GetDetail` (repository + service); `masterdata.Service` (categories/brands/UOMs/tax profiles) | **VERIFIED** | New integration tests: `TestProductUpdateSetActiveList` (rename, SKU immutability, barcode/alias full-replace semantics, activate/deactivate never hard-deletes, active-only vs. including-inactive list filtering) and `TestMasterDataLists` (global UOM seed visibility, brand-new-tenant empty categories/brands, and a real RLS tenant-isolation check — a category created for one tenant is invisible to another) |
+| `PUT /api/v1/products/{id}` (never changes SKU — the immutable business key referenced by every historical invoice/batch/GRN line), `POST /api/v1/products/{id}/status`, `GET /api/v1/products` (paginated browse, distinct from the existing ranked `search`), `GET /api/v1/{categories,brands,uoms,tax-profiles}` — all gated `product.manage` for writes, any authenticated user for reads | **VERIFIED, live** | Full curl round-trip against the live server (create → get → update → deactivate → filtered list), then the identical flow again through the actual Flutter UI on the emulator, both confirmed directly in Postgres |
+| `ProductListScreen` (search, active/inactive filter, FAB), `ProductFormScreen` (shared create/edit, SKU read-only in edit mode, dynamic barcode/alias chip lists), `ProductDetailScreen` (read-only view + Edit + Activate/Deactivate with a confirmation dialog) | **VERIFIED, live** | Installed on the Android emulator: created "Live UI Test Product" end-to-end through the real form (all master-data dropdowns populated from the live server) and confirmed it in Postgres; deactivated and reactivated the earlier curl-created test product through the detail screen, each transition confirmed in Postgres |
+| Overflow-menu entry gated on `product.manage` | **VERIFIED** | Widget test extended to assert the item is hidden/shown correctly and navigates to `ProductListScreen` |
+| 4 widget tests (`test/products_test.dart`) | **VERIFIED** | List/search/inactive-filter, create (asserts the exact POST body), edit (asserts SKU is disabled and pre-filled, PUT body, barcode/alias round-trip), deactivate (asserts the confirmation dialog gates the call) |
+
+### A real bug found by the tests, before it ever reached a device
+
+The create-product test caught the exact same `Decimal.toString()`
+formatting bug documented repeatedly elsewhere in this project (strips
+trailing zeros: "1050.00" → "1050") — `ProductDetail.toJson()` used plain
+`.toString()` for every decimal field, including money fields. Fixed by
+splitting money fields (MRP, selling price, minimum price floor — always
+`.toStringAsFixed(2)`) from quantity/weight fields (pack size, standard
+weight, reorder level/target — no fixed currency scale, plain
+`.toString()` is correct). Caught entirely by the test suite; never
+observed live.
+
 ## Not Yet Started
 
 Customer/supplier aging (30/60/90-day buckets) and margin reports,
@@ -589,7 +652,11 @@ per-device cash session tracking (schema exists, not wired up), a real
 payment provider adapter (production gateway credentials are the external
 dependency — the interface and sandbox are done), idempotency/outbox
 infrastructure for external side effects (printer/WhatsApp), a WhatsApp
-provider adapter,
+provider adapter, an admin/setup UI for category/brand/UOM/tax-profile
+master data (read-only list endpoints exist for the product form to
+consume; there is still no create/edit UI for these lookup tables
+themselves, nor for document-number series — Phases 24 and 25 both hit
+the latter gap directly live),
 hardware adapters (scale/printer/scanner), seed/config workflows, CI/CD
 running for real on GitHub's infrastructure (the workflow exists — Phase
 19 — but has never actually executed there; there is no `git remote`),
@@ -604,9 +671,10 @@ reporting → DevOps).
 
 **NOT READY**, but substantially further along than a first read of "Not Yet
 Started" suggests — that list is what's missing, not a summary of what
-exists. As of Phase 25: the Go backend has verified, tested business domain
+exists. As of Phase 27: the Go backend has verified, tested business domain
 logic for auth/RBAC (including session-restore carrying real permissions,
-not just a login flag), product search, inventory/batches, accounting, POS
+not just a login flag), product master data (search, and now full
+create/edit/update/deactivate/list), inventory/batches, accounting, POS
 sales (cash + credit + credit-limit override), procurement/GRN, returns
 (including looking a past invoice up to pick what to return), supplier
 master + payable ledger + manual payments, UPI payment intents +
@@ -617,25 +685,27 @@ calls. Every internal-error response across every handler now logs its
 real cause server-side (Phase 24 found this was silently broken for most
 of the API, and Phase 25 immediately proved the fix's worth — see above).
 The Flutter client is a real running app (not a mock) with every screen
-the master spec calls for now built: login, Tamil/phonetic product search,
-cart/checkout with cash and credit tenders, a customer picker, a Khata
-statement screen with receipt recording, a supplier payable screen with
-payment recording, a procurement/GRN receiving screen with weight/tare
-capture and reasoned tare-override, a sales-return screen, an end-of-day
-cash reconciliation screen, a 4-tab reports/dashboard screen, encrypted
-offline storage with a working offline-sale-then-sync path, and an outbox
-review/retry screen — all verified live on an Android emulator, including
-with connectivity actually disabled and across a real app restart. A CI
-workflow exists covering both stacks, though it has not yet run on real
-GitHub infrastructure (no `git remote` is configured — see Phase 19's
-honesty note).
+the master spec calls for now built, presented through a redesigned
+theme/dashboard/app-shell (Phase 26): login, a live home dashboard,
+Tamil/phonetic product search, cart/checkout with cash and credit tenders,
+a customer picker, a Khata statement screen with receipt recording, a
+supplier payable screen with payment recording, a procurement/GRN
+receiving screen with weight/tare capture and reasoned tare-override, a
+sales-return screen, an end-of-day cash reconciliation screen, a 4-tab
+reports/dashboard screen, full product master-data management (Phase 27),
+encrypted offline storage with a working offline-sale-then-sync path, and
+an outbox review/retry screen — all verified live on an Android emulator,
+including with connectivity actually disabled and across a real app
+restart. A CI workflow exists covering both stacks, though it has not yet
+run on real GitHub infrastructure (no `git remote` is configured — see
+Phase 19's honesty note).
 
 What's still genuinely missing, and why this isn't production-ready: no
 real payment gateway (sandbox only), no WhatsApp integration, no hardware
 adapters (scanner/scale/printer), no aging/margin reports, no admin/setup
-UI for tenant onboarding config like document-number series (Phases 24 and
-25 both hit this gap directly live — a real shop's onboarding needs this
-built before launch), no
-backup/DR tooling, CI that has never actually executed, and the test suite
-is integration + widget level
-only — no E2E, chaos, load, or security test suites exist yet.
+UI for tenant onboarding config like document-number series or the
+category/brand/UOM/tax-profile lookup tables themselves (Phases 24, 25,
+and 27 all hit some version of this gap directly live — a real shop's
+onboarding needs this built before launch), no backup/DR tooling, CI that
+has never actually executed, and the test suite is integration + widget
+level only — no E2E, chaos, load, or security test suites exist yet.

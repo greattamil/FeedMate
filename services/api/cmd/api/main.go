@@ -20,6 +20,7 @@ import (
 	"github.com/andipatti/feedmate/services/api/internal/domain/eod"
 	"github.com/andipatti/feedmate/services/api/internal/domain/identity"
 	"github.com/andipatti/feedmate/services/api/internal/domain/location"
+	"github.com/andipatti/feedmate/services/api/internal/domain/masterdata"
 	"github.com/andipatti/feedmate/services/api/internal/domain/payment"
 	"github.com/andipatti/feedmate/services/api/internal/domain/pos"
 	"github.com/andipatti/feedmate/services/api/internal/domain/procurement"
@@ -63,6 +64,7 @@ func main() {
 	devicePairingSvc := devicepairing.NewService(db)
 	customerSvc := customer.NewService(db)
 	supplierSvc := supplier.NewService(db)
+	masterDataSvc := masterdata.NewService(db)
 
 	var provider paymentprovider.Provider
 	switch cfg.PaymentProvider {
@@ -88,6 +90,7 @@ func main() {
 	deviceHandlers := &httpapi.DeviceHandlers{DevicePairing: devicePairingSvc}
 	customerHandlers := &httpapi.CustomerHandlers{Customer: customerSvc}
 	supplierHandlers := &httpapi.SupplierHandlers{Supplier: supplierSvc}
+	masterDataHandlers := &httpapi.MasterDataHandlers{MasterData: masterDataSvc}
 
 	r := chi.NewRouter()
 	r.Use(appmw.RequestID)
@@ -117,8 +120,16 @@ func main() {
 			r.Use(appmw.RequireAuth(cfg.JWTSigningKey))
 
 			r.Get("/products/search", productHandlers.Search)
+			r.Get("/products", productHandlers.List)
 			r.Get("/products/{id}", productHandlers.Get)
 			r.With(appmw.RequirePermission("product.manage")).Post("/products", productHandlers.Create)
+			r.With(appmw.RequirePermission("product.manage")).Put("/products/{id}", productHandlers.Update)
+			r.With(appmw.RequirePermission("product.manage")).Post("/products/{id}/status", productHandlers.SetStatus)
+
+			r.Get("/categories", masterDataHandlers.ListCategories)
+			r.Get("/brands", masterDataHandlers.ListBrands)
+			r.Get("/uoms", masterDataHandlers.ListUOMs)
+			r.Get("/tax-profiles", masterDataHandlers.ListTaxProfiles)
 
 			r.With(appmw.RequirePermission("pos.sell")).Post("/pos/quote", posHandlers.Quote)
 			r.With(appmw.RequirePermission("pos.sell")).Post("/pos/invoices", posHandlers.FinalizeInvoice)

@@ -16,6 +16,7 @@ import 'package:feedmate_app/core/local_db.dart';
 import 'package:feedmate_app/core/secure_storage.dart';
 import 'package:feedmate_app/features/khata/khata_customer_list_screen.dart';
 import 'package:feedmate_app/features/procurement/grn_screen.dart';
+import 'package:feedmate_app/features/products/product_list_screen.dart';
 import 'package:feedmate_app/features/pos/cart_model.dart';
 import 'package:feedmate_app/features/pos/product_repository.dart';
 import 'package:feedmate_app/features/pos/product_search_screen.dart';
@@ -71,6 +72,7 @@ void main() {
     expect(find.byKey(const Key('menu_item_suppliers')), findsNothing);
     expect(find.byKey(const Key('menu_item_grn')), findsNothing);
     expect(find.byKey(const Key('menu_item_return')), findsNothing);
+    expect(find.byKey(const Key('menu_item_products')), findsNothing);
     expect(find.byKey(const Key('menu_item_reports')), findsNothing);
     expect(find.byKey(const Key('menu_item_eod')), findsNothing);
     expect(find.byKey(const Key('menu_item_pair_device')), findsNothing);
@@ -89,6 +91,7 @@ void main() {
         'supplier.manage',
         'grn.post',
         'return.create',
+        'product.manage',
         'report.view',
         'cash.eod_close',
         'device.manage',
@@ -104,6 +107,7 @@ void main() {
     expect(find.byKey(const Key('menu_item_suppliers')), findsOneWidget);
     expect(find.byKey(const Key('menu_item_grn')), findsOneWidget);
     expect(find.byKey(const Key('menu_item_return')), findsOneWidget);
+    expect(find.byKey(const Key('menu_item_products')), findsOneWidget);
     expect(find.byKey(const Key('menu_item_reports')), findsOneWidget);
     expect(find.byKey(const Key('menu_item_eod')), findsOneWidget);
     expect(find.byKey(const Key('menu_item_pair_device')), findsOneWidget);
@@ -111,6 +115,14 @@ void main() {
     await tester.tap(find.byKey(const Key('menu_item_reports')));
     await tester.pumpAndSettle();
     expect(find.byType(ReportsScreen), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('more_menu_button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('menu_item_products')));
+    await tester.pumpAndSettle();
+    expect(find.byType(ProductListScreen), findsOneWidget);
     await tester.pageBack();
     await tester.pumpAndSettle();
 

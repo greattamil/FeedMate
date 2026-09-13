@@ -3,6 +3,8 @@ package product
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -86,6 +88,127 @@ func GetByID(ctx context.Context, tx pgx.Tx, id uuid.UUID) (*Product, error) {
 		FROM products WHERE id = $1
 	`, id)
 	return scanProduct(row)
+}
+
+// Update persists every mutable field of an existing product. SKU is
+// intentionally excluded — it is the immutable business key referenced by
+// every historical invoice/batch/GRN line, and PRD master-data conventions
+// treat it the same way customer/supplier codes are treated: fixed at
+// creation.
+func Update(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, p *Product) error {
+	cmd, err := tx.Exec(ctx, `
+		UPDATE products SET
+			name = $3, local_name_ta = $4, category_id = $5, brand_id = $6,
+			default_sale_uom_id = $7, default_purchase_uom_id = $8, base_inventory_uom_id = $9,
+			hsn_code = $10, tax_profile_id = $11, pack_size = $12, standard_weight_kg = $13,
+			mrp = $14, selling_price = $15, reorder_level = $16, reorder_target = $17,
+			min_price_floor = $18, batch_required = $19, expiry_required = $20,
+			loose_sale_allowed = $21, scale_required = $22, product_type = $23, updated_at = now()
+		WHERE tenant_id = $1 AND id = $2
+	`, tenantID, p.ID, p.Name, p.LocalNameTa, p.CategoryID, p.BrandID,
+		p.DefaultSaleUOMID, p.DefaultPurchaseUOMID, p.BaseInventoryUOMID,
+		p.HSNCode, p.TaxProfileID, p.PackSize, p.StandardWeightKg, p.MRP, p.SellingPrice,
+		p.ReorderLevel, p.ReorderTarget, p.MinPriceFloor,
+		p.BatchRequired, p.ExpiryRequired, p.LooseSaleAllowed, p.ScaleRequired, p.ProductType,
+	)
+	if err != nil {
+		return err
+	}
+	if cmd.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetActive is the only supported way to remove a product from sale/receipt
+// workflows — a real DELETE would violate every historical invoice/batch/GRN
+// line's foreign key, and PRD master-data conventions never hard-delete a
+// referenced master record (the same pattern used for customers/suppliers).
+func SetActive(ctx context.Context, tx pgx.Tx, tenantID, productID uuid.UUID, active bool) error {
+	cmd, err := tx.Exec(ctx, `UPDATE products SET active = $3, updated_at = now() WHERE tenant_id = $1 AND id = $2`,
+		tenantID, productID, active)
+	if err != nil {
+		return err
+	}
+	if cmd.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ListOptions filters the master product list/browse screen (distinct from
+// Search, which ranks fuzzy matches for point-of-sale lookup).
+type ListOptions struct {
+	Query      string // matched against name/SKU, substring, case-insensitive
+	CategoryID *uuid.UUID
+	ActiveOnly bool
+	Limit      int
+	Offset     int
+}
+
+func List(ctx context.Context, tx pgx.Tx, opts ListOptions) ([]Product, int, error) {
+	limit := opts.Limit
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	conditions := []string{"1=1"}
+	args := []interface{}{}
+	argN := 1
+	if opts.ActiveOnly {
+		conditions = append(conditions, "active")
+	}
+	if opts.CategoryID != nil {
+		conditions = append(conditions, fmt.Sprintf("category_id = $%d", argN))
+		args = append(args, *opts.CategoryID)
+		argN++
+	}
+	if opts.Query != "" {
+		conditions = append(conditions, fmt.Sprintf("(name ILIKE $%d OR sku ILIKE $%d)", argN, argN))
+		args = append(args, "%"+opts.Query+"%")
+		argN++
+	}
+	where := strings.Join(conditions, " AND ")
+
+	var total int
+	countSQL := "SELECT count(*) FROM products WHERE " + where
+	if err := tx.QueryRow(ctx, countSQL, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	listArgs := append(append([]interface{}{}, args...), limit, opts.Offset)
+	listSQL := fmt.Sprintf(`
+		SELECT id, sku, name, local_name_ta, category_id, brand_id,
+		       default_sale_uom_id, default_purchase_uom_id, base_inventory_uom_id,
+		       hsn_code, tax_profile_id, pack_size, standard_weight_kg, mrp, selling_price,
+		       reorder_level, reorder_target, min_price_floor,
+		       batch_required, expiry_required, loose_sale_allowed, scale_required, product_type, active
+		FROM products WHERE %s ORDER BY name ASC LIMIT $%d OFFSET $%d
+	`, where, argN, argN+1)
+	rows, err := tx.Query(ctx, listSQL, listArgs...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var out []Product
+	for rows.Next() {
+		p, err := scanProductRow(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		out = append(out, *p)
+	}
+	return out, total, rows.Err()
+}
+
+func scanProductRow(rows pgx.Rows) (*Product, error) {
+	var p Product
+	err := rows.Scan(&p.ID, &p.SKU, &p.Name, &p.LocalNameTa, &p.CategoryID, &p.BrandID,
+		&p.DefaultSaleUOMID, &p.DefaultPurchaseUOMID, &p.BaseInventoryUOMID,
+		&p.HSNCode, &p.TaxProfileID, &p.PackSize, &p.StandardWeightKg, &p.MRP, &p.SellingPrice,
+		&p.ReorderLevel, &p.ReorderTarget, &p.MinPriceFloor,
+		&p.BatchRequired, &p.ExpiryRequired, &p.LooseSaleAllowed, &p.ScaleRequired, &p.ProductType, &p.Active)
+	return &p, err
 }
 
 func GetByBarcode(ctx context.Context, tx pgx.Tx, barcode string) (*Product, error) {
@@ -221,5 +344,60 @@ func AddAlias(ctx context.Context, tx pgx.Tx, tenantID, productID uuid.UUID, a A
 		INSERT INTO product_aliases (tenant_id, product_id, alias_text, normalized_text, language_code, alias_type, priority)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 	`, tenantID, productID, a.AliasText, a.NormalizedText, a.LanguageCode, a.AliasType, a.Priority)
+	return err
+}
+
+func ListBarcodes(ctx context.Context, tx pgx.Tx, productID uuid.UUID) ([]Barcode, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT barcode, is_primary FROM product_barcodes WHERE product_id = $1 AND active ORDER BY is_primary DESC, barcode
+	`, productID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Barcode
+	for rows.Next() {
+		var b Barcode
+		if err := rows.Scan(&b.Barcode, &b.IsPrimary); err != nil {
+			return nil, err
+		}
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
+func ListAliases(ctx context.Context, tx pgx.Tx, productID uuid.UUID) ([]Alias, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT alias_text, normalized_text, language_code, alias_type, priority
+		FROM product_aliases WHERE product_id = $1 AND active ORDER BY priority, alias_text
+	`, productID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Alias
+	for rows.Next() {
+		var a Alias
+		if err := rows.Scan(&a.AliasText, &a.NormalizedText, &a.LanguageCode, &a.AliasType, &a.Priority); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// DeleteBarcodes and DeleteAliases hard-delete every row for a product so
+// Update can replace the full set with whatever the edit form submitted
+// (simpler and less error-prone than diffing individual rows for a small,
+// infrequently-changed list). Neither table is referenced by any other
+// table, so this carries no foreign-key/historical-integrity risk (unlike
+// the product row itself, which is never hard-deleted — see SetActive).
+func DeleteBarcodes(ctx context.Context, tx pgx.Tx, tenantID, productID uuid.UUID) error {
+	_, err := tx.Exec(ctx, `DELETE FROM product_barcodes WHERE tenant_id = $1 AND product_id = $2`, tenantID, productID)
+	return err
+}
+
+func DeleteAliases(ctx context.Context, tx pgx.Tx, tenantID, productID uuid.UUID) error {
+	_, err := tx.Exec(ctx, `DELETE FROM product_aliases WHERE tenant_id = $1 AND product_id = $2`, tenantID, productID)
 	return err
 }

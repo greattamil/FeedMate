@@ -80,6 +80,14 @@ class ApiClient {
         ));
   }
 
+  Future<Map<String, dynamic>> putAuthed(String path, Map<String, dynamic> body) async {
+    return _withAuthRetry((token) => _http.put(
+          _uri(path),
+          headers: _authHeaders(token),
+          body: jsonEncode(body),
+        ));
+  }
+
   Map<String, String> _authHeaders(String token) => {
         'Content-Type': 'application/json',
         'Authorization': 'Bearer $token',

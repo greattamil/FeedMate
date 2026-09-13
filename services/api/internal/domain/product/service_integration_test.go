@@ -7,6 +7,7 @@ package product_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -161,6 +162,144 @@ func TestProductCreateAndSearch(t *testing.T) {
 		}
 		if len(results) != 0 {
 			t.Fatalf("expected no results, got %+v", results)
+		}
+	})
+}
+
+func TestProductUpdateSetActiveList(t *testing.T) {
+	dsn := mustEnv(t, "DATABASE_URL")
+	adminDSN := mustEnv(t, "DATABASE_ADMIN_URL")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	db, err := dbctx.Connect(ctx, dsn, adminDSN)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer db.Close()
+
+	tenantID := seedTenant(t, db)
+	svc := product.NewService(db)
+
+	sku := "UPD-" + uuid.NewString()[:8]
+	created, err := svc.Create(context.Background(), tenantID, product.CreateInput{
+		Product: product.Product{
+			SKU: sku, Name: "Original Name",
+			DefaultSaleUOMID: uomBag, DefaultPurchaseUOMID: uomBag, BaseInventoryUOMID: uomKG,
+			BatchRequired: true, ExpiryRequired: true,
+		},
+		Barcodes: []string{"111" + uuid.NewString()[:10]},
+		Aliases:  []string{"original alias"},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	t.Run("Update renames the product, replaces barcodes/aliases, and never changes SKU", func(t *testing.T) {
+		newPrice := decimal.RequireFromString("999.00")
+		newBarcode := "222" + uuid.NewString()[:10]
+		updated, err := svc.Update(context.Background(), tenantID, created.ID, product.UpdateInput{
+			Product: product.Product{
+				SKU: "attempted-sku-change-should-be-ignored", // Update must never touch SKU
+				Name: "Renamed Product", SellingPrice: &newPrice,
+				DefaultSaleUOMID: uomBag, DefaultPurchaseUOMID: uomBag, BaseInventoryUOMID: uomKG,
+				BatchRequired: true, ExpiryRequired: true,
+			},
+			Barcodes: []string{newBarcode},
+			Aliases:  []string{"renamed alias"},
+		})
+		if err != nil {
+			t.Fatalf("update: %v", err)
+		}
+		if updated.Name != "Renamed Product" {
+			t.Fatalf("expected renamed product, got %+v", updated)
+		}
+		if updated.SKU != sku {
+			t.Fatalf("SKU must never change via Update: expected %q, got %q", sku, updated.SKU)
+		}
+		if updated.SellingPrice == nil || !updated.SellingPrice.Equal(newPrice) {
+			t.Fatalf("expected selling price %s, got %v", newPrice, updated.SellingPrice)
+		}
+
+		detail, err := svc.GetDetail(context.Background(), tenantID, created.ID)
+		if err != nil {
+			t.Fatalf("get detail: %v", err)
+		}
+		if len(detail.Barcodes) != 1 || detail.Barcodes[0].Barcode != newBarcode {
+			t.Fatalf("expected old barcode replaced by new one, got %+v", detail.Barcodes)
+		}
+		if len(detail.Aliases) != 1 || detail.Aliases[0].AliasText != "renamed alias" {
+			t.Fatalf("expected old alias replaced by new one, got %+v", detail.Aliases)
+		}
+
+		// The old barcode must no longer resolve to this product.
+		if _, err := svc.GetByBarcode(context.Background(), tenantID, newBarcode); err != nil {
+			t.Fatalf("expected new barcode to resolve: %v", err)
+		}
+	})
+
+	t.Run("SetActive deactivates and reactivates without deleting the row", func(t *testing.T) {
+		deactivated, err := svc.SetActive(context.Background(), tenantID, created.ID, false)
+		if err != nil {
+			t.Fatalf("deactivate: %v", err)
+		}
+		if deactivated.Active {
+			t.Fatal("expected Active=false after deactivation")
+		}
+
+		// A deactivated product must not resolve via GetByBarcode (which the
+		// GRN/POS flows rely on to only ever offer sellable products).
+		fetched, err := svc.GetByID(context.Background(), tenantID, created.ID)
+		if err != nil {
+			t.Fatalf("get by id after deactivate: %v", err)
+		}
+		if fetched.Active {
+			t.Fatal("expected persisted Active=false")
+		}
+
+		reactivated, err := svc.SetActive(context.Background(), tenantID, created.ID, true)
+		if err != nil {
+			t.Fatalf("reactivate: %v", err)
+		}
+		if !reactivated.Active {
+			t.Fatal("expected Active=true after reactivation")
+		}
+	})
+
+	t.Run("SetActive on an unknown product returns ErrNotFound", func(t *testing.T) {
+		if _, err := svc.SetActive(context.Background(), tenantID, uuid.New(), false); !errors.Is(err, product.ErrNotFound) {
+			t.Fatalf("expected ErrNotFound, got: %v", err)
+		}
+	})
+
+	t.Run("List finds the product by name substring and respects the active filter", func(t *testing.T) {
+		result, err := svc.List(context.Background(), tenantID, product.ListOptions{Query: "Renamed", ActiveOnly: true})
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		if result.Total != 1 || len(result.Products) != 1 || result.Products[0].ID != created.ID {
+			t.Fatalf("expected exactly the renamed product, got %+v", result)
+		}
+
+		if _, err := svc.SetActive(context.Background(), tenantID, created.ID, false); err != nil {
+			t.Fatalf("deactivate for filter test: %v", err)
+		}
+		t.Cleanup(func() { _, _ = svc.SetActive(context.Background(), tenantID, created.ID, true) })
+
+		activeOnly, err := svc.List(context.Background(), tenantID, product.ListOptions{Query: "Renamed", ActiveOnly: true})
+		if err != nil {
+			t.Fatalf("list active-only: %v", err)
+		}
+		if activeOnly.Total != 0 {
+			t.Fatalf("expected deactivated product hidden from active-only list, got %+v", activeOnly)
+		}
+
+		includingInactive, err := svc.List(context.Background(), tenantID, product.ListOptions{Query: "Renamed", ActiveOnly: false})
+		if err != nil {
+			t.Fatalf("list including inactive: %v", err)
+		}
+		if includingInactive.Total != 1 {
+			t.Fatalf("expected deactivated product visible when ActiveOnly=false, got %+v", includingInactive)
 		}
 	})
 }

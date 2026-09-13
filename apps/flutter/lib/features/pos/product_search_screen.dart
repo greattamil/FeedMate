@@ -14,6 +14,7 @@ import '../auth/login_screen.dart';
 import '../eod/eod_screen.dart';
 import '../khata/khata_customer_list_screen.dart';
 import '../procurement/grn_screen.dart';
+import '../products/product_list_screen.dart';
 import '../reports/reports_screen.dart';
 import '../returns/return_screen.dart';
 import '../supplier/supplier_list_screen.dart';
@@ -23,7 +24,7 @@ import 'cart_screen.dart';
 import 'product.dart';
 import 'product_repository.dart';
 
-enum _MenuAction { khata, suppliers, grn, returnSale, reports, eod, pairDevice }
+enum _MenuAction { khata, suppliers, grn, returnSale, products, reports, eod, pairDevice }
 
 /// Modernized POS Counter & Product Catalog for FeedMate.
 /// Backed by ranked search (barcode > SKU > exact name > alias > fuzzy).
@@ -170,6 +171,11 @@ class _ProductSearchScreenState extends State<ProductSearchScreen> {
                     MaterialPageRoute(builder: (_) => const ReturnScreen()),
                   );
                   break;
+                case _MenuAction.products:
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const ProductListScreen()),
+                  );
+                  break;
                 case _MenuAction.eod:
                   Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => const EodScreen()),
@@ -221,6 +227,15 @@ class _ProductSearchScreenState extends State<ProductSearchScreen> {
                   child: ListTile(
                     leading: Icon(Icons.assignment_return_outlined),
                     title: Text('Sales Return'),
+                  ),
+                ),
+              if (session.hasPermission('product.manage'))
+                const PopupMenuItem(
+                  key: Key('menu_item_products'),
+                  value: _MenuAction.products,
+                  child: ListTile(
+                    leading: Icon(Icons.inventory_2_outlined),
+                    title: Text('Products'),
                   ),
                 ),
               if (session.hasPermission('report.view'))

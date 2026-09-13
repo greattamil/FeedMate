@@ -28,6 +28,7 @@ import (
 	"github.com/andipatti/feedmate/services/api/internal/domain/product"
 	"github.com/andipatti/feedmate/services/api/internal/domain/reports"
 	"github.com/andipatti/feedmate/services/api/internal/domain/returns"
+	"github.com/andipatti/feedmate/services/api/internal/domain/stockcount"
 	"github.com/andipatti/feedmate/services/api/internal/domain/supplier"
 	"github.com/andipatti/feedmate/services/api/internal/httpapi"
 	appmw "github.com/andipatti/feedmate/services/api/internal/middleware"
@@ -62,6 +63,7 @@ func main() {
 	eodSvc := eod.NewService(db)
 	reportsSvc := reports.NewService(db)
 	auditLogSvc := auditlog.NewService(db)
+	stockCountSvc := stockcount.NewService(db)
 	locationSvc := location.NewService(db)
 	devicePairingSvc := devicepairing.NewService(db)
 	customerSvc := customer.NewService(db)
@@ -90,6 +92,7 @@ func main() {
 	eodHandlers := &httpapi.EODHandlers{EOD: eodSvc}
 	reportsHandlers := &httpapi.ReportsHandlers{Reports: reportsSvc}
 	auditLogHandlers := &httpapi.AuditLogHandlers{AuditLog: auditLogSvc}
+	stockCountHandlers := &httpapi.StockCountHandlers{StockCount: stockCountSvc}
 	locationHandlers := &httpapi.LocationHandlers{Location: locationSvc}
 	deviceHandlers := &httpapi.DeviceHandlers{DevicePairing: devicePairingSvc}
 	customerHandlers := &httpapi.CustomerHandlers{Customer: customerSvc}
@@ -184,6 +187,14 @@ func main() {
 			r.With(appmw.RequirePermission("report.view")).Get("/reports/eod-history", reportsHandlers.EODHistory)
 
 			r.With(appmw.RequirePermission("tenant.admin")).Get("/audit-logs", auditLogHandlers.List)
+
+			r.With(appmw.RequirePermission("stock.count")).Post("/stock-counts", stockCountHandlers.StartCount)
+			r.With(appmw.RequirePermission("stock.count")).Get("/stock-counts", stockCountHandlers.ListCounts)
+			r.With(appmw.RequirePermission("stock.count")).Get("/stock-counts/{id}", stockCountHandlers.GetCountDetail)
+			r.With(appmw.RequirePermission("stock.count")).Get("/stock-counts/{id}/batches", stockCountHandlers.ListBatchesForProduct)
+			r.With(appmw.RequirePermission("stock.count")).Post("/stock-counts/{id}/lines", stockCountHandlers.RecordCount)
+			r.With(appmw.RequirePermission("stock.count")).Post("/stock-counts/{id}/post", stockCountHandlers.PostCount)
+			r.With(appmw.RequirePermission("stock.count")).Post("/stock-counts/{id}/cancel", stockCountHandlers.CancelCount)
 
 			r.Get("/customers", customerHandlers.List)
 			r.Get("/customers/{id}", customerHandlers.Get)

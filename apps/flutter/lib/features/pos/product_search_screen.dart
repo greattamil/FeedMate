@@ -23,6 +23,7 @@ import '../products/product_list_screen.dart';
 import '../reports/reports_screen.dart';
 import '../returns/return_screen.dart';
 import '../staff/staff_list_screen.dart';
+import '../stockcount/stock_count_history_screen.dart';
 import '../supplier/supplier_list_screen.dart';
 import '../sync/outbox_screen.dart';
 import 'cart_model.dart';
@@ -31,7 +32,7 @@ import 'invoice_history_screen.dart';
 import 'product.dart';
 import 'product_repository.dart';
 
-enum _MenuAction { khata, suppliers, grn, grnHistory, returnSale, contra, products, masterData, invoiceHistory, reports, eod, pairDevice, manageDevices, auditLog, staff }
+enum _MenuAction { khata, suppliers, grn, grnHistory, returnSale, contra, products, masterData, invoiceHistory, reports, eod, pairDevice, manageDevices, auditLog, staff, stockCounts }
 
 /// Modernized POS Counter & Product Catalog for FeedMate.
 /// Backed by ranked search (barcode > SKU > exact name > alias > fuzzy).
@@ -233,6 +234,11 @@ class _ProductSearchScreenState extends State<ProductSearchScreen> {
                     MaterialPageRoute(builder: (_) => const StaffListScreen()),
                   );
                   break;
+                case _MenuAction.stockCounts:
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const StockCountHistoryScreen()),
+                  );
+                  break;
               }
             },
             itemBuilder: (context) => [
@@ -260,6 +266,15 @@ class _ProductSearchScreenState extends State<ProductSearchScreen> {
                   child: ListTile(
                     leading: Icon(Icons.move_to_inbox_outlined),
                     title: Text('Receive Stock (GRN)'),
+                  ),
+                ),
+              if (session.hasPermission('stock.count'))
+                const PopupMenuItem(
+                  key: Key('menu_item_stock_counts'),
+                  value: _MenuAction.stockCounts,
+                  child: ListTile(
+                    leading: Icon(Icons.playlist_add_check_rounded),
+                    title: Text('Stock Counts'),
                   ),
                 ),
               if (session.hasPermission('grn.post'))

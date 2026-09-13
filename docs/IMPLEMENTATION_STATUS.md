@@ -871,6 +871,28 @@ Full Flutter suite: 86 tests, all passing. Full Go integration suite: 14
 packages, all passing. `flutter analyze`/`go vet` clean. No live emulator
 verification performed for this phase.
 
+## Phase 39 — Physical Stock Count (Backend + Flutter)
+
+The largest remaining gap: `stock_counts`/`stock_count_lines` existed in
+the schema with zero backend or UI — there was no way to reconcile a
+physical shelf count against what the system believed was on hand. Built
+the full flow: start a count, record physical counts against real
+existing batches, and post it through the exact same `PostStockMovement`
+path (`ADJUSTMENT` type) every other inventory correction in this system
+uses — never a bare `stock_balances` edit.
+
+| Area | Status | Evidence |
+|---|---|---|
+| New `stockcount` domain package: `StartCount`, `RecordCount` (upserts in place on a rescan — no duplicate line for the same product+batch), `PostCount` (posts one `ADJUSTMENT` movement per non-zero-variance line, skips zero-variance lines entirely, irreversible by design), `CancelCount`, `ListCounts`/`GetCountDetail`, `ListBatchesForProduct` | **VERIFIED, and a real bug caught before shipping** | New integration tests seed real opening stock via an actual `procurement.Service.PostGRN` call (not a raw insert) then run a count against it: `TestStockCount_ShortageIsAdjustedDownOnPost` (18 counted vs 20 expected → on-hand drops to 18, net value delta -2000.00, and a posted count rejects further recording/posting), `TestStockCount_ZeroVarianceLinesNeedNoAdjustment`, `TestStockCount_RescanningUpdatesTheSameLineInPlace`, `TestListBatchesForProduct_ReturnsActiveBatchesAtLocation`, `TestStockCount_ListAndCancel`. Writing `PostCount`'s test caught the identical `42P08 ambiguous_parameter` bug found in Phase 36 — `SetStockCountStatus`'s SQL reused `$2` across two expression contexts — fixed the same way: compute `completed_at` in Go |
+| `GetOnHandQty` locks the `stock_balances` row (`FOR UPDATE`) at the moment of each scan, so a sale racing in between the physical count and the eventual post cannot silently invalidate the snapshot | **VERIFIED** | Same tests above run against live PostgreSQL with real locking semantics, not mocked |
+| `POST/GET /api/v1/stock-counts`, `GET .../{id}`, `POST .../{id}/lines`, `POST .../{id}/post`, `POST .../{id}/cancel`, `GET .../{id}/batches` — all gated the existing `stock.count` permission | **VERIFIED** | `go build`/`go vet` clean |
+| `StockCountHistoryScreen` (start a count by location/mode, browse past counts), `StockCountScreen` (adaptive: add-item/post/cancel while `IN_PROGRESS`, read-only review once resolved), `StockCountLineFormScreen` (batch picked from what's actually live at the count's location — never a typed-in batch code, unlike GRN, since a count can only be against stock that already exists) | **VERIFIED** | Wired into the overflow menu gated on `stock.count` |
+| 2 new widget tests (`test/stock_count_test.dart`) | **VERIFIED** | Full start → add item → post flow (asserts the exact recorded-line body and the posted adjustment summary), and cancel-with-confirmation |
+
+Full Flutter suite: 88 tests, all passing. Full Go integration suite: 15
+packages, all passing (the fixed package included). `flutter analyze`/
+`go vet` clean. No live emulator verification performed for this phase.
+
 ## Not Yet Started
 
 Customer/supplier aging (30/60/90-day buckets) and margin reports,

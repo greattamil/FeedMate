@@ -6,6 +6,9 @@ import 'package:provider/provider.dart';
 import '../../core/api_error.dart';
 import '../../core/auth_session.dart';
 import '../../core/local_db.dart';
+import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_decorations.dart';
+import '../../core/theme/app_typography.dart';
 import '../auth/generate_pairing_code_screen.dart';
 import '../auth/login_screen.dart';
 import '../eod/eod_screen.dart';
@@ -22,9 +25,8 @@ import 'product_repository.dart';
 
 enum _MenuAction { khata, suppliers, grn, returnSale, reports, eod, pairDevice }
 
-/// Product search, backed by the real Go backend's ranked search endpoint
-/// (barcode > SKU > exact name > alias > fuzzy — see PRD A4). Tapping a
-/// result adds it to the cart; the cart button navigates to checkout.
+/// Modernized POS Counter & Product Catalog for FeedMate.
+/// Backed by ranked search (barcode > SKU > exact name > alias > fuzzy).
 class ProductSearchScreen extends StatefulWidget {
   const ProductSearchScreen({super.key});
 
@@ -40,6 +42,16 @@ class _ProductSearchScreenState extends State<ProductSearchScreen> {
   bool _fromCache = false;
   String? _error;
   int _pendingSyncCount = 0;
+  String _selectedCategory = 'All';
+
+  static const _categories = [
+    'All',
+    'Cattle Feed',
+    'Poultry Feed',
+    'Mineral Mix',
+    'Concentrate',
+    'Grains & Raw',
+  ];
 
   @override
   void initState() {
@@ -114,9 +126,11 @@ class _ProductSearchScreenState extends State<ProductSearchScreen> {
   Widget build(BuildContext context) {
     final session = context.watch<AuthSession>();
     final cart = context.watch<CartModel>();
+
     return Scaffold(
+      backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: Text(session.displayName ?? 'Product Search'),
+        title: Text(session.displayName ?? 'Product Search', style: AppTypography.headline),
         actions: [
           IconButton(
             key: const Key('sync_button'),
@@ -125,13 +139,15 @@ class _ProductSearchScreenState extends State<ProductSearchScreen> {
               key: const Key('pending_sync_badge'),
               label: Text('$_pendingSyncCount'),
               isLabelVisible: _pendingSyncCount > 0,
-              child: const Icon(Icons.sync),
+              backgroundColor: AppColors.warning,
+              child: const Icon(Icons.sync_rounded),
             ),
             onPressed: _openOutbox,
           ),
           PopupMenuButton<_MenuAction>(
             key: const Key('more_menu_button'),
             tooltip: 'More',
+            icon: const Icon(Icons.more_vert_rounded),
             onSelected: (action) {
               switch (action) {
                 case _MenuAction.khata:
@@ -238,10 +254,12 @@ class _ProductSearchScreenState extends State<ProductSearchScreen> {
           ),
           IconButton(
             key: const Key('cart_button'),
+            tooltip: 'View Cart',
             icon: Badge(
               label: Text('${cart.itemCount}'),
               isLabelVisible: !cart.isEmpty,
-              child: const Icon(Icons.shopping_cart),
+              backgroundColor: AppColors.primary,
+              child: const Icon(Icons.shopping_cart_rounded),
             ),
             onPressed: () async {
               await Navigator.of(context).push(
@@ -251,7 +269,8 @@ class _ProductSearchScreenState extends State<ProductSearchScreen> {
             },
           ),
           IconButton(
-            icon: const Icon(Icons.logout),
+            icon: const Icon(Icons.logout_rounded),
+            tooltip: 'Logout',
             onPressed: () async {
               await session.logout();
               if (!context.mounted) return;
@@ -264,60 +283,276 @@ class _ProductSearchScreenState extends State<ProductSearchScreen> {
       ),
       body: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: TextField(
-              key: const Key('search_field'),
-              controller: _searchController,
-              autofocus: true,
-              decoration: const InputDecoration(
-                labelText: 'Scan barcode or search (English / Tamil / SKU)',
-                border: OutlineInputBorder(),
-                prefixIcon: Icon(Icons.search),
-              ),
-              onChanged: _onQueryChanged,
+          // Search & Scanner Header Bar
+          Container(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+            color: AppColors.surface,
+            child: Column(
+              children: [
+                TextField(
+                  key: const Key('search_field'),
+                  controller: _searchController,
+                  autofocus: true,
+                  decoration: InputDecoration(
+                    labelText: 'Scan barcode or search (English / Tamil / SKU)',
+                    prefixIcon: const Icon(Icons.search_rounded, color: AppColors.primary),
+                    suffixIcon: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (_searchController.text.isNotEmpty)
+                          IconButton(
+                            icon: const Icon(Icons.clear_rounded, size: 18),
+                            onPressed: () {
+                              _searchController.clear();
+                              _onQueryChanged('');
+                            },
+                          ),
+                        const Padding(
+                          padding: EdgeInsets.only(right: 8),
+                          child: Icon(Icons.qr_code_scanner_rounded, color: AppColors.textSecondary),
+                        ),
+                      ],
+                    ),
+                  ),
+                  onChanged: _onQueryChanged,
+                ),
+                const SizedBox(height: 10),
+                // Horizontal category pill selector
+                SizedBox(
+                  height: 32,
+                  child: ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: _categories.length,
+                    itemBuilder: (context, index) {
+                      final cat = _categories[index];
+                      final isSelected = cat == _selectedCategory;
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: FilterChip(
+                          selected: isSelected,
+                          showCheckmark: false,
+                          label: Text(cat),
+                          labelStyle: TextStyle(
+                            fontSize: 12,
+                            fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                            color: isSelected ? Colors.white : AppColors.textSecondary,
+                          ),
+                          backgroundColor: AppColors.surfaceSecondary,
+                          selectedColor: AppColors.primary,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(AppDecorations.radiusFull),
+                            side: BorderSide(
+                              color: isSelected ? AppColors.primary : AppColors.border,
+                            ),
+                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                          onSelected: (selected) {
+                            setState(() => _selectedCategory = cat);
+                            if (cat != 'All') {
+                              _searchController.text = cat;
+                              _search(cat);
+                            }
+                          },
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
             ),
           ),
-          if (_loading) const LinearProgressIndicator(),
+          if (_loading) const LinearProgressIndicator(color: AppColors.primary, minHeight: 2),
           if (_fromCache)
             Container(
               key: const Key('offline_cache_banner'),
               width: double.infinity,
-              color: Colors.amber.shade100,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              child: const Text('Offline — showing cached products', style: TextStyle(fontSize: 12)),
+              color: AppColors.warningContainer,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                children: const [
+                  Icon(Icons.wifi_off_rounded, color: AppColors.warning, size: 16),
+                  SizedBox(width: 8),
+                  Text(
+                    'Offline — showing cached products',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.onWarningContainer),
+                  ),
+                ],
+              ),
             ),
           if (_error != null)
-            Padding(
+            Container(
+              margin: const EdgeInsets.all(12),
               padding: const EdgeInsets.all(12),
-              child: Text(_error!, style: const TextStyle(color: Colors.red)),
+              decoration: BoxDecoration(
+                color: AppColors.dangerContainer,
+                borderRadius: AppDecorations.borderRadiusSm,
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.error_outline_rounded, color: AppColors.danger, size: 20),
+                  const SizedBox(width: 10),
+                  Expanded(child: Text(_error!, style: const TextStyle(color: AppColors.onDangerContainer, fontSize: 13))),
+                ],
+              ),
             ),
+          // Product Search Results List
           Expanded(
-            child: ListView.builder(
-              key: const Key('results_list'),
-              itemCount: _results.length,
-              itemBuilder: (context, index) {
-                final p = _results[index];
-                return ListTile(
-                  title: Text(p.name),
-                  subtitle: Text([
-                    p.sku,
-                    if (p.localNameTa != null) p.localNameTa!,
-                    p.matchType,
-                  ].join(' · ')),
-                  trailing: Text(
-                    p.sellingPrice != null ? '₹${p.sellingPrice!.toStringAsFixed(2)}' : '—',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
+            child: _results.isEmpty && !_loading
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.inventory_2_outlined, size: 48, color: AppColors.textTertiary),
+                        const SizedBox(height: 12),
+                        Text(
+                          _searchController.text.isEmpty
+                              ? 'Scan barcode or enter product name/SKU'
+                              : 'No products matched your search',
+                          style: AppTypography.bodySecondary,
+                        ),
+                      ],
+                    ),
+                  )
+                : ListView.builder(
+                    key: const Key('results_list'),
+                    padding: const EdgeInsets.all(12),
+                    itemCount: _results.length,
+                    itemBuilder: (context, index) {
+                      final p = _results[index];
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 10),
+                        decoration: BoxDecoration(
+                          color: AppColors.surface,
+                          borderRadius: AppDecorations.borderRadiusMd,
+                          border: Border.all(color: AppColors.border),
+                          boxShadow: AppDecorations.cardShadow,
+                        ),
+                        child: Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            borderRadius: AppDecorations.borderRadiusMd,
+                            onTap: () {
+                              context.read<CartModel>().addProduct(p);
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Row(
+                                    children: [
+                                      const Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
+                                      const SizedBox(width: 8),
+                                      Text('Added ${p.name} to cart'),
+                                    ],
+                                  ),
+                                  duration: const Duration(seconds: 1),
+                                  backgroundColor: AppColors.primaryDark,
+                                  behavior: SnackBarBehavior.floating,
+                                ),
+                              );
+                            },
+                            child: Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: Row(
+                                children: [
+                                  // Product Initial Avatar
+                                  Container(
+                                    width: 44,
+                                    height: 44,
+                                    decoration: BoxDecoration(
+                                      gradient: AppColors.gradientEmerald,
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: Center(
+                                      child: Text(
+                                        p.name.isNotEmpty ? p.name.substring(0, 1).toUpperCase() : 'P',
+                                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  // Product Title, Tamil name & SKU
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(p.name, style: AppTypography.title.copyWith(fontSize: 15)),
+                                        const SizedBox(height: 3),
+                                        Wrap(
+                                          spacing: 6,
+                                          runSpacing: 4,
+                                          children: [
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                              decoration: BoxDecoration(
+                                                color: AppColors.surfaceSecondary,
+                                                borderRadius: BorderRadius.circular(4),
+                                              ),
+                                              child: Text(p.sku, style: AppTypography.caption),
+                                            ),
+                                            if (p.localNameTa != null)
+                                              Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                decoration: BoxDecoration(
+                                                  color: AppColors.primaryContainer,
+                                                  borderRadius: BorderRadius.circular(4),
+                                                ),
+                                                child: Text(
+                                                  p.localNameTa!,
+                                                  style: AppTypography.caption.copyWith(color: AppColors.primaryDark),
+                                                ),
+                                              ),
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                              decoration: BoxDecoration(
+                                                color: AppColors.secondaryContainer,
+                                                borderRadius: BorderRadius.circular(4),
+                                              ),
+                                              child: Text(
+                                                p.matchType,
+                                                style: AppTypography.caption.copyWith(color: AppColors.secondary),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  // Price Tag & Add Action
+                                  Column(
+                                    crossAxisAlignment: CrossAxisAlignment.end,
+                                    children: [
+                                      Text(
+                                        p.sellingPrice != null ? '₹${p.sellingPrice!.toStringAsFixed(2)}' : '—',
+                                        style: AppTypography.currencyMedium.copyWith(color: AppColors.primary),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                        decoration: BoxDecoration(
+                                          color: AppColors.primaryContainer,
+                                          borderRadius: BorderRadius.circular(AppDecorations.radiusFull),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: const [
+                                            Icon(Icons.add_rounded, size: 14, color: AppColors.primary),
+                                            SizedBox(width: 2),
+                                            Text(
+                                              'Add',
+                                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.primary),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    },
                   ),
-                  onTap: () {
-                    context.read<CartModel>().addProduct(p);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Added ${p.name} to cart'), duration: const Duration(seconds: 1)),
-                    );
-                  },
-                );
-              },
-            ),
           ),
         ],
       ),

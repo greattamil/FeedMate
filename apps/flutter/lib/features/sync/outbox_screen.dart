@@ -6,6 +6,8 @@ import 'package:provider/provider.dart';
 
 import '../../core/local_db.dart';
 import '../../core/sync_service.dart';
+import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_decorations.dart';
 
 /// Review screen for the offline sale outbox — every queued sale, whatever
 /// its status. PENDING entries are what the next sync attempt will send;
@@ -69,14 +71,15 @@ class _OutboxScreenState extends State<OutboxScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppColors.background,
       appBar: AppBar(
         title: const Text('Offline Sales Outbox'),
         actions: [
           IconButton(
             key: const Key('outbox_sync_now_button'),
             icon: _syncing
-                ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.sync),
+                ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                : const Icon(Icons.sync_rounded),
             tooltip: 'Sync now',
             onPressed: _syncing ? null : _syncNow,
           ),
@@ -85,11 +88,36 @@ class _OutboxScreenState extends State<OutboxScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _entries.isEmpty
-              ? const Center(child: Text('No offline sales queued'))
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(20),
+                        decoration: const BoxDecoration(
+                          color: AppColors.primaryContainer,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.cloud_done_rounded, size: 48, color: AppColors.primary),
+                      ),
+                      const SizedBox(height: 16),
+                      const Text(
+                        'No offline sales queued',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                      ),
+                      const SizedBox(height: 6),
+                      const Text(
+                        'All locally recorded transactions are synced with the server.',
+                        style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
+                      ),
+                    ],
+                  ),
+                )
               : RefreshIndicator(
                   onRefresh: _refresh,
                   child: ListView.builder(
                     key: const Key('outbox_entries_list'),
+                    padding: const EdgeInsets.all(16),
                     itemCount: _entries.length,
                     itemBuilder: (context, index) => _buildTile(_entries[index]),
                   ),
@@ -105,45 +133,84 @@ class _OutboxScreenState extends State<OutboxScreen> {
     final lastError = row['last_error'] as String?;
 
     Color statusColor;
+    Color statusBg;
     IconData statusIcon;
     switch (status) {
       case 'SYNCED':
-        statusColor = Colors.green;
-        statusIcon = Icons.check_circle_outline;
+        statusColor = AppColors.success;
+        statusBg = AppColors.successContainer;
+        statusIcon = Icons.check_circle_rounded;
         break;
       case 'FAILED':
-        statusColor = Colors.red;
-        statusIcon = Icons.error_outline;
+        statusColor = AppColors.danger;
+        statusBg = AppColors.dangerContainer;
+        statusIcon = Icons.error_rounded;
         break;
       default:
-        statusColor = Colors.orange;
-        statusIcon = Icons.schedule;
+        statusColor = AppColors.warning;
+        statusBg = AppColors.warningContainer;
+        statusIcon = Icons.schedule_rounded;
     }
 
     final subtitleText = createdAt != null ? _dateFormat.format(createdAt.toLocal()) : '';
 
-    return ListTile(
-      key: Key('outbox_entry_$clientTransactionId'),
-      leading: Icon(statusIcon, color: statusColor),
-      title: Text('$lineCount item(s) — $status'),
-      subtitle: lastError == null
-          ? Text(subtitleText, style: const TextStyle(fontSize: 12))
-          : Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(subtitleText, style: const TextStyle(fontSize: 12)),
-                Text(lastError, style: const TextStyle(color: Colors.red, fontSize: 12)),
-              ],
-            ),
-      trailing: status == 'FAILED'
-          ? TextButton(
-              key: Key('outbox_retry_$clientTransactionId'),
-              onPressed: () => _retry(clientTransactionId),
-              child: const Text('Retry'),
-            )
-          : row['server_invoice_number'] != null
-              ? Text(row['server_invoice_number'] as String)
-              : null,
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: AppDecorations.card(color: AppColors.surface),
+      child: ListTile(
+        key: Key('outbox_entry_$clientTransactionId'),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        leading: Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: statusBg,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(statusIcon, color: statusColor, size: 22),
+        ),
+        title: Text(
+          '$lineCount item(s) — $status',
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+        ),
+        subtitle: Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: lastError == null
+              ? Text(subtitleText, style: const TextStyle(fontSize: 12, color: AppColors.textSecondary))
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(subtitleText, style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                    const SizedBox(height: 4),
+                    Text(lastError, style: const TextStyle(color: AppColors.danger, fontSize: 12, fontWeight: FontWeight.w600)),
+                  ],
+                ),
+        ),
+        trailing: status == 'FAILED'
+            ? FilledButton(
+                key: Key('outbox_retry_$clientTransactionId'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppColors.danger,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                onPressed: () => _retry(clientTransactionId),
+                child: const Text('Retry'),
+              )
+            : row['server_invoice_number'] != null
+                ? Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: AppColors.surfaceSecondary,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: Text(
+                      row['server_invoice_number'] as String,
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppColors.textPrimary),
+                    ),
+                  )
+                : null,
+      ),
     );
   }
 
@@ -156,3 +223,4 @@ class _OutboxScreenState extends State<OutboxScreen> {
     }
   }
 }
+

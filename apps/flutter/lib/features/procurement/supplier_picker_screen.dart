@@ -5,11 +5,12 @@ import 'package:provider/provider.dart';
 
 import '../../core/api_client.dart';
 import '../../core/api_error.dart';
+import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_decorations.dart';
+import '../../core/theme/app_typography.dart';
 import '../supplier/supplier_api.dart';
 
-/// Lets someone posting a GRN search for and pick the supplier the goods
-/// were received from. Pops with the selected SupplierSummary, or null if
-/// cancelled. Mirrors CustomerPickerScreen's search-as-you-type pattern.
+/// Modernized Supplier Picker for GRN Inward.
 class SupplierPickerScreen extends StatefulWidget {
   const SupplierPickerScreen({super.key});
 
@@ -67,40 +68,93 @@ class _SupplierPickerScreenState extends State<SupplierPickerScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Select Supplier')),
+      backgroundColor: AppColors.background,
+      appBar: AppBar(title: const Text('Select Supplier for GRN', style: AppTypography.headline)),
       body: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.all(12),
+          Container(
+            padding: const EdgeInsets.all(16),
+            color: AppColors.surface,
             child: TextField(
               key: const Key('supplier_picker_search_field'),
               controller: _controller,
               autofocus: true,
-              decoration: const InputDecoration(
-                labelText: 'Search by name, code, or GSTIN',
-                prefixIcon: Icon(Icons.search),
+              decoration: InputDecoration(
+                labelText: 'Search supplier by name, code, or GSTIN',
+                prefixIcon: const Icon(Icons.search_rounded, color: AppColors.primary),
+                suffixIcon: _controller.text.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear_rounded, size: 18),
+                        onPressed: () {
+                          _controller.clear();
+                          _onQueryChanged('');
+                        },
+                      )
+                    : null,
               ),
               onChanged: _onQueryChanged,
             ),
           ),
+          if (_loading) const LinearProgressIndicator(color: AppColors.primary, minHeight: 2),
           if (_error != null)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Text(_error!, style: const TextStyle(color: Colors.red)),
+            Container(
+              margin: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.dangerContainer,
+                borderRadius: AppDecorations.borderRadiusSm,
+              ),
+              child: Text(_error!, style: const TextStyle(color: AppColors.onDangerContainer)),
             ),
-          if (_loading) const LinearProgressIndicator(),
           Expanded(
             child: _results.isEmpty && !_loading
-                ? const Center(child: Text('No suppliers found'))
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: const [
+                        Icon(Icons.local_shipping_outlined, size: 56, color: Color(0xFF94A3B8)),
+                        SizedBox(height: 12),
+                        Text('No suppliers found', style: AppTypography.bodySecondary),
+                      ],
+                    ),
+                  )
                 : ListView.builder(
+                    padding: const EdgeInsets.all(12),
                     itemCount: _results.length,
                     itemBuilder: (context, index) {
                       final s = _results[index];
-                      return ListTile(
-                        key: Key('supplier_picker_result_${s.id}'),
-                        title: Text(s.name),
-                        subtitle: Text('${s.supplierCode}${s.phone != null ? ' · ${s.phone}' : ''}'),
-                        onTap: () => Navigator.of(context).pop(s),
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        decoration: BoxDecoration(
+                          color: AppColors.surface,
+                          borderRadius: AppDecorations.borderRadiusMd,
+                          border: Border.all(color: AppColors.border),
+                          boxShadow: AppDecorations.cardShadow,
+                        ),
+                        child: ListTile(
+                          key: Key('supplier_picker_result_${s.id}'),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                          leading: Container(
+                            width: 42,
+                            height: 42,
+                            decoration: BoxDecoration(
+                              gradient: const LinearGradient(
+                                colors: [Color(0xFF0284C7), Color(0xFF0EA5E9)],
+                              ),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Center(
+                              child: Icon(Icons.local_shipping_rounded, color: Colors.white, size: 20),
+                            ),
+                          ),
+                          title: Text(s.name, style: AppTypography.title),
+                          subtitle: Text(
+                            '${s.supplierCode}${s.phone != null ? ' · ${s.phone}' : ''}',
+                            style: AppTypography.caption,
+                          ),
+                          trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppColors.textSecondary),
+                          onTap: () => Navigator.of(context).pop(s),
+                        ),
                       );
                     },
                   ),

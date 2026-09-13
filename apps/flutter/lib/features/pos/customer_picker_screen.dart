@@ -5,10 +5,13 @@ import 'package:provider/provider.dart';
 
 import '../../core/api_client.dart';
 import '../../core/api_error.dart';
+import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_decorations.dart';
+import '../../core/theme/app_typography.dart';
 import 'customer_api.dart';
 
-/// Lets a cashier search for and pick a customer to attribute a CREDIT tender
-/// to. Pops with the selected CustomerSummary, or null if the user cancels.
+/// Modernized Customer Picker for FeedMate.
+/// Allows cashiers to search and select a customer for Khata credit billing.
 class CustomerPickerScreen extends StatefulWidget {
   const CustomerPickerScreen({super.key});
 
@@ -66,41 +69,110 @@ class _CustomerPickerScreenState extends State<CustomerPickerScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Select Customer')),
+      backgroundColor: AppColors.background,
+      appBar: AppBar(
+        title: const Text('Select Customer for Khata', style: AppTypography.headline),
+      ),
       body: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.all(12),
+          Container(
+            padding: const EdgeInsets.all(16),
+            color: AppColors.surface,
             child: TextField(
               key: const Key('customer_search_field'),
               controller: _controller,
               autofocus: true,
-              decoration: const InputDecoration(
-                labelText: 'Search by name, code, or phone',
-                prefixIcon: Icon(Icons.search),
+              decoration: InputDecoration(
+                labelText: 'Search by farmer name, code, or mobile',
+                prefixIcon: const Icon(Icons.search_rounded, color: AppColors.primary),
+                suffixIcon: _controller.text.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear_rounded, size: 18),
+                        onPressed: () {
+                          _controller.clear();
+                          _onQueryChanged('');
+                        },
+                      )
+                    : null,
               ),
               onChanged: _onQueryChanged,
             ),
           ),
+          if (_loading) const LinearProgressIndicator(color: AppColors.primary, minHeight: 2),
           if (_error != null)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Text(_error!, style: const TextStyle(color: Colors.red)),
+            Container(
+              margin: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.dangerContainer,
+                borderRadius: AppDecorations.borderRadiusSm,
+              ),
+              child: Text(_error!, style: const TextStyle(color: AppColors.onDangerContainer)),
             ),
-          if (_loading) const LinearProgressIndicator(),
           Expanded(
             child: _results.isEmpty && !_loading
-                ? const Center(child: Text('No customers found'))
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.person_search_outlined, size: 48, color: AppColors.textTertiary),
+                        const SizedBox(height: 12),
+                        const Text('No customers found', style: AppTypography.bodySecondary),
+                      ],
+                    ),
+                  )
                 : ListView.builder(
+                    padding: const EdgeInsets.all(12),
                     itemCount: _results.length,
                     itemBuilder: (context, index) {
                       final c = _results[index];
-                      return ListTile(
-                        key: Key('customer_result_${c.id}'),
-                        title: Text(c.name),
-                        subtitle: Text('${c.customerCode}${c.phone != null ? ' · ${c.phone}' : ''}'),
-                        trailing: Text(c.customerType),
-                        onTap: () => Navigator.of(context).pop(c),
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        decoration: BoxDecoration(
+                          color: AppColors.surface,
+                          borderRadius: AppDecorations.borderRadiusMd,
+                          border: Border.all(color: AppColors.border),
+                          boxShadow: AppDecorations.cardShadow,
+                        ),
+                        child: ListTile(
+                          key: Key('customer_result_${c.id}'),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                          leading: Container(
+                            width: 42,
+                            height: 42,
+                            decoration: BoxDecoration(
+                              gradient: AppColors.gradientIndigo,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Center(
+                              child: Text(
+                                c.name.isNotEmpty ? c.name.substring(0, 1).toUpperCase() : 'C',
+                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 17),
+                              ),
+                            ),
+                          ),
+                          title: Text(c.name, style: AppTypography.title),
+                          subtitle: Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: AppColors.surfaceSecondary,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(c.customerCode, style: AppTypography.caption),
+                              ),
+                              if (c.phone != null) ...[
+                                const SizedBox(width: 8),
+                                const Icon(Icons.phone_outlined, size: 12, color: AppColors.textSecondary),
+                                const SizedBox(width: 3),
+                                Text(c.phone!, style: AppTypography.caption),
+                              ],
+                            ],
+                          ),
+                          trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppColors.textSecondary),
+                          onTap: () => Navigator.of(context).pop(c),
+                        ),
                       );
                     },
                   ),

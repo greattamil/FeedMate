@@ -130,35 +130,92 @@ class _KhataDetailScreenState extends State<KhataDetailScreen> {
 
   Widget _buildSummaryCard(CustomerDetail detail) {
     final overLimit = detail.outstandingBalance > detail.creditLimit;
+    final limit = detail.creditLimit > Decimal.zero ? detail.creditLimit : Decimal.one;
+    final ratio = (detail.outstandingBalance / limit).toDouble().clamp(0.0, 1.0);
+
     return Padding(
       padding: const EdgeInsets.all(16),
-      child: Card(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('${detail.customerCode} · ${detail.customerType}',
-                  style: const TextStyle(color: Colors.grey)),
-              if (detail.phone != null) Text(detail.phone!),
-              const SizedBox(height: 12),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  _summaryStat('Outstanding', detail.outstandingBalance,
-                      key: 'khata_outstanding_balance',
-                      color: overLimit ? Colors.red : null),
-                  _summaryStat('Credit Limit', detail.creditLimit, key: 'khata_credit_limit'),
-                  _summaryStat('Available', detail.availableCredit, key: 'khata_available_credit'),
-                ],
-              ),
-              if (overLimit)
-                const Padding(
-                  padding: EdgeInsets.only(top: 8),
-                  child: Text('Over credit limit', style: TextStyle(color: Colors.red, fontSize: 12)),
+      child: Container(
+        decoration: BoxDecoration(
+          gradient: overLimit
+              ? const LinearGradient(colors: [Color(0xFF881337), Color(0xFFE11D48)])
+              : const LinearGradient(colors: [Color(0xFF0F766E), Color(0xFF065F46)]),
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: const [
+            BoxShadow(color: Color(0x200F172A), blurRadius: 20, offset: Offset(0, 6)),
+          ],
+        ),
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    '${detail.customerCode} · ${detail.customerType}',
+                    style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+                  ),
                 ),
-            ],
-          ),
+                if (detail.phone != null)
+                  Row(
+                    children: [
+                      const Icon(Icons.phone_outlined, size: 14, color: Colors.white70),
+                      const SizedBox(width: 4),
+                      Text(detail.phone!, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                    ],
+                  ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                _summaryStat('Outstanding', detail.outstandingBalance,
+                    key: 'khata_outstanding_balance',
+                    color: Colors.white),
+                _summaryStat('Credit Limit', detail.creditLimit,
+                    key: 'khata_credit_limit',
+                    color: Colors.white70),
+                _summaryStat('Available', detail.availableCredit,
+                    key: 'khata_available_credit',
+                    color: Colors.white70),
+              ],
+            ),
+            const SizedBox(height: 14),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(999),
+              child: LinearProgressIndicator(
+                value: ratio,
+                minHeight: 6,
+                backgroundColor: Colors.white.withOpacity(0.25),
+                valueColor: AlwaysStoppedAnimation<Color>(
+                  overLimit ? const Color(0xFFFDE047) : const Color(0xFF6EE7B7),
+                ),
+              ),
+            ),
+            if (overLimit)
+              Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.yellowAccent.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: const Text(
+                    'Over credit limit',
+                    style: TextStyle(color: Color(0xFFFEF08A), fontSize: 12, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+          ],
         ),
       ),
     );
@@ -168,11 +225,12 @@ class _KhataDetailScreenState extends State<KhataDetailScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+        Text(label, style: const TextStyle(fontSize: 11, color: Colors.white70, fontWeight: FontWeight.w500)),
+        const SizedBox(height: 2),
         Text(
           '₹${value.toStringAsFixed(2)}',
           key: Key(key),
-          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: color),
+          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17, color: color ?? Colors.white),
         ),
       ],
     );
@@ -180,19 +238,41 @@ class _KhataDetailScreenState extends State<KhataDetailScreen> {
 
   Widget _buildLedgerTile(LedgerEntry e) {
     final isDebit = e.debit > Decimal.zero;
-    return ListTile(
-      key: Key('khata_ledger_entry_${e.id}'),
-      leading: Icon(
-        isDebit ? Icons.arrow_upward : Icons.arrow_downward,
-        color: isDebit ? Colors.red : Colors.green,
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
       ),
-      title: Text(e.description ?? e.documentType),
-      subtitle: Text('${e.documentType} · ${_dateFormat.format(e.entryDate.toLocal())}'),
-      trailing: Text(
-        isDebit ? '+₹${e.debit.toStringAsFixed(2)}' : '-₹${e.credit.toStringAsFixed(2)}',
-        style: TextStyle(
-          fontWeight: FontWeight.bold,
-          color: isDebit ? Colors.red : Colors.green,
+      child: ListTile(
+        key: Key('khata_ledger_entry_${e.id}'),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+        leading: Container(
+          width: 38,
+          height: 38,
+          decoration: BoxDecoration(
+            color: isDebit ? const Color(0xFFFFE4E6) : const Color(0xFFD1FAE5),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(
+            isDebit ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded,
+            color: isDebit ? const Color(0xFFE11D48) : const Color(0xFF059669),
+            size: 20,
+          ),
+        ),
+        title: Text(e.description ?? e.documentType, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+        subtitle: Text(
+          '${e.documentType} · ${_dateFormat.format(e.entryDate.toLocal())}',
+          style: const TextStyle(color: Color(0xFF64748B), fontSize: 12),
+        ),
+        trailing: Text(
+          isDebit ? '+₹${e.debit.toStringAsFixed(2)}' : '-₹${e.credit.toStringAsFixed(2)}',
+          style: TextStyle(
+            fontWeight: FontWeight.w800,
+            fontSize: 15,
+            color: isDebit ? const Color(0xFFE11D48) : const Color(0xFF059669),
+          ),
         ),
       ),
     );

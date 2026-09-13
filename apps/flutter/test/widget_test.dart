@@ -15,6 +15,7 @@ import 'package:feedmate_app/core/local_db.dart';
 import 'package:feedmate_app/core/secure_storage.dart';
 import 'package:feedmate_app/core/sync_service.dart';
 import 'package:feedmate_app/features/auth/login_screen.dart';
+import 'package:feedmate_app/features/dashboard/home_dashboard_screen.dart';
 import 'package:feedmate_app/features/pos/cart_model.dart';
 import 'package:feedmate_app/features/pos/product_repository.dart';
 import 'package:feedmate_app/features/pos/product_search_screen.dart';
@@ -98,8 +99,12 @@ void main() {
     await tester.tap(find.byKey(const Key('login_button')));
     await tester.pumpAndSettle();
 
-    expect(find.byType(ProductSearchScreen), findsOneWidget);
-    expect(find.text('Test Owner'), findsOneWidget);
+    // A successful login now lands on the app shell's home dashboard (the
+    // product search / counter screen is a separate bottom-nav tab, mounted
+    // but inactive — see AppShell).
+    expect(find.byType(HomeDashboardScreen), findsOneWidget);
+    expect(find.byType(ProductSearchScreen, skipOffstage: false), findsWidgets);
+    expect(find.textContaining('Test Owner'), findsWidgets);
   });
 
   testWidgets('product search shows ranked results from the API', (tester) async {

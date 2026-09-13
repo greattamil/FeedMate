@@ -5,6 +5,8 @@ import 'package:provider/provider.dart';
 
 import '../../core/api_client.dart';
 import '../../core/api_error.dart';
+import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_decorations.dart';
 import 'reports_api.dart';
 
 /// Reports/dashboard — a real Flutter view on top of the four reporting
@@ -20,11 +22,16 @@ class ReportsScreen extends StatelessWidget {
     return DefaultTabController(
       length: 4,
       child: Scaffold(
+        backgroundColor: AppColors.background,
         appBar: AppBar(
-          title: const Text('Reports'),
-          bottom: const TabBar(
+          title: const Text('Reports & Analytics'),
+          bottom: TabBar(
             isScrollable: true,
-            tabs: [
+            labelColor: AppColors.primary,
+            unselectedLabelColor: AppColors.textSecondary,
+            indicatorColor: AppColors.primary,
+            indicatorWeight: 3,
+            tabs: const [
               Tab(text: 'Sales', key: Key('tab_sales')),
               Tab(text: 'Stock', key: Key('tab_stock')),
               Tab(text: 'Balances', key: Key('tab_balances')),
@@ -115,47 +122,87 @@ class _SalesSummaryTabState extends State<_SalesSummaryTab> {
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          ListTile(
+          // Date Filter Pill Button
+          InkWell(
             key: const Key('sales_date_range_tile'),
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.date_range),
-            title: Text('${_dateFormat.format(_dateFrom)} – ${_dateFormat.format(_dateTo)}'),
-            trailing: const Icon(Icons.edit_calendar_outlined),
             onTap: _pickDateRange,
+            borderRadius: BorderRadius.circular(14),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: AppDecorations.card(color: AppColors.surface),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: AppColors.primaryContainer,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.date_range_rounded, color: AppColors.primary, size: 20),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Date Range', style: TextStyle(color: AppColors.textSecondary, fontSize: 11)),
+                        Text(
+                          '${_dateFormat.format(_dateFrom)} – ${_dateFormat.format(_dateTo)}',
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppColors.textPrimary),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Icon(Icons.edit_calendar_rounded, size: 18, color: AppColors.primary),
+                ],
+              ),
+            ),
           ),
+          const SizedBox(height: 16),
           if (_loading) const Center(child: CircularProgressIndicator()),
-          if (_error != null) Text(_error!, style: const TextStyle(color: Colors.red)),
+          if (_error != null)
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.dangerContainer,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(_error!, style: const TextStyle(color: AppColors.onDangerContainer)),
+            ),
           if (summary != null) ...[
-            Card(
-              child: Padding(
+            // Sales Metrics Detailed Card
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: AppDecorations.card(color: AppColors.surface),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Summary Breakdown',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppColors.textPrimary),
+                  ),
+                  const SizedBox(height: 12),
+                  _statRow('Invoices', summary.invoiceCount.toString(), key: 'sales_invoice_count'),
+                  _statRow('Gross Sales', '₹${summary.grossSales.toStringAsFixed(2)}', key: 'sales_gross'),
+                  _statRow('Discounts', '₹${summary.discountTotal.toStringAsFixed(2)}'),
+                  _statRow('Tax', '₹${summary.taxTotal.toStringAsFixed(2)}'),
+                  const Divider(height: 20),
+                  _statRow('Net Sales', '₹${summary.netSales.toStringAsFixed(2)}', key: 'sales_net', bold: true),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            if (summary.byTender.isNotEmpty)
+              Container(
                 padding: const EdgeInsets.all(16),
+                decoration: AppDecorations.card(color: AppColors.surface),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _statRow('Invoices', summary.invoiceCount.toString(), key: 'sales_invoice_count'),
-                    _statRow('Gross Sales', '₹${summary.grossSales.toStringAsFixed(2)}', key: 'sales_gross'),
-                    _statRow('Discounts', '₹${summary.discountTotal.toStringAsFixed(2)}'),
-                    _statRow('Tax', '₹${summary.taxTotal.toStringAsFixed(2)}'),
-                    const Divider(),
-                    _statRow('Net Sales', '₹${summary.netSales.toStringAsFixed(2)}',
-                        key: 'sales_net', bold: true),
+                    const Text('By Tender', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppColors.textPrimary)),
+                    const SizedBox(height: 12),
+                    ...summary.byTender.map((t) => _statRow(t.method, '₹${t.total.toStringAsFixed(2)}')),
                   ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            if (summary.byTender.isNotEmpty)
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('By Tender', style: TextStyle(fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 8),
-                      ...summary.byTender.map((t) => _statRow(t.method, '₹${t.total.toStringAsFixed(2)}')),
-                    ],
-                  ),
                 ),
               ),
           ],
@@ -166,14 +213,20 @@ class _SalesSummaryTabState extends State<_SalesSummaryTab> {
 
   Widget _statRow(String label, String value, {String? key, bool bold = false}) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: 5),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label),
-          Text(value,
-              key: key != null ? Key(key) : null,
-              style: TextStyle(fontWeight: bold ? FontWeight.bold : FontWeight.normal)),
+          Text(label, style: TextStyle(color: AppColors.textSecondary, fontWeight: bold ? FontWeight.bold : FontWeight.normal)),
+          Text(
+            value,
+            key: key != null ? Key(key) : null,
+            style: TextStyle(
+              fontWeight: bold ? FontWeight.bold : FontWeight.w600,
+              fontSize: bold ? 15 : 14,
+              color: bold ? AppColors.primary : AppColors.textPrimary,
+            ),
+          ),
         ],
       ),
     );
@@ -234,24 +287,57 @@ class _StockOnHandTabState extends State<_StockOnHandTab> {
             ])
           : ListView.builder(
               key: const Key('stock_list'),
+              padding: const EdgeInsets.all(16),
               itemCount: _lines.length,
               itemBuilder: (context, index) {
                 final l = _lines[index];
-                return ListTile(
+                return Container(
                   key: Key('stock_${l.productId}'),
-                  title: Text(l.name),
-                  subtitle: Text(
-                    '${l.sku} · ${l.batchCount} batch(es)'
-                    '${l.nearestExpiry != null ? ' · nearest expiry ${DateFormat('dd MMM yyyy').format(l.nearestExpiry!)}' : ''}',
-                  ),
-                  trailing: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text(l.totalAvailable.toString(), style: const TextStyle(fontWeight: FontWeight.bold)),
-                      if (l.expiringWithin30Days)
-                        const Text('Expiring soon', style: TextStyle(color: Colors.orange, fontSize: 11)),
-                    ],
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: AppDecorations.card(color: AppColors.surface),
+                  child: ListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    leading: Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: l.expiringWithin30Days ? AppColors.warningContainer : AppColors.primaryContainer,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Icon(
+                        Icons.inventory_2_rounded,
+                        color: l.expiringWithin30Days ? AppColors.warning : AppColors.primary,
+                        size: 22,
+                      ),
+                    ),
+                    title: Text(l.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                    subtitle: Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        '${l.sku} · ${l.batchCount} batch(es)'
+                        '${l.nearestExpiry != null ? ' · nearest expiry ${DateFormat('dd MMM yyyy').format(l.nearestExpiry!)}' : ''}',
+                        style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                      ),
+                    ),
+                    trailing: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          l.totalAvailable.toString(),
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppColors.textPrimary),
+                        ),
+                        if (l.expiringWithin30Days)
+                          Container(
+                            margin: const EdgeInsets.only(top: 4),
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: AppColors.warningContainer,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: const Text('Expiring soon', style: TextStyle(color: AppColors.onWarningContainer, fontSize: 10, fontWeight: FontWeight.bold)),
+                          ),
+                      ],
+                    ),
                   ),
                 );
               },
@@ -314,17 +400,27 @@ class _CustomerBalancesTabState extends State<_CustomerBalancesTab> {
             ])
           : ListView.builder(
               key: const Key('balances_list'),
+              padding: const EdgeInsets.all(16),
               itemCount: _balances.length,
               itemBuilder: (context, index) {
                 final b = _balances[index];
                 final overLimit = b.balance > b.creditLimit;
-                return ListTile(
+                return Container(
                   key: Key('balance_${b.customerId}'),
-                  title: Text(b.name),
-                  subtitle: Text('Limit: ₹${b.creditLimit.toStringAsFixed(2)}'),
-                  trailing: Text(
-                    '₹${b.balance.toStringAsFixed(2)}',
-                    style: TextStyle(fontWeight: FontWeight.bold, color: overLimit ? Colors.red : null),
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: AppDecorations.card(color: AppColors.surface),
+                  child: ListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    leading: CircleAvatar(
+                      backgroundColor: overLimit ? AppColors.dangerContainer : AppColors.secondaryContainer,
+                      child: Icon(Icons.person_rounded, color: overLimit ? AppColors.danger : AppColors.secondary, size: 20),
+                    ),
+                    title: Text(b.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                    subtitle: Text('Limit: ₹${b.creditLimit.toStringAsFixed(2)}', style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+                    trailing: Text(
+                      '₹${b.balance.toStringAsFixed(2)}',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: overLimit ? Colors.red : AppColors.textPrimary),
+                    ),
                   ),
                 );
               },
@@ -389,24 +485,39 @@ class _EodHistoryTabState extends State<_EodHistoryTab> {
             ])
           : ListView.builder(
               key: const Key('eod_history_list'),
+              padding: const EdgeInsets.all(16),
               itemCount: _sessions.length,
               itemBuilder: (context, index) {
                 final s = _sessions[index];
-                return ListTile(
+                return Container(
                   key: Key('eod_history_${_dateFormat.format(s.businessDate)}'),
-                  title: Text(_dateFormat.format(s.businessDate)),
-                  subtitle: Text('${s.status} · Expected ₹${s.expectedCash.toStringAsFixed(2)}'),
-                  trailing: s.variance != null
-                      ? Text(
-                          '₹${s.variance!.toStringAsFixed(2)}',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: s.variance == Decimal.zero
-                                ? Colors.green
-                                : (s.variance! < Decimal.zero ? Colors.red : Colors.orange),
-                          ),
-                        )
-                      : null,
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: AppDecorations.card(color: AppColors.surface),
+                  child: ListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    leading: Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: AppColors.secondaryContainer,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(Icons.history_rounded, color: AppColors.secondary, size: 22),
+                    ),
+                    title: Text(_dateFormat.format(s.businessDate), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                    subtitle: Text('${s.status} · Expected ₹${s.expectedCash.toStringAsFixed(2)}', style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+                    trailing: s.variance != null
+                        ? Text(
+                            '₹${s.variance!.toStringAsFixed(2)}',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15,
+                              color: s.variance == Decimal.zero
+                                  ? Colors.green
+                                  : (s.variance! < Decimal.zero ? Colors.red : Colors.orange),
+                            ),
+                          )
+                        : null,
+                  ),
                 );
               },
             ),

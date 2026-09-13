@@ -5,12 +5,13 @@ import 'package:provider/provider.dart';
 
 import '../../core/api_client.dart';
 import '../../core/api_error.dart';
+import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_decorations.dart';
+import '../../core/theme/app_typography.dart';
 import 'supplier_api.dart';
 import 'supplier_detail_screen.dart';
 
-/// Entry point for the supplier payable feature — mirrors
-/// khata_customer_list_screen.dart on the payable side: search/browse
-/// suppliers, tap one to see their statement.
+/// Modernized Supplier Directory for FeedMate.
 class SupplierListScreen extends StatefulWidget {
   const SupplierListScreen({super.key});
 
@@ -68,46 +69,113 @@ class _SupplierListScreenState extends State<SupplierListScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Suppliers')),
+      backgroundColor: AppColors.background,
+      appBar: AppBar(
+        title: const Text('Feed Suppliers & Mills', style: AppTypography.headline),
+      ),
       body: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.all(12),
+          Container(
+            padding: const EdgeInsets.all(16),
+            color: AppColors.surface,
             child: TextField(
               key: const Key('supplier_search_field'),
               controller: _controller,
-              decoration: const InputDecoration(
-                labelText: 'Search by name, code, phone, or GSTIN',
-                prefixIcon: Icon(Icons.search),
+              decoration: InputDecoration(
+                labelText: 'Search supplier by name, code, mobile, or GSTIN',
+                prefixIcon: const Icon(Icons.search_rounded, color: AppColors.primary),
+                suffixIcon: _controller.text.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear_rounded, size: 18),
+                        onPressed: () {
+                          _controller.clear();
+                          _onQueryChanged('');
+                        },
+                      )
+                    : null,
               ),
               onChanged: _onQueryChanged,
             ),
           ),
+          if (_loading) const LinearProgressIndicator(color: AppColors.primary, minHeight: 2),
           if (_error != null)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Text(_error!, style: const TextStyle(color: Colors.red)),
+            Container(
+              margin: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.dangerContainer,
+                borderRadius: AppDecorations.borderRadiusSm,
+              ),
+              child: Text(_error!, style: const TextStyle(color: AppColors.onDangerContainer)),
             ),
-          if (_loading) const LinearProgressIndicator(),
           Expanded(
             child: _results.isEmpty && !_loading
-                ? const Center(child: Text('No suppliers found'))
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: const [
+                        Icon(Icons.local_shipping_outlined, size: 56, color: Color(0xFF94A3B8)),
+                        SizedBox(height: 12),
+                        Text('No suppliers found', style: AppTypography.bodySecondary),
+                      ],
+                    ),
+                  )
                 : ListView.builder(
                     key: const Key('supplier_results_list'),
+                    padding: const EdgeInsets.all(12),
                     itemCount: _results.length,
                     itemBuilder: (context, index) {
                       final s = _results[index];
-                      return ListTile(
-                        key: Key('supplier_${s.id}'),
-                        leading: const Icon(Icons.local_shipping_outlined),
-                        title: Text(s.name),
-                        subtitle: Text('${s.supplierCode}${s.phone != null ? ' · ${s.phone}' : ''}'),
-                        trailing: const Icon(Icons.chevron_right),
-                        onTap: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(builder: (_) => SupplierDetailScreen(supplierId: s.id)),
-                          );
-                        },
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        decoration: BoxDecoration(
+                          color: AppColors.surface,
+                          borderRadius: AppDecorations.borderRadiusMd,
+                          border: Border.all(color: AppColors.border),
+                          boxShadow: AppDecorations.cardShadow,
+                        ),
+                        child: ListTile(
+                          key: Key('supplier_${s.id}'),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                          leading: Container(
+                            width: 44,
+                            height: 44,
+                            decoration: BoxDecoration(
+                              gradient: const LinearGradient(
+                                colors: [Color(0xFF0284C7), Color(0xFF0EA5E9)],
+                              ),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Center(
+                              child: Icon(Icons.local_shipping_rounded, color: Colors.white, size: 22),
+                            ),
+                          ),
+                          title: Text(s.name, style: AppTypography.title),
+                          subtitle: Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: AppColors.surfaceSecondary,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(s.supplierCode, style: AppTypography.caption),
+                              ),
+                              if (s.phone != null) ...[
+                                const SizedBox(width: 8),
+                                const Icon(Icons.phone_outlined, size: 12, color: AppColors.textSecondary),
+                                const SizedBox(width: 3),
+                                Text(s.phone!, style: AppTypography.caption),
+                              ],
+                            ],
+                          ),
+                          trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppColors.textSecondary),
+                          onTap: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(builder: (_) => SupplierDetailScreen(supplierId: s.id)),
+                            );
+                          },
+                        ),
                       );
                     },
                   ),

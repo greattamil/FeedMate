@@ -153,116 +153,182 @@ class _GrnLineFormScreenState extends State<GrnLineFormScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(widget.product.name)),
+      backgroundColor: const Color(0xFFF8FAFC),
+      appBar: AppBar(
+        title: Text(widget.product.name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+      ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
           if (_error != null) ...[
-            Text(_error!, style: const TextStyle(color: Colors.red)),
-            const SizedBox(height: 12),
-          ],
-          TextField(
-            key: const Key('grn_line_batch_code_field'),
-            controller: _batchController,
-            decoration: const InputDecoration(labelText: 'Batch code'),
-          ),
-          const SizedBox(height: 12),
-          ListTile(
-            key: const Key('grn_line_mfg_date_tile'),
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Manufacture date'),
-            subtitle: Text(_manufactureDate == null ? 'Not set' : _dateFormat.format(_manufactureDate!)),
-            trailing: const Icon(Icons.calendar_today),
-            onTap: () => _pickDate(isExpiry: false),
-          ),
-          ListTile(
-            key: const Key('grn_line_expiry_date_tile'),
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Expiry date'),
-            subtitle: Text(_expiryDate == null ? 'Not set' : _dateFormat.format(_expiryDate!)),
-            trailing: const Icon(Icons.calendar_today),
-            onTap: () => _pickDate(isExpiry: true),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            key: const Key('grn_line_qty_field'),
-            controller: _qtyController,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(labelText: 'Received quantity'),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            key: const Key('grn_line_unit_cost_field'),
-            controller: _costController,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(labelText: 'Unit cost (₹)'),
-          ),
-          const SizedBox(height: 12),
-          DropdownButtonFormField<String>(
-            key: const Key('grn_line_quality_dropdown'),
-            initialValue: _qualityStatus,
-            decoration: const InputDecoration(labelText: 'Quality status'),
-            items: _qualityOptions.map((q) => DropdownMenuItem(value: q, child: Text(q))).toList(),
-            onChanged: (v) => setState(() => _qualityStatus = v ?? 'ACCEPTED'),
-          ),
-          const Divider(height: 32),
-          SwitchListTile(
-            key: const Key('grn_line_capture_weight_switch'),
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Capture weight / tare'),
-            subtitle: const Text('For loose or bagged goods weighed at receipt'),
-            value: _captureWeight,
-            onChanged: (v) => setState(() => _captureWeight = v),
-          ),
-          if (_captureWeight) ...[
-            const SizedBox(height: 8),
-            TextField(
-              key: const Key('grn_line_gross_weight_field'),
-              controller: _grossWeightController,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(labelText: 'Gross weight (kg)'),
+            Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFE4E6),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(_error!, style: const TextStyle(color: Color(0xFFE11D48), fontSize: 13)),
             ),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              key: const Key('grn_line_tare_method_dropdown'),
-              initialValue: _tareMethod,
-              decoration: const InputDecoration(labelText: 'Tare method'),
-              items: const [
-                DropdownMenuItem(value: 'MEASURED', child: Text('Measured (weighed empty)')),
-                DropdownMenuItem(value: 'STANDARD_PER_BAG', child: Text('Standard per bag')),
+          ],
+          // Card 1: Batch & Dates
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('BATCH & VALIDITY', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF64748B), letterSpacing: 0.6)),
+                const SizedBox(height: 12),
+                TextField(
+                  key: const Key('grn_line_batch_code_field'),
+                  controller: _batchController,
+                  decoration: const InputDecoration(labelText: 'Batch code / lot no.', prefixIcon: Icon(Icons.tag_rounded, size: 18)),
+                ),
+                const SizedBox(height: 12),
+                ListTile(
+                  key: const Key('grn_line_mfg_date_tile'),
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.calendar_today_rounded, color: Color(0xFF0F766E), size: 20),
+                  title: const Text('Manufacture Date', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                  subtitle: Text(_manufactureDate == null ? 'Tap to set' : _dateFormat.format(_manufactureDate!), style: const TextStyle(color: Color(0xFF64748B), fontSize: 12)),
+                  trailing: const Icon(Icons.chevron_right_rounded, color: Color(0xFF64748B)),
+                  onTap: () => _pickDate(isExpiry: false),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  key: const Key('grn_line_expiry_date_tile'),
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.event_busy_rounded, color: Color(0xFFE11D48), size: 20),
+                  title: const Text('Expiry Date', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                  subtitle: Text(_expiryDate == null ? 'Tap to set' : _dateFormat.format(_expiryDate!), style: const TextStyle(color: Color(0xFF64748B), fontSize: 12)),
+                  trailing: const Icon(Icons.chevron_right_rounded, color: Color(0xFF64748B)),
+                  onTap: () => _pickDate(isExpiry: true),
+                ),
               ],
-              onChanged: (v) => setState(() => _tareMethod = v ?? 'MEASURED'),
             ),
-            const SizedBox(height: 12),
-            if (_tareMethod == 'MEASURED')
-              TextField(
-                key: const Key('grn_line_measured_tare_field'),
-                controller: _measuredTareController,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(labelText: 'Measured tare (kg)'),
-              )
-            else ...[
-              TextField(
-                key: const Key('grn_line_bag_count_field'),
-                controller: _bagCountController,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Bag count'),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                key: const Key('grn_line_standard_tare_field'),
-                controller: _standardTareController,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(labelText: 'Standard tare per bag (kg)'),
-              ),
-            ],
-          ],
+          ),
+          const SizedBox(height: 14),
+          // Card 2: Quantity & Cost
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('QUANTITY & PRICING', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF64748B), letterSpacing: 0.6)),
+                const SizedBox(height: 12),
+                TextField(
+                  key: const Key('grn_line_qty_field'),
+                  controller: _qtyController,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(labelText: 'Received quantity (bags/units)', prefixIcon: Icon(Icons.numbers_rounded, size: 18)),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  key: const Key('grn_line_unit_cost_field'),
+                  controller: _costController,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(labelText: 'Unit purchase cost (₹)', prefixIcon: Icon(Icons.currency_rupee_rounded, size: 18)),
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  key: const Key('grn_line_quality_dropdown'),
+                  initialValue: _qualityStatus,
+                  decoration: const InputDecoration(labelText: 'Quality status', prefixIcon: Icon(Icons.verified_outlined, size: 18)),
+                  items: _qualityOptions.map((q) => DropdownMenuItem(value: q, child: Text(q))).toList(),
+                  onChanged: (v) => setState(() => _qualityStatus = v ?? 'ACCEPTED'),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          // Card 3: Tare & Weighing
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SwitchListTile(
+                  key: const Key('grn_line_capture_weight_switch'),
+                  contentPadding: EdgeInsets.zero,
+                  activeColor: const Color(0xFF0F766E),
+                  title: const Text('Capture Tare & Net Weight', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                  subtitle: const Text('For loose or weighed bagged animal feed', style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+                  value: _captureWeight,
+                  onChanged: (v) => setState(() => _captureWeight = v),
+                ),
+                if (_captureWeight) ...[
+                  const Divider(height: 20),
+                  TextField(
+                    key: const Key('grn_line_gross_weight_field'),
+                    controller: _grossWeightController,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(labelText: 'Gross weight (kg)', prefixIcon: Icon(Icons.scale_rounded, size: 18)),
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    key: const Key('grn_line_tare_method_dropdown'),
+                    initialValue: _tareMethod,
+                    decoration: const InputDecoration(labelText: 'Tare method', prefixIcon: Icon(Icons.tune_rounded, size: 18)),
+                    items: const [
+                      DropdownMenuItem(value: 'MEASURED', child: Text('Measured (weighed empty)')),
+                      DropdownMenuItem(value: 'STANDARD_PER_BAG', child: Text('Standard per bag')),
+                    ],
+                    onChanged: (v) => setState(() => _tareMethod = v ?? 'MEASURED'),
+                  ),
+                  const SizedBox(height: 12),
+                  if (_tareMethod == 'MEASURED')
+                    TextField(
+                      key: const Key('grn_line_measured_tare_field'),
+                      controller: _measuredTareController,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      decoration: const InputDecoration(labelText: 'Measured tare weight (kg)'),
+                    )
+                  else ...[
+                    TextField(
+                      key: const Key('grn_line_bag_count_field'),
+                      controller: _bagCountController,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(labelText: 'Bag count'),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      key: const Key('grn_line_standard_tare_field'),
+                      controller: _standardTareController,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      decoration: const InputDecoration(labelText: 'Standard tare per bag (kg)'),
+                    ),
+                  ],
+                ],
+              ],
+            ),
+          ),
           const SizedBox(height: 24),
           FilledButton(
             key: const Key('grn_line_save_button'),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF0F766E),
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
             onPressed: _save,
-            child: const Text('Save Line'),
+            child: const Text('Save Line to GRN', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
           ),
+          const SizedBox(height: 20),
         ],
       ),
     );

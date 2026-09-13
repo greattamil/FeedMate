@@ -4,7 +4,9 @@ import 'package:provider/provider.dart';
 
 import '../../core/auth_session.dart';
 import '../../core/secure_storage.dart';
-import '../pos/product_search_screen.dart';
+import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_decorations.dart';
+import '../shell/app_shell.dart';
 import 'pair_device_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -23,12 +25,6 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   void initState() {
     super.initState();
-    // Support diagnostic (PRD §93: devices must expose their identity for
-    // support/troubleshooting). This is also the only way an owner can tell
-    // support/an admin which device_uuid to register — there is no
-    // self-service device registration flow yet (see
-    // docs/IMPLEMENTATION_STATUS.md), so a new install cannot log in until
-    // whoever provisions tenants adds this UUID as a device for the tenant.
     context.read<SecureStorage>().getOrCreateDeviceUuid().then((uuid) {
       if (mounted) setState(() => _deviceUuid = uuid);
     });
@@ -45,7 +41,7 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _submitting = false);
     if (success) {
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const ProductSearchScreen()),
+        MaterialPageRoute(builder: (_) => const AppShell()),
       );
     }
   }
@@ -54,57 +50,109 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     final session = context.watch<AuthSession>();
     return Scaffold(
-      appBar: AppBar(title: const Text('Andipatti Animal Feed System')),
+      backgroundColor: AppColors.background,
       body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 400),
-          child: Padding(
-            padding: const EdgeInsets.all(24),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
             child: Column(
               mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Text(
-                  'Shop Login',
-                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 24),
-                TextField(
-                  controller: _usernameController,
-                  decoration: const InputDecoration(labelText: 'Username', border: OutlineInputBorder()),
-                  key: const Key('username_field'),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _passwordController,
-                  decoration: const InputDecoration(labelText: 'Password', border: OutlineInputBorder()),
-                  obscureText: true,
-                  key: const Key('password_field'),
-                  onSubmitted: (_) => _submitting ? null : _submit(),
+                // Brand Header Badge
+                Container(
+                  padding: const EdgeInsets.all(18),
+                  decoration: BoxDecoration(
+                    gradient: AppColors.gradientEmerald,
+                    shape: BoxShape.circle,
+                    boxShadow: AppDecorations.cardShadow,
+                  ),
+                  child: const Icon(Icons.storefront_rounded, size: 44, color: Colors.white),
                 ),
                 const SizedBox(height: 20),
-                if (session.lastError != null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: Text(
-                      session.lastError!,
-                      style: const TextStyle(color: Colors.red),
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                FilledButton(
-                  key: const Key('login_button'),
-                  onPressed: _submitting ? null : _submit,
-                  child: _submitting
-                      ? const SizedBox(
-                          height: 20, width: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Text('Log In'),
+                const Text(
+                  'FeedMate POS',
+                  style: TextStyle(fontSize: 26, fontWeight: FontWeight.w900, color: AppColors.textPrimary, letterSpacing: -0.5),
+                  textAlign: TextAlign.center,
                 ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Andipatti Animal Feed System · Store Login',
+                  style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 28),
+
+                // Main Form Card
+                Container(
+                  padding: const EdgeInsets.all(24),
+                  decoration: AppDecorations.card(color: AppColors.surface),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const Text(
+                        'Shop Login',
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                        textAlign: TextAlign.start,
+                      ),
+                      const SizedBox(height: 20),
+                      TextField(
+                        controller: _usernameController,
+                        key: const Key('username_field'),
+                        decoration: const InputDecoration(
+                          labelText: 'Username',
+                          prefixIcon: Icon(Icons.person_outline_rounded, size: 20),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      TextField(
+                        controller: _passwordController,
+                        key: const Key('password_field'),
+                        obscureText: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Password',
+                          prefixIcon: Icon(Icons.lock_outline_rounded, size: 20),
+                        ),
+                        onSubmitted: (_) => _submitting ? null : _submit(),
+                      ),
+                      const SizedBox(height: 20),
+                      if (session.lastError != null)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                          margin: const EdgeInsets.only(bottom: 16),
+                          decoration: BoxDecoration(
+                            color: AppColors.dangerContainer,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            session.lastError!,
+                            style: const TextStyle(color: AppColors.danger, fontSize: 13, fontWeight: FontWeight.w600),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      FilledButton(
+                        key: const Key('login_button'),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppColors.primary,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        onPressed: _submitting ? null : _submit,
+                        child: _submitting
+                            ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                              )
+                            : const Text('Log In', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                      ),
+                    ],
+                  ),
+                ),
+
                 if (_deviceUuid != null) ...[
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 20),
+                  // Device Identity & Pairing Card
                   InkWell(
                     key: const Key('device_uuid_row'),
                     onTap: () {
@@ -113,17 +161,23 @@ class _LoginScreenState extends State<LoginScreen> {
                         const SnackBar(content: Text('Device ID copied'), duration: Duration(seconds: 1)),
                       );
                     },
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 8),
+                    borderRadius: BorderRadius.circular(12),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: AppColors.surfaceSecondary,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: AppColors.border),
+                      ),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          const Icon(Icons.smartphone, size: 14, color: Colors.grey),
-                          const SizedBox(width: 6),
+                          const Icon(Icons.smartphone_rounded, size: 16, color: AppColors.textSecondary),
+                          const SizedBox(width: 8),
                           Flexible(
                             child: Text(
                               'Device: $_deviceUuid  (tap to copy)',
-                              style: const TextStyle(fontSize: 11, color: Colors.grey),
+                              style: const TextStyle(fontSize: 11, color: AppColors.textSecondary, fontWeight: FontWeight.w500),
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
@@ -131,11 +185,11 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                     ),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 12),
                   TextButton.icon(
                     key: const Key('register_device_link'),
-                    icon: const Icon(Icons.qr_code, size: 16),
-                    label: const Text('Register this device with a pairing code'),
+                    icon: const Icon(Icons.qr_code_2_rounded, size: 18),
+                    label: const Text('Register this device with a pairing code', style: TextStyle(fontWeight: FontWeight.w600)),
                     onPressed: () async {
                       final registered = await Navigator.of(context).push<bool>(
                         MaterialPageRoute(builder: (_) => const PairDeviceScreen()),
@@ -158,3 +212,4 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 }
+

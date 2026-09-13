@@ -325,50 +325,132 @@ class _CartScreenState extends State<CartScreen> {
     final canCheckout = !_checkingOut && !cart.isEmpty && (_quote != null || (_offline && _selectedLocationId != null));
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Cart')),
+      backgroundColor: const Color(0xFFF8FAFC),
+      appBar: AppBar(
+        title: const Text('Checkout & Cart', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+      ),
       body: Column(
         children: [
           if (_offline)
             Container(
               key: const Key('offline_checkout_banner'),
               width: double.infinity,
-              color: Colors.amber.shade100,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              child: const Text(
-                'Offline — sale will be queued and priced when back online',
-                style: TextStyle(fontSize: 12),
+              color: const Color(0xFFFEF3C7),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              child: Row(
+                children: const [
+                  Icon(Icons.wifi_off_rounded, color: Color(0xFFD97706), size: 18),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Offline — sale will be queued and priced when back online',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF92400E)),
+                    ),
+                  ),
+                ],
               ),
             ),
           Expanded(
             child: cart.isEmpty
-                ? const Center(child: Text('Cart is empty'))
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: const [
+                        Icon(Icons.shopping_cart_outlined, size: 56, color: Color(0xFF94A3B8)),
+                        SizedBox(height: 12),
+                        Text('Cart is empty', style: TextStyle(color: Color(0xFF64748B), fontSize: 16, fontWeight: FontWeight.w500)),
+                      ],
+                    ),
+                  )
                 : ListView.builder(
+                    padding: const EdgeInsets.all(12),
                     itemCount: cart.lines.length,
                     itemBuilder: (context, index) {
                       final line = cart.lines[index];
-                      return ListTile(
-                        title: Text(line.product.name),
-                        subtitle: Text(line.product.sku),
-                        leading: IconButton(
-                          icon: const Icon(Icons.remove_circle_outline),
-                          onPressed: () {
-                            cart.updateQuantity(line.product.id, line.quantity - Decimal.one);
-                            _onCartChanged();
-                          },
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 10),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                          boxShadow: const [
+                            BoxShadow(color: Color(0x060F172A), blurRadius: 10, offset: Offset(0, 2)),
+                          ],
                         ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
+                        child: Row(
                           children: [
-                            Text(line.quantity.toString()),
-                            IconButton(
-                              icon: const Icon(Icons.add_circle_outline),
-                              onPressed: () {
-                                cart.updateQuantity(line.product.id, line.quantity + Decimal.one);
-                                _onCartChanged();
-                              },
+                            Container(
+                              width: 40,
+                              height: 40,
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFE6F4EA),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: const Center(
+                                child: Icon(Icons.grain_rounded, color: Color(0xFF0F766E), size: 20),
+                              ),
                             ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(line.product.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                                  const SizedBox(height: 2),
+                                  Text(line.product.sku, style: const TextStyle(color: Color(0xFF64748B), fontSize: 12)),
+                                  if (line.product.sellingPrice != null) ...[
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      '₹${line.product.sellingPrice!.toStringAsFixed(2)} each',
+                                      style: const TextStyle(color: Color(0xFF0F766E), fontWeight: FontWeight.w600, fontSize: 12),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                            // Stepper Controls
+                            Container(
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF1F5F9),
+                                borderRadius: BorderRadius.circular(30),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
+                                    icon: const Icon(Icons.remove_circle_outline, size: 20),
+                                    padding: const EdgeInsets.all(6),
+                                    constraints: const BoxConstraints(),
+                                    color: const Color(0xFF0F766E),
+                                    onPressed: () {
+                                      cart.updateQuantity(line.product.id, line.quantity - Decimal.one);
+                                      _onCartChanged();
+                                    },
+                                  ),
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                                    child: Text(
+                                      line.quantity.toString(),
+                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                    ),
+                                  ),
+                                  IconButton(
+                                    icon: const Icon(Icons.add_circle_outline, size: 20),
+                                    padding: const EdgeInsets.all(6),
+                                    constraints: const BoxConstraints(),
+                                    color: const Color(0xFF0F766E),
+                                    onPressed: () {
+                                      cart.updateQuantity(line.product.id, line.quantity + Decimal.one);
+                                      _onCartChanged();
+                                    },
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 4),
                             IconButton(
-                              icon: const Icon(Icons.delete_outline),
+                              icon: const Icon(Icons.delete_outline, size: 20, color: Color(0xFFE11D48)),
                               onPressed: () {
                                 cart.removeLine(line.product.id);
                                 _onCartChanged();
@@ -380,81 +462,140 @@ class _CartScreenState extends State<CartScreen> {
                     },
                   ),
           ),
-          if (_locations.length > 1)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: DropdownButtonFormField<String>(
-                initialValue: _selectedLocationId,
-                decoration: const InputDecoration(labelText: 'Location'),
-                items: _locations
-                    .map((l) => DropdownMenuItem(value: l.id, child: Text(l.name)))
-                    .toList(),
-                onChanged: (value) => setState(() => _selectedLocationId = value),
-              ),
-            ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Row(
-              children: [
-                Expanded(
-                  child: SegmentedButton<String>(
-                    key: const Key('tender_method_toggle'),
-                    segments: const [
-                      ButtonSegment(value: 'CASH', label: Text('Cash')),
-                      ButtonSegment(value: 'CREDIT', label: Text('Credit (Khata)'), enabled: true),
-                    ],
-                    selected: {_tenderMethod},
-                    onSelectionChanged: _offline
-                        ? null
-                        : (selection) => setState(() => _tenderMethod = selection.first),
-                  ),
-                ),
+          // Location & Tender Controls Container
+          Container(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              border: Border(top: BorderSide(color: Color(0xFFE2E8F0))),
+              boxShadow: [
+                BoxShadow(color: Color(0x0A0F172A), blurRadius: 16, offset: Offset(0, -4)),
               ],
             ),
-          ),
-          if (_tenderMethod == 'CREDIT' && !_offline)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: ListTile(
-                key: const Key('customer_picker_tile'),
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.person_outline),
-                title: Text(_selectedCustomer?.name ?? 'Select customer'),
-                subtitle: _selectedCustomer != null ? Text(_selectedCustomer!.customerCode) : null,
-                trailing: const Icon(Icons.chevron_right),
-                onTap: _pickCustomer,
-              ),
-            ),
-          if (_error != null)
-            Padding(
-              padding: const EdgeInsets.all(12),
-              child: Text(_error!, style: const TextStyle(color: Colors.red)),
-            ),
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Expanded(
-                  child: Text(
-                    _quoting
-                        ? 'Calculating…'
-                        : _quote != null
-                            ? 'Total: ₹${_quote!.grandTotal.toStringAsFixed(2)}'
-                            : (estimate != null
-                                ? 'Estimated: ₹${estimate.toStringAsFixed(2)}'
-                                : 'Total: —'),
-                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                    key: const Key('cart_total'),
+                if (_locations.length > 1)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: DropdownButtonFormField<String>(
+                      initialValue: _selectedLocationId,
+                      decoration: const InputDecoration(
+                        labelText: 'Fulfillment Location',
+                        prefixIcon: Icon(Icons.store_rounded, size: 18),
+                        isDense: true,
+                      ),
+                      items: _locations
+                          .map((l) => DropdownMenuItem(value: l.id, child: Text(l.name)))
+                          .toList(),
+                      onChanged: (value) => setState(() => _selectedLocationId = value),
+                    ),
                   ),
+                // Tender Toggle
+                Row(
+                  children: [
+                    Expanded(
+                      child: SegmentedButton<String>(
+                        key: const Key('tender_method_toggle'),
+                        segments: const [
+                          ButtonSegment(
+                            value: 'CASH',
+                            icon: Icon(Icons.payments_rounded, size: 16),
+                            label: Text('Cash'),
+                          ),
+                          ButtonSegment(
+                            value: 'CREDIT',
+                            icon: Icon(Icons.account_balance_wallet_rounded, size: 16),
+                            label: Text('Credit (Khata)'),
+                            enabled: true,
+                          ),
+                        ],
+                        selected: {_tenderMethod},
+                        onSelectionChanged: _offline
+                            ? null
+                            : (selection) => setState(() => _tenderMethod = selection.first),
+                      ),
+                    ),
+                  ],
                 ),
-                FilledButton(
-                  key: const Key('checkout_button'),
-                  onPressed: canCheckout ? () => _checkout() : null,
-                  child: _checkingOut
-                      ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                      : Text(_offline
-                          ? 'Queue Sale (Offline)'
-                          : (_tenderMethod == 'CREDIT' ? 'Charge to Khata' : 'Charge Cash')),
+                if (_tenderMethod == 'CREDIT' && !_offline) ...[
+                  const SizedBox(height: 10),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                    ),
+                    child: ListTile(
+                      key: const Key('customer_picker_tile'),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      leading: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEEF2FF),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(Icons.person_rounded, color: Color(0xFF4F46E5), size: 20),
+                      ),
+                      title: Text(_selectedCustomer?.name ?? 'Select customer', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                      subtitle: _selectedCustomer != null
+                          ? Text('${_selectedCustomer!.customerCode} · ${_selectedCustomer!.phone ?? ""}')
+                          : const Text('Required for Khata credit billing', style: TextStyle(fontSize: 12)),
+                      trailing: const Icon(Icons.chevron_right_rounded, color: Color(0xFF64748B)),
+                      onTap: _pickCustomer,
+                    ),
+                  ),
+                ],
+                if (_error != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(_error!, style: const TextStyle(color: Color(0xFFE11D48), fontSize: 13)),
+                  ),
+                const SizedBox(height: 12),
+                // Total and Checkout Action Button
+                Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _quoting
+                                ? 'Calculating…'
+                                : _quote != null
+                                    ? 'Total: ₹${_quote!.grandTotal.toStringAsFixed(2)}'
+                                    : (estimate != null
+                                        ? 'Estimated: ₹${estimate.toStringAsFixed(2)}'
+                                        : 'Total: —'),
+                            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: Color(0xFF0F766E)),
+                            key: const Key('cart_total'),
+                          ),
+                          if (_quote != null && _quote!.taxTotal > Decimal.zero)
+                            Text(
+                              'Includes ₹${_quote!.taxTotal.toStringAsFixed(2)} GST tax',
+                              style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                            ),
+                        ],
+                      ),
+                    ),
+                    FilledButton(
+                      key: const Key('checkout_button'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF0F766E),
+                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      onPressed: canCheckout ? () => _checkout() : null,
+                      child: _checkingOut
+                          ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                          : Text(
+                              _offline
+                                  ? 'Queue Sale (Offline)'
+                                  : (_tenderMethod == 'CREDIT' ? 'Charge to Khata' : 'Charge Cash'),
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                            ),
+                    ),
+                  ],
                 ),
               ],
             ),

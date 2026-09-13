@@ -130,42 +130,83 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
   Widget _buildSummaryCard(SupplierDetail detail) {
     return Padding(
       padding: const EdgeInsets.all(16),
-      child: Card(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(detail.supplierCode, style: const TextStyle(color: Colors.grey)),
-              if (detail.phone != null) Text(detail.phone!),
-              if (detail.gstin != null) Text('GSTIN: ${detail.gstin}'),
-              const SizedBox(height: 12),
+      child: Container(
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [Color(0xFF0369A1), Color(0xFF0284C7)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: const [
+            BoxShadow(color: Color(0x180F172A), blurRadius: 20, offset: Offset(0, 6)),
+          ],
+        ),
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    detail.supplierCode,
+                    style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+                  ),
+                ),
+                if (detail.gstin != null)
+                  Text(
+                    'GSTIN: ${detail.gstin}',
+                    style: const TextStyle(color: Colors.white70, fontSize: 11),
+                  ),
+              ],
+            ),
+            if (detail.phone != null) ...[
+              const SizedBox(height: 8),
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Outstanding Payable', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                      Text(
-                        '₹${detail.outstandingPayable.toStringAsFixed(2)}',
-                        key: const Key('supplier_outstanding_payable'),
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                      ),
-                    ],
-                  ),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Payment Terms', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                      Text('${detail.paymentTermsDays} days',
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                    ],
-                  ),
+                  const Icon(Icons.phone_outlined, size: 14, color: Colors.white70),
+                  const SizedBox(width: 4),
+                  Text(detail.phone!, style: const TextStyle(color: Colors.white70, fontSize: 12)),
                 ],
               ),
             ],
-          ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Outstanding Payable', style: TextStyle(fontSize: 11, color: Colors.white70, fontWeight: FontWeight.w500)),
+                    const SizedBox(height: 2),
+                    Text(
+                      '₹${detail.outstandingPayable.toStringAsFixed(2)}',
+                      key: const Key('supplier_outstanding_payable'),
+                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 20, color: Colors.white),
+                    ),
+                  ],
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    const Text('Payment Terms', style: TextStyle(fontSize: 11, color: Colors.white70, fontWeight: FontWeight.w500)),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${detail.paymentTermsDays} days',
+                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: Colors.white),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );
@@ -175,19 +216,41 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
     // A credit increases the payable (e.g. a GRN); a debit decreases it (a
     // payment) — the opposite convention from a customer ledger entry.
     final isCredit = e.credit > Decimal.zero;
-    return ListTile(
-      key: Key('supplier_ledger_entry_${e.id}'),
-      leading: Icon(
-        isCredit ? Icons.arrow_upward : Icons.arrow_downward,
-        color: isCredit ? Colors.red : Colors.green,
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
       ),
-      title: Text(e.description ?? e.documentType),
-      subtitle: Text('${e.documentType} · ${_dateFormat.format(e.entryDate.toLocal())}'),
-      trailing: Text(
-        isCredit ? '+₹${e.credit.toStringAsFixed(2)}' : '-₹${e.debit.toStringAsFixed(2)}',
-        style: TextStyle(
-          fontWeight: FontWeight.bold,
-          color: isCredit ? Colors.red : Colors.green,
+      child: ListTile(
+        key: Key('supplier_ledger_entry_${e.id}'),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+        leading: Container(
+          width: 38,
+          height: 38,
+          decoration: BoxDecoration(
+            color: isCredit ? const Color(0xFFFFE4E6) : const Color(0xFFD1FAE5),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(
+            isCredit ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded,
+            color: isCredit ? const Color(0xFFE11D48) : const Color(0xFF059669),
+            size: 20,
+          ),
+        ),
+        title: Text(e.description ?? e.documentType, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+        subtitle: Text(
+          '${e.documentType} · ${_dateFormat.format(e.entryDate.toLocal())}',
+          style: const TextStyle(color: Color(0xFF64748B), fontSize: 12),
+        ),
+        trailing: Text(
+          isCredit ? '+₹${e.credit.toStringAsFixed(2)}' : '-₹${e.debit.toStringAsFixed(2)}',
+          style: TextStyle(
+            fontWeight: FontWeight.w800,
+            fontSize: 15,
+            color: isCredit ? const Color(0xFFE11D48) : const Color(0xFF059669),
+          ),
         ),
       ),
     );

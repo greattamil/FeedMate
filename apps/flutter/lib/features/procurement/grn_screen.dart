@@ -160,69 +160,171 @@ class _GrnScreenState extends State<GrnScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Receive Stock (GRN)')),
+      backgroundColor: const Color(0xFFF8FAFC),
+      appBar: AppBar(
+        title: const Text('Receive Stock (GRN)', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+      ),
       body: _loadingLocations
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(child: CircularProgressIndicator(color: Color(0xFF0F766E)))
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
                 if (_error != null) ...[
-                  Text(_error!, style: const TextStyle(color: Colors.red)),
-                  const SizedBox(height: 12),
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFE4E6),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(_error!, style: const TextStyle(color: Color(0xFFE11D48), fontSize: 13)),
+                  ),
                 ],
-                ListTile(
-                  key: const Key('grn_supplier_tile'),
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(_supplier == null ? 'Select supplier' : _supplier!.name),
-                  subtitle: _supplier == null ? null : Text(_supplier!.supplierCode),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: _pickSupplier,
-                ),
-                DropdownButtonFormField<String>(
-                  key: const Key('grn_location_dropdown'),
-                  initialValue: _selectedLocationId,
-                  decoration: const InputDecoration(labelText: 'Receiving location'),
-                  items: _locations.map((l) => DropdownMenuItem(value: l.id, child: Text(l.name))).toList(),
-                  onChanged: (v) => setState(() => _selectedLocationId = v),
+                // Supplier Selection Card
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                    boxShadow: const [BoxShadow(color: Color(0x060F172A), blurRadius: 10, offset: Offset(0, 2))],
+                  ),
+                  child: ListTile(
+                    key: const Key('grn_supplier_tile'),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+                    leading: Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFE0F2FE),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Center(
+                        child: Icon(Icons.local_shipping_rounded, color: Color(0xFF0284C7), size: 20),
+                      ),
+                    ),
+                    title: Text(
+                      _supplier == null ? 'Select supplier' : _supplier!.name,
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                    ),
+                    subtitle: Text(
+                      _supplier == null ? 'Required to create intake note' : _supplier!.supplierCode,
+                      style: const TextStyle(color: Color(0xFF64748B), fontSize: 12),
+                    ),
+                    trailing: const Icon(Icons.chevron_right_rounded, color: Color(0xFF64748B)),
+                    onTap: _pickSupplier,
+                  ),
                 ),
                 const SizedBox(height: 12),
-                TextField(
-                  key: const Key('grn_supplier_doc_field'),
-                  controller: _supplierDocController,
-                  decoration: const InputDecoration(labelText: 'Supplier document / invoice no. (optional)'),
+                // Shipment Details Card
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      DropdownButtonFormField<String>(
+                        key: const Key('grn_location_dropdown'),
+                        initialValue: _selectedLocationId,
+                        decoration: const InputDecoration(
+                          labelText: 'Receiving warehouse / location',
+                          prefixIcon: Icon(Icons.warehouse_rounded, size: 18),
+                        ),
+                        items: _locations.map((l) => DropdownMenuItem(value: l.id, child: Text(l.name))).toList(),
+                        onChanged: (v) => setState(() => _selectedLocationId = v),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        key: const Key('grn_supplier_doc_field'),
+                        controller: _supplierDocController,
+                        decoration: const InputDecoration(
+                          labelText: 'Supplier document / invoice no. (optional)',
+                          prefixIcon: Icon(Icons.receipt_long_rounded, size: 18),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        key: const Key('grn_vehicle_no_field'),
+                        controller: _vehicleNoController,
+                        decoration: const InputDecoration(
+                          labelText: 'Delivery vehicle no. (optional)',
+                          prefixIcon: Icon(Icons.local_shipping_rounded, size: 18),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 12),
-                TextField(
-                  key: const Key('grn_vehicle_no_field'),
-                  controller: _vehicleNoController,
-                  decoration: const InputDecoration(labelText: 'Vehicle no. (optional)'),
-                ),
-                const Divider(height: 32),
+                const SizedBox(height: 20),
+                // Received Feed Items Header
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text('Lines', style: TextStyle(fontWeight: FontWeight.bold)),
-                    TextButton.icon(
+                    Text('Received Items (${_lines.length})', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                    FilledButton.icon(
                       key: const Key('grn_add_line_button'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF0F766E),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
                       onPressed: _addLine,
-                      icon: const Icon(Icons.add),
-                      label: const Text('Add Line'),
+                      icon: const Icon(Icons.add_rounded, size: 16),
+                      label: const Text('Add Product Line', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                     ),
                   ],
                 ),
-                if (_lines.isEmpty) const Text('No lines added yet.'),
+                const SizedBox(height: 10),
+                if (_lines.isEmpty)
+                  Container(
+                    padding: const EdgeInsets.symmetric(vertical: 32),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                    ),
+                    child: Center(
+                      child: Column(
+                        children: const [
+                          Icon(Icons.move_to_inbox_outlined, size: 42, color: Color(0xFF94A3B8)),
+                          SizedBox(height: 8),
+                          Text('No lines added yet.', style: TextStyle(color: Color(0xFF64748B), fontSize: 13)),
+                        ],
+                      ),
+                    ),
+                  ),
                 ...List.generate(_lines.length, (index) {
                   final line = _lines[index];
-                  return Card(
+                  return Container(
                     key: Key('grn_line_card_$index'),
+                    margin: const EdgeInsets.only(bottom: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                      boxShadow: const [BoxShadow(color: Color(0x060F172A), blurRadius: 6, offset: Offset(0, 1))],
+                    ),
                     child: ListTile(
-                      title: Text(line.product.name),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+                      leading: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFE6F4EA),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(Icons.inventory_2_rounded, color: Color(0xFF0F766E), size: 20),
+                      ),
+                      title: Text(line.product.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                       subtitle: Text(
-                          'Batch ${line.batchCode} · Qty ${line.receivedQty.toStringAsFixed(2)} · ₹${line.unitCost.toStringAsFixed(2)}/unit'),
+                        'Batch ${line.batchCode} · Qty ${line.receivedQty.toStringAsFixed(2)} · ₹${line.unitCost.toStringAsFixed(2)}/unit',
+                        style: const TextStyle(color: Color(0xFF64748B), fontSize: 12),
+                      ),
                       onTap: () => _editLine(index),
                       trailing: IconButton(
                         key: Key('grn_line_delete_$index'),
-                        icon: const Icon(Icons.delete_outline),
+                        icon: const Icon(Icons.delete_outline, size: 20, color: Color(0xFFE11D48)),
                         onPressed: () => setState(() => _lines.removeAt(index)),
                       ),
                     ),
@@ -231,9 +333,17 @@ class _GrnScreenState extends State<GrnScreen> {
                 const SizedBox(height: 24),
                 FilledButton(
                   key: const Key('grn_post_button'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF0F766E),
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
                   onPressed: _canPost ? _post : null,
-                  child: _posting ? const CircularProgressIndicator() : const Text('Post GRN'),
+                  child: _posting
+                      ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      : const Text('Post Inward GRN', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
                 ),
+                const SizedBox(height: 20),
               ],
             ),
     );

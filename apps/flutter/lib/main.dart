@@ -12,10 +12,11 @@ import 'core/local_db.dart';
 import 'core/local_db_sqlcipher.dart';
 import 'core/secure_storage.dart';
 import 'core/sync_service.dart';
+import 'core/theme/app_theme.dart';
 import 'features/auth/login_screen.dart';
 import 'features/pos/cart_model.dart';
 import 'features/pos/product_repository.dart';
-import 'features/pos/product_search_screen.dart';
+import 'features/shell/app_shell.dart';
 
 /// Resolves the API base URL for local development. An Android emulator
 /// reaches the host machine's localhost via the special alias 10.0.2.2;
@@ -76,7 +77,7 @@ class FeedMateApp extends StatelessWidget {
       ],
       child: MaterialApp(
         title: 'Andipatti Animal Feed System',
-        theme: ThemeData(colorSchemeSeed: Colors.green, useMaterial3: true),
+        theme: AppTheme.lightTheme,
         home: localDb != null ? const _ConnectivitySyncGate(child: _SessionGate()) : const _SessionGate(),
       ),
     );
@@ -144,7 +145,7 @@ class _SessionGateState extends State<_SessionGate> {
       case AuthStatus.loggedOut:
         return const LoginScreen();
       case AuthStatus.loggedIn:
-        return const ProductSearchScreen();
+        return const AppShell();
     }
   }
 }

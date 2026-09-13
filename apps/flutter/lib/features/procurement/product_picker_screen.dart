@@ -4,12 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/api_error.dart';
+import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_decorations.dart';
+import '../../core/theme/app_typography.dart';
 import '../pos/product.dart';
 import '../pos/product_repository.dart';
 
-/// Lets someone receiving stock search for and pick a product to add as a
-/// GRN line. Pops with the selected Product, or null if cancelled. Mirrors
-/// CustomerPickerScreen's search-as-you-type pattern.
+/// Modernized Product Picker for GRN Inward.
 class ProductPickerScreen extends StatefulWidget {
   const ProductPickerScreen({super.key});
 
@@ -65,40 +66,116 @@ class _ProductPickerScreenState extends State<ProductPickerScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Select Product')),
+      backgroundColor: AppColors.background,
+      appBar: AppBar(title: const Text('Select Product to Receive', style: AppTypography.headline)),
       body: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.all(12),
+          Container(
+            padding: const EdgeInsets.all(16),
+            color: AppColors.surface,
             child: TextField(
               key: const Key('product_picker_search_field'),
               controller: _controller,
               autofocus: true,
-              decoration: const InputDecoration(
-                labelText: 'Search by name, Tamil, or SKU',
-                prefixIcon: Icon(Icons.search),
+              decoration: InputDecoration(
+                labelText: 'Search by feed name, Tamil, or SKU',
+                prefixIcon: const Icon(Icons.search_rounded, color: AppColors.primary),
+                suffixIcon: _controller.text.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear_rounded, size: 18),
+                        onPressed: () {
+                          _controller.clear();
+                          _onQueryChanged('');
+                        },
+                      )
+                    : null,
               ),
               onChanged: _onQueryChanged,
             ),
           ),
+          if (_loading) const LinearProgressIndicator(color: AppColors.primary, minHeight: 2),
           if (_error != null)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Text(_error!, style: const TextStyle(color: Colors.red)),
+            Container(
+              margin: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.dangerContainer,
+                borderRadius: AppDecorations.borderRadiusSm,
+              ),
+              child: Text(_error!, style: const TextStyle(color: AppColors.onDangerContainer)),
             ),
-          if (_loading) const LinearProgressIndicator(),
           Expanded(
             child: _results.isEmpty && !_loading
-                ? const Center(child: Text('Search for a product to receive'))
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: const [
+                        Icon(Icons.inventory_2_outlined, size: 56, color: Color(0xFF94A3B8)),
+                        SizedBox(height: 12),
+                        Text('Search for a feed product to receive', style: AppTypography.bodySecondary),
+                      ],
+                    ),
+                  )
                 : ListView.builder(
+                    padding: const EdgeInsets.all(12),
                     itemCount: _results.length,
                     itemBuilder: (context, index) {
                       final p = _results[index];
-                      return ListTile(
-                        key: Key('product_picker_result_${p.id}'),
-                        title: Text(p.name),
-                        subtitle: Text(p.sku),
-                        onTap: () => Navigator.of(context).pop(p),
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        decoration: BoxDecoration(
+                          color: AppColors.surface,
+                          borderRadius: AppDecorations.borderRadiusMd,
+                          border: Border.all(color: AppColors.border),
+                          boxShadow: AppDecorations.cardShadow,
+                        ),
+                        child: ListTile(
+                          key: Key('product_picker_result_${p.id}'),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                          leading: Container(
+                            width: 42,
+                            height: 42,
+                            decoration: BoxDecoration(
+                              gradient: AppColors.gradientEmerald,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Center(
+                              child: Text(
+                                p.name.isNotEmpty ? p.name.substring(0, 1).toUpperCase() : 'P',
+                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 17),
+                              ),
+                            ),
+                          ),
+                          title: Text(p.name, style: AppTypography.title),
+                          subtitle: Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: AppColors.surfaceSecondary,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(p.sku, style: AppTypography.caption),
+                              ),
+                              if (p.localNameTa != null) ...[
+                                const SizedBox(width: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.primaryContainer,
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    p.localNameTa!,
+                                    style: AppTypography.caption.copyWith(color: AppColors.primaryDark),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                          trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppColors.textSecondary),
+                          onTap: () => Navigator.of(context).pop(p),
+                        ),
                       );
                     },
                   ),

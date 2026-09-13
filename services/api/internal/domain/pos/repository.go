@@ -43,24 +43,24 @@ func AllocateInvoiceNumber(ctx context.Context, tx pgx.Tx, tenantID, financialYe
 }
 
 type InvoiceHeader struct {
-	ID                uuid.UUID
-	FinancialYearID   uuid.UUID
-	InvoiceNumber     string
-	CustomerID        *uuid.UUID
-	CustomerNameSnap  *string
-	Subtotal          decimal.Decimal
-	DiscountTotal     decimal.Decimal
-	TaxableTotal      decimal.Decimal
-	TaxTotal          decimal.Decimal
-	RoundingAmount    decimal.Decimal
-	GrandTotal        decimal.Decimal
-	PaymentStatus     string
-	Status            string
-	Source            string
+	ID                  uuid.UUID
+	FinancialYearID     uuid.UUID
+	InvoiceNumber       string
+	CustomerID          *uuid.UUID
+	CustomerNameSnap    *string
+	Subtotal            decimal.Decimal
+	DiscountTotal       decimal.Decimal
+	TaxableTotal        decimal.Decimal
+	TaxTotal            decimal.Decimal
+	RoundingAmount      decimal.Decimal
+	GrandTotal          decimal.Decimal
+	PaymentStatus       string
+	Status              string
+	Source              string
 	ClientTransactionID *uuid.UUID
-	DeviceID          *uuid.UUID
-	CashierUserID     *uuid.UUID
-	FinalizedAt       *time.Time
+	DeviceID            *uuid.UUID
+	CashierUserID       *uuid.UUID
+	FinalizedAt         *time.Time
 }
 
 // FindByClientTransactionID implements upload idempotency: a retried
@@ -84,6 +84,65 @@ func GetInvoiceByID(ctx context.Context, tx pgx.Tx, id uuid.UUID) (*InvoiceHeade
 		FROM sales_invoices WHERE id = $1
 	`, id)
 	return scanInvoiceHeader(row)
+}
+
+// GetByInvoiceNumber looks an invoice up by its human-facing number (what a
+// cashier actually has on the printed receipt) rather than its internal id,
+// so a return can be initiated without the client ever having stored the id.
+func GetByInvoiceNumber(ctx context.Context, tx pgx.Tx, invoiceNumber string) (*InvoiceHeader, error) {
+	row := tx.QueryRow(ctx, `
+		SELECT id, financial_year_id, invoice_number, customer_id, customer_name_snapshot,
+		       subtotal, discount_total, taxable_total, tax_total, rounding_amount, grand_total,
+		       payment_status, status, source, client_transaction_id, device_id, cashier_user_id, finalized_at
+		FROM sales_invoices WHERE invoice_number = $1
+	`, invoiceNumber)
+	return scanInvoiceHeader(row)
+}
+
+// InvoiceLineSummary describes one line of a finalized invoice for the
+// purpose of picking what to return: what was sold, and what of it is still
+// eligible (never more than quantity minus what's already been returned via
+// a POSTED return — PRD 9.7).
+type InvoiceLineSummary struct {
+	ID              uuid.UUID
+	ProductID       uuid.UUID
+	ProductName     string
+	SKU             string
+	UOMCode         string
+	Quantity        decimal.Decimal
+	UnitPrice       decimal.Decimal
+	LineTotal       decimal.Decimal
+	AlreadyReturned decimal.Decimal
+}
+
+func ListInvoiceLines(ctx context.Context, tx pgx.Tx, invoiceID uuid.UUID) ([]InvoiceLineSummary, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT l.id, l.product_id, l.product_name_snapshot, l.sku_snapshot, l.uom_code_snapshot,
+		       l.quantity, l.unit_price, l.line_total,
+		       COALESCE((
+		           SELECT SUM(srl.quantity) FROM sales_return_lines srl
+		           JOIN sales_returns sr ON sr.id = srl.sales_return_id
+		           WHERE srl.original_line_id = l.id AND sr.status = 'POSTED'
+		       ), 0)
+		FROM sales_invoice_lines l
+		WHERE l.invoice_id = $1
+		ORDER BY l.line_no
+	`, invoiceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []InvoiceLineSummary
+	for rows.Next() {
+		var l InvoiceLineSummary
+		if err := rows.Scan(&l.ID, &l.ProductID, &l.ProductName, &l.SKU, &l.UOMCode,
+			&l.Quantity, &l.UnitPrice, &l.LineTotal, &l.AlreadyReturned); err != nil {
+			return nil, err
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
 }
 
 func scanInvoiceHeader(row pgx.Row) (*InvoiceHeader, error) {

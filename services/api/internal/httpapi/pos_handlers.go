@@ -18,6 +18,58 @@ type POSHandlers struct {
 	POS *pos.Service
 }
 
+// GetInvoiceForReturn looks an invoice up by its human-facing number (the
+// query param `number` — what's printed on the receipt) and returns its
+// lines with remaining-eligible-to-return quantities, for the returns
+// screen's line picker.
+func (h *POSHandlers) GetInvoiceForReturn(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	claims, ok := reqctx.Claims(r.Context())
+	if !ok {
+		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		return
+	}
+	invoiceNumber := r.URL.Query().Get("number")
+	if invoiceNumber == "" {
+		WriteError(w, reqID, CodeValidation, "query parameter 'number' is required")
+		return
+	}
+	result, err := h.POS.GetInvoiceForReturn(r.Context(), claims.TenantID, invoiceNumber)
+	if err != nil {
+		if errors.Is(err, pos.ErrNotFound) {
+			WriteError(w, reqID, CodeNotFound, "invoice not found")
+			return
+		}
+		WriteError(w, reqID, CodeInternal, "failed to fetch invoice: "+err.Error())
+		return
+	}
+
+	lines := make([]map[string]interface{}, 0, len(result.Lines))
+	for _, l := range result.Lines {
+		remaining := l.Quantity.Sub(l.AlreadyReturned)
+		lines = append(lines, map[string]interface{}{
+			"id":                 l.ID.String(),
+			"product_id":         l.ProductID.String(),
+			"product_name":       l.ProductName,
+			"sku":                l.SKU,
+			"uom_code":           l.UOMCode,
+			"quantity":           l.Quantity.StringFixed(3),
+			"unit_price":         l.UnitPrice.StringFixed(2),
+			"line_total":         l.LineTotal.StringFixed(2),
+			"already_returned":   l.AlreadyReturned.StringFixed(3),
+			"remaining_eligible": remaining.StringFixed(3),
+		})
+	}
+	header := result.Header
+	WriteJSON(w, http.StatusOK, map[string]interface{}{
+		"id":             header.ID.String(),
+		"invoice_number": header.InvoiceNumber,
+		"grand_total":    header.GrandTotal.StringFixed(2),
+		"status":         header.Status,
+		"lines":          lines,
+	})
+}
+
 type finalizeLineRequest struct {
 	ProductID         string  `json:"product_id"`
 	Quantity          string  `json:"quantity"`
@@ -31,13 +83,13 @@ type finalizeTenderRequest struct {
 }
 
 type finalizeRequest struct {
-	ClientTransactionID  string                  `json:"client_transaction_id"`
-	LocationID           string                  `json:"location_id"`
-	CustomerID           string                  `json:"customer_id,omitempty"`
-	Lines                []finalizeLineRequest   `json:"lines"`
-	Tenders              []finalizeTenderRequest `json:"tenders"`
-	OverrideCreditLimit  bool                    `json:"override_credit_limit,omitempty"`
-	OverrideReason       string                  `json:"override_reason,omitempty"`
+	ClientTransactionID string                  `json:"client_transaction_id"`
+	LocationID          string                  `json:"location_id"`
+	CustomerID          string                  `json:"customer_id,omitempty"`
+	Lines               []finalizeLineRequest   `json:"lines"`
+	Tenders             []finalizeTenderRequest `json:"tenders"`
+	OverrideCreditLimit bool                    `json:"override_credit_limit,omitempty"`
+	OverrideReason      string                  `json:"override_reason,omitempty"`
 }
 
 type finalizeResponse struct {

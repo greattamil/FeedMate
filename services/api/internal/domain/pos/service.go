@@ -31,6 +31,41 @@ func NewService(db *dbctx.DB) *Service {
 	return &Service{db: db}
 }
 
+// InvoiceForReturn is everything a cashier needs to pick which lines of a
+// past sale to return: the header (for display/context) and each line's
+// remaining eligible quantity (never more than sold minus already returned
+// via a POSTED return — PRD 9.7).
+type InvoiceForReturn struct {
+	Header *InvoiceHeader
+	Lines  []InvoiceLineSummary
+}
+
+// GetInvoiceForReturn looks an invoice up by its human-facing number (what's
+// on the printed receipt) and loads its lines with remaining-eligible
+// quantities — the read side of the returns flow. PostReturn itself
+// re-derives quantities inside its own transaction and never trusts a value
+// from an earlier read.
+func (s *Service) GetInvoiceForReturn(ctx context.Context, tenantID uuid.UUID, invoiceNumber string) (*InvoiceForReturn, error) {
+	var result InvoiceForReturn
+	err := s.db.WithTenantReadTx(ctx, tenantID, func(tx pgx.Tx) error {
+		header, err := GetByInvoiceNumber(ctx, tx, invoiceNumber)
+		if err != nil {
+			return err
+		}
+		lines, err := ListInvoiceLines(ctx, tx, header.ID)
+		if err != nil {
+			return err
+		}
+		result.Header = header
+		result.Lines = lines
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 type SaleLine struct {
 	ProductID         uuid.UUID
 	Quantity          decimal.Decimal
@@ -321,7 +356,7 @@ func (s *Service) FinalizeInvoice(ctx context.Context, tenantID, deviceID, userI
 				CustomerID: *req.CustomerID, DocumentType: "INVOICE", DocumentID: header.ID,
 				Debit: creditAmount, Credit: decimal.Zero,
 				Description: description,
-				DeviceID: &deviceID, CreatedByUserID: &userID,
+				DeviceID:    &deviceID, CreatedByUserID: &userID,
 			}); err != nil {
 				return fmt.Errorf("post customer ledger entry: %w", err)
 			}

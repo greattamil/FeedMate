@@ -526,15 +526,70 @@ one-off buttons.
 No new backend bugs found — this phase was pure Flutter UI on top of an
 already-solid, already-tested reports API.
 
+## Phase 24 — Flutter Procurement/GRN Screen
+
+The last major missing Flutter screen: receiving physical stock from a
+supplier (PRD 7.4). `procurement.Service.PostGRN` has existed with a
+complete, tested backend (weight/tare capture with the reasoned-override
+pattern, batch creation, supplier payable posting, accounting journal)
+since early in the project, but the only way to post a GRN was `curl`.
+This phase adds `GrnScreen` plus supporting `SupplierPickerScreen` and
+`ProductPickerScreen`, and wires it into the AppBar overflow menu gated on
+`grn.post`.
+
+| Area | Status | Evidence |
+|---|---|---|
+| `ProcurementApi` wrapping `POST /api/v1/procurement/grns` | **VERIFIED** | Exercises the existing, already-tested backend |
+| `GrnScreen`: supplier/location pickers, optional supplier document/vehicle no., multi-line entry (batch code, manufacture/expiry dates, quantity, unit cost, quality status, optional weight/tare capture with MEASURED/STANDARD_PER_BAG tare methods) | **VERIFIED, live** | Installed on the Android emulator and posted two real GRNs against the live server, confirmed in the database: `GRN-2627-0001` (25 × ₹820.00, supplier ledger credited ₹21,525.00 including 5% GST) and `GRN-2627-0002` (15 × ₹900.00, credited ₹14,175.00) — both created real `batches` rows and real `supplier_ledger_entries` |
+| Tare-override reasoned-exception retry (PRD A7): a line whose computed tare exceeds the tenant's configured threshold is rejected with `CONFLICT` unless the cashier supplies an explicit override reason | **VERIFIED** | Widget test drives the full reject → override-dialog → reason → retry-with-`override_tare:true` → success sequence, mirroring the EOD variance-reason pattern |
+| UOM and tax profile are taken from the product's own stored defaults (`default_purchase_uom_id`, `tax_profile_id`) rather than picked ad hoc per line | **VERIFIED** | `tax_profile_id` was missing from the product HTTP response entirely — added it to `productResponse`/`toProductResponse` (`product_handlers.go`), a small necessary backend addition, not scope creep: without it the client had no way to know a product's tax profile |
+| 2 widget tests (`test/grn_test.dart`) | **VERIFIED** | Happy-path post, and the tare-override retry sequence |
+
+### Two real bugs found live, both process/infrastructure failures rather than the GRN feature itself
+
+1. **The live test tenant had no GRN document-number series configured.** Posting the first real GRN through the app failed with an opaque `INTERNAL_ERROR`. Root cause: `document_series` (which every document-numbered domain — INVOICE/GRN/RETURN/CONTRA/RECEIPT — depends on) only had an `INVOICE` row for this tenant; `GRN` had never been seeded, because no admin/setup UI exists yet to manage it (tracked under "seed/config workflows" below) and integration tests insert their own row directly rather than exercising real setup. Fixed by inserting the missing row directly for this tenant so live verification could proceed — a real shop's onboarding will need document-series setup built before launch.
+2. **Found while diagnosing bug #1 — and a much bigger deal**: the actual cause above was completely invisible from the server logs. `WriteError`'s `CodeInternal` branch is specifically designed so every internal-error response gets logged server-side with the real detail (see its doc comment in `errors.go`) — but of ~30 `CodeInternal` call sites across every handler file (`auth`, `contra`, `customer`, `eod`, `location`, `payment`, `pos`, `procurement`, `product`, `quote`, `reports`, `returns`, `supplier`), all but a handful passed a fixed, uninformative string instead of including `err.Error()`, silently discarding the one piece of information needed to diagnose *any* internal error in this system. This was a latent, systemic observability bug — not something this phase introduced, but something this phase's own failure surfaced — and every one of those ~30 call sites has now been fixed to include the real error text (still never sent to the client; `WriteError` already redacts `message` to a generic string for `CodeInternal` before it leaves the server, so this is purely a server-side logging fix with zero client-facing change). Re-ran the full Go integration suite and all Flutter tests after the change; both still pass.
+
+## Phase 25 — Flutter Sales-Return Screen
+
+The very last screen on the "never miss a screen" list. Unlike every
+other phase's backend, this one genuinely needed new server code first:
+`returns.Service.PostReturn` was complete and tested, but nothing existed
+to let a client look an invoice up by its printed number and see which of
+its lines (and how much of each) are still eligible to return — without
+that, a cashier has no way to pick what to return. Added it, then built
+`ReturnScreen` on top.
+
+| Area | Status | Evidence |
+|---|---|---|
+| `pos.GetByInvoiceNumber` + `pos.ListInvoiceLines` (repository), `pos.Service.GetInvoiceForReturn`, `GET /api/v1/pos/invoices?number=...` (gated on `return.create`) | **VERIFIED** | New integration test (`TestGetInvoiceForReturn`) covers the found and not-found paths; remaining-eligible quantity is computed the same way `returns.AlreadyReturnedQty` does (sum of POSTED return lines against the original line), duplicated as inline SQL rather than importing the `returns` package, which would have created an import cycle (`returns` already imports `pos`) |
+| `ReturnsApi` wrapping the new lookup endpoint and `POST /api/v1/pos/returns` | **VERIFIED** | Exercises the (now two) backend endpoints |
+| `ReturnScreen`: look an invoice up by number, per-line return quantity capped at what's still eligible, condition status (SELLABLE restocks the original batch; anything else requires picking a quarantine location, enforced client-side before the server re-validates it), reason, refund method (CASH/UPI/CREDIT\_NOTE) | **VERIFIED, live** | Installed on the Android emulator and posted a real return against a real prior invoice (`INV-2627-00012`, 1 bag, ₹1260.00): the app showed `RET-2627-0001` posted with a ₹1260.00 refund, confirmed in `sales_returns` (`status=POSTED`, `refund_status=COMPLETED`, `total=1260.00`); re-looked the same invoice up afterward and confirmed the line correctly dropped out of eligibility ("Nothing left on this invoice is eligible to return") |
+| Overflow-menu entry gated on `return.create` | **VERIFIED** | Widget test extended to assert the item is hidden/shown correctly and navigates to `ReturnScreen` |
+| 2 widget tests (`test/returns_test.dart`) | **VERIFIED** | Sellable return happy path; non-sellable return's client-side quarantine-location requirement, including the reject-then-succeed sequence |
+
+### Two more real bugs found live — and proof the Phase 24 logging fix was worth doing
+
+Posting the first live return failed with the same opaque `INTERNAL_ERROR`
+Phase 24 hit for GRN — except this time the fix from that phase meant the
+real cause was sitting right in the server log: `allocate return number: no
+active RETURN document series configured for this financial year`. Same
+root cause as Phase 24's bug #1 (this tenant's `document_series` only ever
+had `INVOICE`, then `GRN`), same fix (insert the missing row) — but this
+time diagnosed in seconds from the log instead of requiring a rebuild with
+temporary debug logging. While fixing it, proactively seeded `CONTRA` and
+`RECEIPT` series for the same tenant too, since they have the identical gap
+and would otherwise fail the same way the first time anyone tries them
+live.
+
 ## Not Yet Started
 
 Customer/supplier aging (30/60/90-day buckets) and margin reports,
 per-device cash session tracking (schema exists, not wired up), a real
 payment provider adapter (production gateway credentials are the external
 dependency — the interface and sandbox are done), idempotency/outbox
-infrastructure for external side effects (printer/WhatsApp), the rest of
-the Flutter app (a procurement/GRN screen is the last major missing
-screen), a WhatsApp provider adapter,
+infrastructure for external side effects (printer/WhatsApp), a WhatsApp
+provider adapter,
 hardware adapters (scale/printer/scanner), seed/config workflows, CI/CD
 running for real on GitHub's infrastructure (the workflow exists — Phase
 19 — but has never actually executed there; there is no `git remote`),
@@ -549,20 +604,26 @@ reporting → DevOps).
 
 **NOT READY**, but substantially further along than a first read of "Not Yet
 Started" suggests — that list is what's missing, not a summary of what
-exists. As of Phase 23: the Go backend has verified, tested business domain
+exists. As of Phase 25: the Go backend has verified, tested business domain
 logic for auth/RBAC (including session-restore carrying real permissions,
 not just a login flag), product search, inventory/batches, accounting, POS
-sales (cash + credit + credit-limit override), procurement/GRN, returns,
-supplier master + payable ledger + manual payments, UPI payment intents +
+sales (cash + credit + credit-limit override), procurement/GRN, returns
+(including looking a past invoice up to pick what to return), supplier
+master + payable ledger + manual payments, UPI payment intents +
 webhooks, manual cash/bank Khata receipts, contra/buy-back, EOD cash
 reconciliation, reports, and device self-registration — all covered by
 integration tests against live PostgreSQL and exercised via real HTTP
-calls. The Flutter client is a real running app (not a mock): login,
-Tamil/phonetic product search, cart/checkout with cash and credit tenders,
-a customer picker, a Khata statement screen with receipt recording, a
-supplier payable screen with payment recording, an end-of-day cash
-reconciliation screen, a 4-tab reports/dashboard screen, encrypted offline
-storage with a working offline-sale-then-sync path, and an outbox
+calls. Every internal-error response across every handler now logs its
+real cause server-side (Phase 24 found this was silently broken for most
+of the API, and Phase 25 immediately proved the fix's worth — see above).
+The Flutter client is a real running app (not a mock) with every screen
+the master spec calls for now built: login, Tamil/phonetic product search,
+cart/checkout with cash and credit tenders, a customer picker, a Khata
+statement screen with receipt recording, a supplier payable screen with
+payment recording, a procurement/GRN receiving screen with weight/tare
+capture and reasoned tare-override, a sales-return screen, an end-of-day
+cash reconciliation screen, a 4-tab reports/dashboard screen, encrypted
+offline storage with a working offline-sale-then-sync path, and an outbox
 review/retry screen — all verified live on an Android emulator, including
 with connectivity actually disabled and across a real app restart. A CI
 workflow exists covering both stacks, though it has not yet run on real
@@ -571,7 +632,10 @@ honesty note).
 
 What's still genuinely missing, and why this isn't production-ready: no
 real payment gateway (sandbox only), no WhatsApp integration, no hardware
-adapters (scanner/scale/printer), no aging/margin reports, one Flutter
-screen still absent (procurement/GRN), no backup/DR tooling, CI that has
-never actually executed, and the test suite is integration + widget level
+adapters (scanner/scale/printer), no aging/margin reports, no admin/setup
+UI for tenant onboarding config like document-number series (Phases 24 and
+25 both hit this gap directly live — a real shop's onboarding needs this
+built before launch), no
+backup/DR tooling, CI that has never actually executed, and the test suite
+is integration + widget level
 only — no E2E, chaos, load, or security test suites exist yet.

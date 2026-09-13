@@ -390,3 +390,45 @@ func TestFinalizeInvoice_ConcurrentSalesNeverOversell(t *testing.T) {
 		t.Fatalf("expected 40 remaining (100 - 60), got %s", remaining)
 	}
 }
+
+func TestGetInvoiceForReturn(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	f := seedFixture(t, db)
+	svc := pos.NewService(db)
+
+	req := pos.FinalizeRequest{
+		ClientTransactionID: uuid.New(),
+		LocationID:          f.locationID,
+		Lines:               []pos.SaleLine{{ProductID: f.productID, Quantity: decimal.RequireFromString("3")}},
+		Tenders:             []pos.Tender{{Method: "CASH", Amount: decimal.RequireFromString("3780.00")}},
+	}
+	result, err := svc.FinalizeInvoice(context.Background(), f.tenantID, f.deviceID, f.userID, req)
+	if err != nil {
+		t.Fatalf("finalize: %v", err)
+	}
+
+	found, err := svc.GetInvoiceForReturn(context.Background(), f.tenantID, result.InvoiceNumber)
+	if err != nil {
+		t.Fatalf("GetInvoiceForReturn: %v", err)
+	}
+	if found.Header.ID != result.InvoiceID {
+		t.Fatalf("expected header id %s, got %s", result.InvoiceID, found.Header.ID)
+	}
+	if len(found.Lines) != 1 {
+		t.Fatalf("expected 1 line, got %d", len(found.Lines))
+	}
+	line := found.Lines[0]
+	if !line.Quantity.Equal(decimal.RequireFromString("3")) {
+		t.Fatalf("expected quantity 3, got %s", line.Quantity)
+	}
+	if !line.AlreadyReturned.Equal(decimal.Zero) {
+		t.Fatalf("expected nothing returned yet, got %s", line.AlreadyReturned)
+	}
+
+	t.Run("an unknown invoice number is not found", func(t *testing.T) {
+		if _, err := svc.GetInvoiceForReturn(context.Background(), f.tenantID, "NO-SUCH-INVOICE"); !errors.Is(err, pos.ErrNotFound) {
+			t.Fatalf("expected ErrNotFound, got: %v", err)
+		}
+	})
+}

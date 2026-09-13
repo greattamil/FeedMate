@@ -122,6 +122,7 @@ func main() {
 
 			r.With(appmw.RequirePermission("pos.sell")).Post("/pos/quote", posHandlers.Quote)
 			r.With(appmw.RequirePermission("pos.sell")).Post("/pos/invoices", posHandlers.FinalizeInvoice)
+			r.With(appmw.RequirePermission("return.create")).Get("/pos/invoices", posHandlers.GetInvoiceForReturn)
 
 			r.With(appmw.RequirePermission("pos.sell")).Get("/locations", locationHandlers.List)
 

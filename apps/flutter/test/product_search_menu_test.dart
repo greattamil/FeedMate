@@ -15,10 +15,12 @@ import 'package:feedmate_app/core/auth_session.dart';
 import 'package:feedmate_app/core/local_db.dart';
 import 'package:feedmate_app/core/secure_storage.dart';
 import 'package:feedmate_app/features/khata/khata_customer_list_screen.dart';
+import 'package:feedmate_app/features/procurement/grn_screen.dart';
 import 'package:feedmate_app/features/pos/cart_model.dart';
 import 'package:feedmate_app/features/pos/product_repository.dart';
 import 'package:feedmate_app/features/pos/product_search_screen.dart';
 import 'package:feedmate_app/features/reports/reports_screen.dart';
+import 'package:feedmate_app/features/returns/return_screen.dart';
 import 'package:feedmate_app/features/supplier/supplier_list_screen.dart';
 
 import 'fake_local_db.dart';
@@ -67,6 +69,8 @@ void main() {
 
     expect(find.byKey(const Key('menu_item_khata')), findsOneWidget);
     expect(find.byKey(const Key('menu_item_suppliers')), findsNothing);
+    expect(find.byKey(const Key('menu_item_grn')), findsNothing);
+    expect(find.byKey(const Key('menu_item_return')), findsNothing);
     expect(find.byKey(const Key('menu_item_reports')), findsNothing);
     expect(find.byKey(const Key('menu_item_eod')), findsNothing);
     expect(find.byKey(const Key('menu_item_pair_device')), findsNothing);
@@ -80,7 +84,15 @@ void main() {
     });
     final session = await _loggedInSession(
       httpClient: client,
-      permissions: ['pos.sell', 'supplier.manage', 'report.view', 'cash.eod_close', 'device.manage'],
+      permissions: [
+        'pos.sell',
+        'supplier.manage',
+        'grn.post',
+        'return.create',
+        'report.view',
+        'cash.eod_close',
+        'device.manage',
+      ],
     );
 
     await tester.pumpWidget(_wrap(httpClient: client, session: session));
@@ -90,6 +102,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('menu_item_khata')), findsOneWidget);
     expect(find.byKey(const Key('menu_item_suppliers')), findsOneWidget);
+    expect(find.byKey(const Key('menu_item_grn')), findsOneWidget);
+    expect(find.byKey(const Key('menu_item_return')), findsOneWidget);
     expect(find.byKey(const Key('menu_item_reports')), findsOneWidget);
     expect(find.byKey(const Key('menu_item_eod')), findsOneWidget);
     expect(find.byKey(const Key('menu_item_pair_device')), findsOneWidget);
@@ -97,6 +111,22 @@ void main() {
     await tester.tap(find.byKey(const Key('menu_item_reports')));
     await tester.pumpAndSettle();
     expect(find.byType(ReportsScreen), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('more_menu_button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('menu_item_grn')));
+    await tester.pumpAndSettle();
+    expect(find.byType(GrnScreen), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('more_menu_button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('menu_item_return')));
+    await tester.pumpAndSettle();
+    expect(find.byType(ReturnScreen), findsOneWidget);
     await tester.pageBack();
     await tester.pumpAndSettle();
 

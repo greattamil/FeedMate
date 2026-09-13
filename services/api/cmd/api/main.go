@@ -79,6 +79,7 @@ func main() {
 	paymentSvc := payment.NewService(db, provider)
 
 	authHandlers := &httpapi.AuthHandlers{Identity: identitySvc}
+	staffHandlers := &httpapi.StaffHandlers{Identity: identitySvc}
 	healthHandlers := &httpapi.HealthHandlers{DB: db}
 	productHandlers := &httpapi.ProductHandlers{Product: productSvc}
 	posHandlers := &httpapi.POSHandlers{POS: posSvc}
@@ -145,6 +146,13 @@ func main() {
 			r.With(appmw.RequirePermission("device.manage")).Post("/devices/pairing-codes", deviceHandlers.GeneratePairingCode)
 			r.With(appmw.RequirePermission("device.manage")).Get("/devices", deviceHandlers.List)
 			r.With(appmw.RequirePermission("device.manage")).Post("/devices/{id}/revoke", deviceHandlers.Revoke)
+
+			r.With(appmw.RequirePermission("user.manage")).Post("/users", staffHandlers.CreateUser)
+			r.With(appmw.RequirePermission("user.manage")).Get("/users", staffHandlers.ListUsers)
+			r.With(appmw.RequirePermission("user.manage")).Get("/users/{id}", staffHandlers.GetUser)
+			r.With(appmw.RequirePermission("user.manage")).Post("/users/{id}/status", staffHandlers.SetUserStatus)
+			r.With(appmw.RequirePermission("user.manage")).Put("/users/{id}/roles", staffHandlers.SetUserRoles)
+			r.With(appmw.RequirePermission("user.manage")).Get("/roles", staffHandlers.ListRoles)
 
 			r.With(appmw.RequirePermission("grn.post")).Post("/procurement/grns", procurementHandlers.PostGRN)
 			r.With(appmw.RequirePermission("grn.post")).Get("/procurement/grns", procurementHandlers.ListGRNs)

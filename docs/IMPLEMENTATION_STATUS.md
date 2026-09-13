@@ -830,6 +830,26 @@ Full Flutter suite: 79 tests, all passing. Full Go integration suite: 14
 packages, all passing (the fixed package included). `flutter analyze`/
 `go vet` clean. No live emulator verification performed for this phase.
 
+## Phase 37 — Staff / User Management (Backend + Flutter)
+
+Before this phase there was **no way to create a staff account or assign
+roles from the app at all** — the `identity` domain only had `Login`,
+`Refresh`, and `Logout`. Every user/role in every environment (including
+the seeded test fixtures used throughout this project's own integration
+tests) had to be inserted directly into the database.
+
+| Area | Status | Evidence |
+|---|---|---|
+| `identity.Service.CreateUser` / `ListUsers` / `GetUserDetail` / `SetUserStatus` / `ListRoles` / `SetUserRoles` | **VERIFIED** | New integration tests: `TestCreateUser_ListsAndAssignsRolesAndRejectsDuplicateUsername`, `TestSetUserStatus_DeactivatedUserCannotLogIn` (end-to-end: login succeeds, deactivate, login now rejected, reactivate, login succeeds again), `TestSetUserRoles_ReplacesFullAssignmentSet` (full-replace semantics, including clearing to zero roles) — all run against live PostgreSQL |
+| `SetUserStatus` never hard-deletes (historical invoices/GRNs/audit entries reference the user as actor); `SetUserRoles` uses the same full-replace convention as `product.Update`'s barcodes/aliases rather than incremental grant/revoke calls | **VERIFIED** | Same tests above |
+| `POST/GET /api/v1/users`, `GET /api/v1/users/{id}`, `POST /api/v1/users/{id}/status`, `PUT /api/v1/users/{id}/roles`, `GET /api/v1/roles` — all gated `user.manage`; self-deactivation explicitly rejected in the handler (the service layer has no concept of "the caller", only the target user) | **VERIFIED** | `go build`/`go vet` clean |
+| `StaffListScreen` (search + Add Staff FAB), `StaffFormDialog` (username/password/display name/contact + role chips, roles loaded from the live server), `StaffDetailScreen` (status toggle with confirmation, role chips toggle instantly) | **VERIFIED** | Wired into the overflow menu gated on `user.manage` |
+| 4 new widget tests (`test/staff_test.dart`) | **VERIFIED** | List with status, create with roles posts the exact body, short-password client-side rejection, detail screen's status toggle + role chip both post the exact bodies |
+
+Full Flutter suite: 83 tests, all passing. Full Go integration suite: 14
+packages, all passing. `flutter analyze`/`go vet` clean. No live emulator
+verification performed for this phase.
+
 ## Not Yet Started
 
 Customer/supplier aging (30/60/90-day buckets) and margin reports,

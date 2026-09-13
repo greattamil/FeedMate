@@ -19,18 +19,18 @@ const (
 )
 
 var (
-	ErrInvalidCredentials = errors.New("invalid credentials")
-	ErrAccountLocked      = errors.New("account locked")
-	ErrDeviceNotActive    = errors.New("device not registered or not active")
+	ErrInvalidCredentials  = errors.New("invalid credentials")
+	ErrAccountLocked       = errors.New("account locked")
+	ErrDeviceNotActive     = errors.New("device not registered or not active")
 	ErrRefreshTokenInvalid = errors.New("refresh token invalid or expired")
 )
 
 type Service struct {
-	db          *dbctx.DB
-	signingKey  string
-	accessTTL   time.Duration
-	refreshTTL  time.Duration
-	bcryptCost  int
+	db         *dbctx.DB
+	signingKey string
+	accessTTL  time.Duration
+	refreshTTL time.Duration
+	bcryptCost int
 }
 
 func NewService(db *dbctx.DB, signingKey string, accessTTL, refreshTTL time.Duration, bcryptCost int) *Service {
@@ -207,5 +207,176 @@ func (s *Service) Logout(ctx context.Context, tenantID uuid.UUID, refreshToken s
 	refreshHash := auth.HashRefreshToken(refreshToken)
 	return s.db.WithTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
 		return RevokeSessionByHash(ctx, tx, refreshHash)
+	})
+}
+
+var ErrValidation = errors.New("validation error")
+
+type CreateUserInput struct {
+	Username    string
+	Password    string
+	DisplayName string
+	Phone       string
+	Email       string
+	RoleIDs     []uuid.UUID
+}
+
+// CreateUser registers a new staff account and assigns it zero or more
+// roles in the same transaction. Usernames are checked for availability
+// tenant-scoped here, then relied on to actually collide at the DB level
+// if two concurrent creates race (there is no unique index on username
+// alone across tenants, matching how Login already looks it up).
+func (s *Service) CreateUser(ctx context.Context, tenantID uuid.UUID, in CreateUserInput) (uuid.UUID, error) {
+	if in.Username == "" {
+		return uuid.Nil, fmt.Errorf("%w: username is required", ErrValidation)
+	}
+	if in.DisplayName == "" {
+		return uuid.Nil, fmt.Errorf("%w: display_name is required", ErrValidation)
+	}
+	if len(in.Password) < 8 {
+		return uuid.Nil, fmt.Errorf("%w: password must be at least 8 characters", ErrValidation)
+	}
+
+	hash, err := auth.HashPassword(in.Password, s.bcryptCost)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("hash password: %w", err)
+	}
+
+	var userID uuid.UUID
+	err = s.db.WithTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
+		if _, err := FindUserByUsername(ctx, tx, in.Username); err == nil {
+			return ErrUsernameTaken
+		} else if !errors.Is(err, ErrNotFound) {
+			return err
+		}
+		id, err := InsertUser(ctx, tx, tenantID, in.Username, hash, in.DisplayName, in.Phone, in.Email)
+		if err != nil {
+			return fmt.Errorf("insert user: %w", err)
+		}
+		for _, roleID := range in.RoleIDs {
+			if err := AssignRole(ctx, tx, tenantID, id, roleID); err != nil {
+				return fmt.Errorf("assign role %s: %w", roleID, err)
+			}
+		}
+		userID = id
+		return nil
+	})
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return userID, nil
+}
+
+type UserListPage struct {
+	Users []UserSummary
+	Total int
+}
+
+func (s *Service) ListUsers(ctx context.Context, tenantID uuid.UUID, query string, limit, offset int) (*UserListPage, error) {
+	var page UserListPage
+	err := s.db.WithTenantReadTx(ctx, tenantID, func(tx pgx.Tx) error {
+		users, total, err := ListUsers(ctx, tx, query, limit, offset)
+		if err != nil {
+			return err
+		}
+		page.Users = users
+		page.Total = total
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &page, nil
+}
+
+// UserDetail is a staff member's full profile plus their currently
+// assigned role ids, for the staff detail/edit screen.
+type UserDetail struct {
+	User    UserSummary
+	RoleIDs []uuid.UUID
+}
+
+func (s *Service) GetUserDetail(ctx context.Context, tenantID, userID uuid.UUID) (*UserDetail, error) {
+	var detail UserDetail
+	err := s.db.WithTenantReadTx(ctx, tenantID, func(tx pgx.Tx) error {
+		user, err := GetUserSummaryByID(ctx, tx, userID)
+		if err != nil {
+			return err
+		}
+		detail.User = *user
+		roleIDs, err := ListRolesForUser(ctx, tx, userID)
+		if err != nil {
+			return err
+		}
+		detail.RoleIDs = roleIDs
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &detail, nil
+}
+
+// SetUserStatus activates or deactivates a staff account — never a hard
+// delete (see repository.SetUserStatus's doc comment). A shop owner cannot
+// deactivate their own account through this path by omission — callers
+// (the HTTP handler) are expected to reject self-deactivation explicitly,
+// since nothing here has enough context to know "self" from any other user.
+func (s *Service) SetUserStatus(ctx context.Context, tenantID, userID uuid.UUID, active bool) error {
+	status := "ACTIVE"
+	if !active {
+		status = "DISABLED"
+	}
+	return s.db.WithTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
+		return SetUserStatus(ctx, tx, userID, status)
+	})
+}
+
+func (s *Service) ListRoles(ctx context.Context, tenantID uuid.UUID) ([]Role, error) {
+	var roles []Role
+	err := s.db.WithTenantReadTx(ctx, tenantID, func(tx pgx.Tx) error {
+		var err error
+		roles, err = ListRoles(ctx, tx)
+		return err
+	})
+	return roles, err
+}
+
+// SetUserRoles replaces a user's full set of role assignments with exactly
+// the given list — the same full-replace convention used for a product's
+// barcodes/aliases (see product.Service.Update), simpler for a form to
+// reason about than issuing incremental grant/revoke calls.
+func (s *Service) SetUserRoles(ctx context.Context, tenantID, userID uuid.UUID, roleIDs []uuid.UUID) error {
+	return s.db.WithTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
+		if _, err := GetUserByID(ctx, tx, userID); err != nil {
+			return err
+		}
+		existing, err := ListRolesForUser(ctx, tx, userID)
+		if err != nil {
+			return err
+		}
+		desired := make(map[uuid.UUID]bool, len(roleIDs))
+		for _, id := range roleIDs {
+			desired[id] = true
+		}
+		current := make(map[uuid.UUID]bool, len(existing))
+		for _, id := range existing {
+			current[id] = true
+		}
+		for _, id := range existing {
+			if !desired[id] {
+				if err := RevokeRole(ctx, tx, userID, id); err != nil {
+					return err
+				}
+			}
+		}
+		for _, id := range roleIDs {
+			if !current[id] {
+				if err := AssignRole(ctx, tx, tenantID, userID, id); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
 	})
 }

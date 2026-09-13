@@ -79,6 +79,89 @@ func (h *SupplierHandlers) Create(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusCreated, supplierToJSON(created))
 }
 
+type updateSupplierRequest struct {
+	Name             string `json:"name"`
+	TradeName        string `json:"trade_name,omitempty"`
+	GSTIN            string `json:"gstin,omitempty"`
+	Phone            string `json:"phone,omitempty"`
+	Email            string `json:"email,omitempty"`
+	PaymentTermsDays int    `json:"payment_terms_days,omitempty"`
+}
+
+// Update revises a supplier's editable fields. supplier_code is immutable
+// and not accepted here — see supplier.Update's doc comment.
+func (h *SupplierHandlers) Update(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	claims, ok := reqctx.Claims(r.Context())
+	if !ok {
+		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid supplier id")
+		return
+	}
+	var req updateSupplierRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid request body")
+		return
+	}
+
+	updated, err := h.Supplier.Update(r.Context(), claims.TenantID, id, supplier.UpdateInput{
+		Name: req.Name, TradeName: req.TradeName, GSTIN: req.GSTIN,
+		Phone: req.Phone, Email: req.Email, PaymentTermsDays: req.PaymentTermsDays,
+	})
+	if err != nil {
+		if errors.Is(err, supplier.ErrValidation) {
+			WriteError(w, reqID, CodeValidation, err.Error())
+			return
+		}
+		if errors.Is(err, supplier.ErrNotFound) {
+			WriteError(w, reqID, CodeNotFound, "supplier not found")
+			return
+		}
+		WriteError(w, reqID, CodeInternal, "failed to update supplier: "+err.Error())
+		return
+	}
+	WriteJSON(w, http.StatusOK, supplierToJSON(updated))
+}
+
+type setSupplierStatusRequest struct {
+	Active bool `json:"active"`
+}
+
+// SetStatus activates or deactivates a supplier — never a hard delete, since
+// historical GRN/payment rows reference it (mirrors ProductHandlers.SetStatus).
+func (h *SupplierHandlers) SetStatus(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	claims, ok := reqctx.Claims(r.Context())
+	if !ok {
+		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid supplier id")
+		return
+	}
+	var req setSupplierStatusRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid request body")
+		return
+	}
+	updated, err := h.Supplier.SetActive(r.Context(), claims.TenantID, id, req.Active)
+	if err != nil {
+		if errors.Is(err, supplier.ErrNotFound) {
+			WriteError(w, reqID, CodeNotFound, "supplier not found")
+			return
+		}
+		WriteError(w, reqID, CodeInternal, "failed to update supplier status: "+err.Error())
+		return
+	}
+	WriteJSON(w, http.StatusOK, supplierToJSON(updated))
+}
+
 func (h *SupplierHandlers) List(w http.ResponseWriter, r *http.Request) {
 	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())

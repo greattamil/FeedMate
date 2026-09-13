@@ -170,6 +170,8 @@ func main() {
 			r.Get("/suppliers/{id}", supplierHandlers.Get)
 			r.Get("/suppliers/{id}/ledger", supplierHandlers.Ledger)
 			r.With(appmw.RequirePermission("supplier.manage")).Post("/suppliers", supplierHandlers.Create)
+			r.With(appmw.RequirePermission("supplier.manage")).Put("/suppliers/{id}", supplierHandlers.Update)
+			r.With(appmw.RequirePermission("supplier.manage")).Post("/suppliers/{id}/status", supplierHandlers.SetStatus)
 
 			// Further authenticated routes (inventory, etc.) are registered
 			// here as each domain module is implemented.

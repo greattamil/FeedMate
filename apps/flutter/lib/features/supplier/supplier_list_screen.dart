@@ -5,11 +5,13 @@ import 'package:provider/provider.dart';
 
 import '../../core/api_client.dart';
 import '../../core/api_error.dart';
+import '../../core/auth_session.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_decorations.dart';
 import '../../core/theme/app_typography.dart';
 import 'supplier_api.dart';
 import 'supplier_detail_screen.dart';
+import 'supplier_form_dialog.dart';
 
 /// Modernized Supplier Directory for FeedMate.
 class SupplierListScreen extends StatefulWidget {
@@ -66,13 +68,53 @@ class _SupplierListScreenState extends State<SupplierListScreen> {
     super.dispose();
   }
 
+  Future<void> _addSupplier() async {
+    final result = await showDialog<SupplierFormResult>(
+      context: context,
+      builder: (context) => const SupplierFormDialog(),
+    );
+    if (result == null) return;
+
+    try {
+      final api = SupplierApi(context.read<ApiClient>());
+      await api.create(
+        supplierCode: result.supplierCode!,
+        name: result.name,
+        tradeName: result.tradeName,
+        gstin: result.gstin,
+        phone: result.phone,
+        email: result.email,
+        paymentTermsDays: result.paymentTermsDays,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${result.name} added to supplier directory')),
+      );
+      await _search(_controller.text);
+    } on ApiError catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final session = context.watch<AuthSession>();
+    final canManage = session.hasPermission('supplier.manage');
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
         title: const Text('Feed Suppliers & Mills', style: AppTypography.headline),
       ),
+      floatingActionButton: canManage
+          ? FloatingActionButton.extended(
+              key: const Key('add_supplier_fab'),
+              onPressed: _addSupplier,
+              icon: const Icon(Icons.add_business_rounded),
+              label: const Text('Add Supplier'),
+              backgroundColor: AppColors.primary,
+            )
+          : null,
       body: Column(
         children: [
           Container(

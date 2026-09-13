@@ -197,3 +197,103 @@ func TestSupplierListLedger_ReturnsEntriesNewestFirstAndRejectsUnknownSupplier(t
 		t.Fatalf("expected ErrNotFound for a nonexistent supplier, got: %v", err)
 	}
 }
+
+func TestSupplierUpdate_RevisesFieldsButNeverSupplierCode(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	tenantID := seedTenant(t, db)
+	svc := supplier.NewService(db)
+
+	created, err := svc.Create(context.Background(), tenantID, supplier.CreateInput{
+		SupplierCode: "UPD001", Name: "Original Mill", Phone: "9000000001", PaymentTermsDays: 15,
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	updated, err := svc.Update(context.Background(), tenantID, created.ID, supplier.UpdateInput{
+		Name: "Renamed Mill", TradeName: "Renamed Trade Co", GSTIN: "29ZZZZZ0000Z1Z1",
+		Phone: "9000000002", Email: "renamed@example.com", PaymentTermsDays: 45,
+	})
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if updated.SupplierCode != "UPD001" {
+		t.Fatalf("supplier_code must never change on update, got %q", updated.SupplierCode)
+	}
+	if updated.Name != "Renamed Mill" || updated.PaymentTermsDays != 45 || updated.Phone == nil || *updated.Phone != "9000000002" {
+		t.Fatalf("expected revised fields, got %+v", updated)
+	}
+	if updated.TradeName == nil || *updated.TradeName != "Renamed Trade Co" {
+		t.Fatalf("expected trade_name to be set, got %+v", updated.TradeName)
+	}
+
+	fetched, _, err := svc.GetByID(context.Background(), tenantID, created.ID)
+	if err != nil {
+		t.Fatalf("get by id: %v", err)
+	}
+	if fetched.Name != "Renamed Mill" {
+		t.Fatalf("expected persisted rename, got %q", fetched.Name)
+	}
+
+	if _, err := svc.Update(context.Background(), tenantID, created.ID, supplier.UpdateInput{Name: "", PaymentTermsDays: 0}); !errors.Is(err, supplier.ErrValidation) {
+		t.Fatalf("expected ErrValidation for missing name, got: %v", err)
+	}
+	if _, err := svc.Update(context.Background(), tenantID, created.ID, supplier.UpdateInput{Name: "X", PaymentTermsDays: -1}); !errors.Is(err, supplier.ErrValidation) {
+		t.Fatalf("expected ErrValidation for negative payment_terms_days, got: %v", err)
+	}
+	if _, err := svc.Update(context.Background(), tenantID, uuid.New(), supplier.UpdateInput{Name: "X"}); !errors.Is(err, supplier.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for a nonexistent supplier, got: %v", err)
+	}
+}
+
+func TestSupplierSetActive_NeverHardDeletes(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	tenantID := seedTenant(t, db)
+	svc := supplier.NewService(db)
+
+	created, err := svc.Create(context.Background(), tenantID, supplier.CreateInput{SupplierCode: "DEACT01", Name: "Deactivate Test Mill"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	deactivated, err := svc.SetActive(context.Background(), tenantID, created.ID, false)
+	if err != nil {
+		t.Fatalf("deactivate: %v", err)
+	}
+	if deactivated.Status != "INACTIVE" {
+		t.Fatalf("expected INACTIVE, got %s", deactivated.Status)
+	}
+
+	// Still findable by ID — a deactivation is a status flip, never a
+	// hard delete, since historical GRN/payment rows reference this row.
+	fetched, _, err := svc.GetByID(context.Background(), tenantID, created.ID)
+	if err != nil {
+		t.Fatalf("get by id after deactivate: %v", err)
+	}
+	if fetched.Status != "INACTIVE" {
+		t.Fatalf("expected persisted INACTIVE status, got %s", fetched.Status)
+	}
+
+	// An inactive supplier is excluded from the default active-only List.
+	active, err := svc.List(context.Background(), tenantID, "Deactivate Test Mill", 10)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(active) != 0 {
+		t.Fatalf("expected deactivated supplier to be excluded from List, got %+v", active)
+	}
+
+	reactivated, err := svc.SetActive(context.Background(), tenantID, created.ID, true)
+	if err != nil {
+		t.Fatalf("reactivate: %v", err)
+	}
+	if reactivated.Status != "ACTIVE" {
+		t.Fatalf("expected ACTIVE after reactivation, got %s", reactivated.Status)
+	}
+
+	if _, err := svc.SetActive(context.Background(), tenantID, uuid.New(), false); !errors.Is(err, supplier.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for a nonexistent supplier, got: %v", err)
+	}
+}

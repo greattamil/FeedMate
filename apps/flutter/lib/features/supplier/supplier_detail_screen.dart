@@ -5,7 +5,9 @@ import 'package:provider/provider.dart';
 
 import '../../core/api_client.dart';
 import '../../core/api_error.dart';
+import '../../core/auth_session.dart';
 import 'supplier_api.dart';
+import 'supplier_form_dialog.dart';
 
 /// A supplier's payable statement — the mirror image of KhataDetailScreen:
 /// a credit here increases what the shop owes the supplier (e.g. a GRN), a
@@ -86,11 +88,99 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
     }
   }
 
+  Future<void> _editSupplier() async {
+    final detail = _detail;
+    if (detail == null) return;
+    final result = await showDialog<SupplierFormResult>(
+      context: context,
+      builder: (context) => SupplierFormDialog(existing: detail),
+    );
+    if (result == null) return;
+
+    try {
+      final api = SupplierApi(context.read<ApiClient>());
+      await api.update(
+        supplierId: widget.supplierId,
+        name: result.name,
+        tradeName: result.tradeName,
+        gstin: result.gstin,
+        phone: result.phone,
+        email: result.email,
+        paymentTermsDays: result.paymentTermsDays,
+      );
+      if (!mounted) return;
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Supplier updated')));
+    } on ApiError catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
+  Future<void> _toggleActive() async {
+    final detail = _detail;
+    if (detail == null) return;
+    final makeActive = !detail.active;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(makeActive ? 'Reactivate Supplier?' : 'Deactivate Supplier?'),
+        content: Text(makeActive
+            ? '${detail.name} will be available again for new purchases.'
+            : '${detail.name} will be hidden from supplier pickers. Existing GRNs and payments are unaffected.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+          FilledButton(
+            key: const Key('supplier_toggle_active_confirm'),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(makeActive ? 'Reactivate' : 'Deactivate'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      final api = SupplierApi(context.read<ApiClient>());
+      await api.setActive(widget.supplierId, makeActive);
+      if (!mounted) return;
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(makeActive ? 'Supplier reactivated' : 'Supplier deactivated')),
+      );
+    } on ApiError catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final detail = _detail;
+    final session = context.watch<AuthSession>();
+    final canManage = session.hasPermission('supplier.manage');
     return Scaffold(
-      appBar: AppBar(title: Text(detail?.name ?? 'Supplier')),
+      appBar: AppBar(
+        title: Text(detail?.name ?? 'Supplier'),
+        actions: [
+          if (detail != null && canManage) ...[
+            IconButton(
+              key: const Key('edit_supplier_button'),
+              onPressed: _editSupplier,
+              icon: const Icon(Icons.edit_note_rounded),
+              tooltip: 'Edit Supplier',
+            ),
+            IconButton(
+              key: const Key('toggle_supplier_active_button'),
+              onPressed: _toggleActive,
+              icon: Icon(detail.active ? Icons.block_rounded : Icons.check_circle_outline_rounded),
+              tooltip: detail.active ? 'Deactivate Supplier' : 'Reactivate Supplier',
+            ),
+          ],
+        ],
+      ),
       floatingActionButton: detail == null
           ? null
           : FloatingActionButton.extended(

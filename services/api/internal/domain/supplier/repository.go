@@ -56,6 +56,41 @@ func Create(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, s *Supplier) err
 	return row.Scan(&s.ID, &s.Status)
 }
 
+// Update revises a supplier's editable fields. supplier_code is never
+// touched here — like product.Update's SKU, it is the immutable business
+// key referenced by every historical GRN/payment/ledger row.
+func Update(ctx context.Context, tx pgx.Tx, s *Supplier) error {
+	tag, err := tx.Exec(ctx, `
+		UPDATE suppliers
+		SET legal_name = $2, trade_name = $3, gstin = $4, phone = $5, email = $6, payment_terms_days = $7
+		WHERE id = $1
+	`, s.ID, s.Name, s.TradeName, s.GSTIN, s.Phone, s.Email, s.PaymentTermsDays)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetActive activates or deactivates a supplier. Never a hard DELETE — a
+// deactivated supplier is still referenced by historical GRN/payment rows.
+func SetActive(ctx context.Context, tx pgx.Tx, id uuid.UUID, active bool) error {
+	status := "ACTIVE"
+	if !active {
+		status = "INACTIVE"
+	}
+	tag, err := tx.Exec(ctx, `UPDATE suppliers SET status = $2 WHERE id = $1`, id, status)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // List returns active suppliers, optionally filtered by a case-insensitive
 // substring match on name/supplier_code/phone/GSTIN.
 func List(ctx context.Context, tx pgx.Tx, query string, limit int) ([]Supplier, error) {

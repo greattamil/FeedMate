@@ -679,6 +679,35 @@ Go domain work first, unlike customer), and **split/multi-tender POS
 billing** (backend already supports an array of tenders; `cart_screen.dart`
 only allows a single `CASH`/`CREDIT` selection).
 
+## Phase 29 — Supplier Create + Edit + Deactivate (Backend + Flutter)
+
+Unlike customer, supplier had **no** `Update` method at all — not even for
+payment terms — and no way to register a new supplier or deactivate one
+from the app. This phase built the missing backend support from scratch,
+mirroring `product.Update`/`product.SetActive`'s conventions, then wired
+the Flutter UI.
+
+| Area | Status | Evidence |
+|---|---|---|
+| `supplier.Update`, `supplier.SetActive` (repository + service) — `supplier_code` is never touched by Update, the immutable business key referenced by every historical GRN/payment row; `SetActive` is a status flip, never a hard delete | **VERIFIED** | New integration tests: `TestSupplierUpdate_RevisesFieldsButNeverSupplierCode` (renames every editable field, confirms `supplier_code` unchanged, confirms persistence via a fresh `GetByID`, rejects empty name / negative payment terms / unknown supplier) and `TestSupplierSetActive_NeverHardDeletes` (deactivate → still fetchable by ID with `INACTIVE` status → excluded from the default active-only `List` → reactivate → rejects unknown supplier). Both run against live PostgreSQL via `scripts/test-integration.sh` |
+| `PUT /api/v1/suppliers/{id}`, `POST /api/v1/suppliers/{id}/status` — both gated `supplier.manage`, matching the existing `Create` route's gate | **VERIFIED** | Handlers mirror `ProductHandlers.Update`/`SetStatus` exactly; `go build`/`go vet` clean |
+| `SupplierApi.create()/update()/setActive()` (Flutter) | **VERIFIED** | All three re-fetch via `getDetail()` after the write, matching the established Customer/Product pattern, since the write responses (`supplierToJSON`) omit `outstanding_payable` (only ever computed live from the ledger) |
+| "Add Supplier" FAB on `SupplierListScreen`, "Edit Supplier" + "Deactivate/Reactivate" (with a confirmation dialog) AppBar icons on `SupplierDetailScreen`, all gated on `supplier.manage` | **VERIFIED** | Shared `SupplierFormDialog` used for both create and edit; in edit mode `supplier_code` is shown but disabled, mirroring `ProductFormScreen`'s SKU-immutability convention |
+| 6 new widget tests (`test/supplier_test.dart`, 9 total in the file, all passing) | **VERIFIED** | FAB/icons hidden without permission, create posts the exact body and refreshes the list, required-field validation, edit posts the exact body confirming `supplier_code` is never sent and the code field is disabled, deactivate requires confirmation and posts `{"active": false}` |
+
+No live emulator verification was performed for this phase either (same
+caveat as Phase 28) — correctness rests on: the new Go domain code passing
+integration tests against live PostgreSQL, `go build`/`go vet` clean, the
+full Flutter widget-test suite (63 tests, all passing), and `flutter
+analyze` clean (only pre-existing info-level lints). This should be
+live-verified on the emulator before being called fully done to the same
+standard as Phases 24/25/27.
+
+Phase A from the gap-analysis report (Customer + Supplier CRUD) is now
+complete. Still open: **split/multi-tender POS billing** (backend already
+supports an array of tenders; `cart_screen.dart` only allows a single
+`CASH`/`CREDIT` selection) — the next recommended P0 item.
+
 ## Not Yet Started
 
 Customer/supplier aging (30/60/90-day buckets) and margin reports,

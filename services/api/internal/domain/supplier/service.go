@@ -65,6 +65,82 @@ func (s *Service) Create(ctx context.Context, tenantID uuid.UUID, in CreateInput
 	return sup, nil
 }
 
+type UpdateInput struct {
+	Name             string
+	TradeName        string
+	GSTIN            string
+	Phone            string
+	Email            string
+	PaymentTermsDays int
+}
+
+// Update revises a supplier's editable fields (never supplier_code — see
+// repository.Update's doc comment).
+func (s *Service) Update(ctx context.Context, tenantID, supplierID uuid.UUID, in UpdateInput) (*Supplier, error) {
+	if in.Name == "" {
+		return nil, fmt.Errorf("%w: name is required", ErrValidation)
+	}
+	if in.PaymentTermsDays < 0 {
+		return nil, fmt.Errorf("%w: payment_terms_days cannot be negative", ErrValidation)
+	}
+
+	var updated *Supplier
+	err := s.db.WithTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
+		existing, err := GetByID(ctx, tx, supplierID)
+		if err != nil {
+			return err
+		}
+		existing.Name = in.Name
+		existing.PaymentTermsDays = in.PaymentTermsDays
+		existing.TradeName = nil
+		if in.TradeName != "" {
+			existing.TradeName = &in.TradeName
+		}
+		existing.GSTIN = nil
+		if in.GSTIN != "" {
+			existing.GSTIN = &in.GSTIN
+		}
+		existing.Phone = nil
+		if in.Phone != "" {
+			existing.Phone = &in.Phone
+		}
+		existing.Email = nil
+		if in.Email != "" {
+			existing.Email = &in.Email
+		}
+		if err := Update(ctx, tx, existing); err != nil {
+			return err
+		}
+		updated = existing
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return updated, nil
+}
+
+// SetActive activates or deactivates a supplier — never a hard delete, since
+// historical GRN/payment rows reference it (mirrors product.SetActive).
+func (s *Service) SetActive(ctx context.Context, tenantID, supplierID uuid.UUID, active bool) (*Supplier, error) {
+	var updated *Supplier
+	err := s.db.WithTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
+		if err := SetActive(ctx, tx, supplierID, active); err != nil {
+			return err
+		}
+		fresh, err := GetByID(ctx, tx, supplierID)
+		if err != nil {
+			return err
+		}
+		updated = fresh
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return updated, nil
+}
+
 func (s *Service) List(ctx context.Context, tenantID uuid.UUID, query string, limit int) ([]Supplier, error) {
 	var result []Supplier
 	err := s.db.WithTenantReadTx(ctx, tenantID, func(tx pgx.Tx) error {

@@ -36,19 +36,25 @@ class SupplierDetail {
   final String id;
   final String supplierCode;
   final String name;
+  final String? tradeName;
   final String? phone;
   final String? gstin;
+  final String? email;
   final int paymentTermsDays;
   final Decimal outstandingPayable;
+  final bool active;
 
   SupplierDetail({
     required this.id,
     required this.supplierCode,
     required this.name,
+    this.tradeName,
     required this.phone,
     required this.gstin,
+    this.email,
     required this.paymentTermsDays,
     required this.outstandingPayable,
+    this.active = true,
   });
 
   factory SupplierDetail.fromJson(Map<String, dynamic> json) {
@@ -56,10 +62,13 @@ class SupplierDetail {
       id: json['id'] as String,
       supplierCode: json['supplier_code'] as String,
       name: json['name'] as String,
+      tradeName: json['trade_name'] as String?,
       phone: json['phone'] as String?,
       gstin: json['gstin'] as String?,
+      email: json['email'] as String?,
       paymentTermsDays: json['payment_terms_days'] as int? ?? 0,
       outstandingPayable: Decimal.parse(json['outstanding_payable'] as String),
+      active: (json['status'] as String? ?? 'ACTIVE') == 'ACTIVE',
     );
   }
 }
@@ -138,6 +147,62 @@ class SupplierApi {
     return (response['entries'] as List<dynamic>)
         .map((e) => SupplierLedgerEntry.fromJson(e as Map<String, dynamic>))
         .toList();
+  }
+
+  /// Registers a new supplier (gated server-side on supplier.manage). Like
+  /// CustomerApi.create/ProductAdminApi.create, re-fetches via getDetail()
+  /// because the Create response (supplierToJSON) omits outstanding_payable,
+  /// which is only ever computed live from the ledger.
+  Future<SupplierDetail> create({
+    required String supplierCode,
+    required String name,
+    String? tradeName,
+    String? gstin,
+    String? phone,
+    String? email,
+    int paymentTermsDays = 0,
+  }) async {
+    final body = {
+      'supplier_code': supplierCode,
+      'name': name,
+      if (tradeName != null && tradeName.isNotEmpty) 'trade_name': tradeName,
+      if (gstin != null && gstin.isNotEmpty) 'gstin': gstin,
+      if (phone != null && phone.isNotEmpty) 'phone': phone,
+      if (email != null && email.isNotEmpty) 'email': email,
+      'payment_terms_days': paymentTermsDays,
+    };
+    final response = await client.postAuthed('/api/v1/suppliers', body);
+    return getDetail(response['id'] as String);
+  }
+
+  /// Revises a supplier's editable fields. supplier_code is immutable and
+  /// never sent — see supplier.Update's doc comment server-side.
+  Future<SupplierDetail> update({
+    required String supplierId,
+    required String name,
+    String? tradeName,
+    String? gstin,
+    String? phone,
+    String? email,
+    int paymentTermsDays = 0,
+  }) async {
+    final body = {
+      'name': name,
+      if (tradeName != null && tradeName.isNotEmpty) 'trade_name': tradeName,
+      if (gstin != null && gstin.isNotEmpty) 'gstin': gstin,
+      if (phone != null && phone.isNotEmpty) 'phone': phone,
+      if (email != null && email.isNotEmpty) 'email': email,
+      'payment_terms_days': paymentTermsDays,
+    };
+    await client.putAuthed('/api/v1/suppliers/$supplierId', body);
+    return getDetail(supplierId);
+  }
+
+  /// Activates or deactivates a supplier — never a hard delete, since
+  /// historical GRN/payment rows reference it.
+  Future<SupplierDetail> setActive(String supplierId, bool active) async {
+    await client.postAuthed('/api/v1/suppliers/$supplierId/status', {'active': active});
+    return getDetail(supplierId);
   }
 
   Future<RecordPaymentResult> recordPayment({

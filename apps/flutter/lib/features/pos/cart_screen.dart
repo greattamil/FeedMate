@@ -18,9 +18,12 @@ import 'pos_api.dart';
 /// quote whenever it changes (never computes tax/totals itself — see
 /// pos_api.dart), and finalizes a real invoice via the API on checkout.
 ///
-/// Supports a single full-amount tender, either CASH or CREDIT against a
-/// selected customer's Khata. Split tenders (cash+UPI+credit in one sale)
-/// are not yet wired into the UI, though the backend already supports it.
+/// Supports either a single full-amount tender (CASH or CREDIT against a
+/// selected customer's Khata) or a split payment across multiple tender
+/// lines (e.g. part CASH, part UPI, part CREDIT) that must sum to exactly
+/// the invoice grand total — the server enforces the match (see
+/// pos.ErrTenderMismatch) and only counts the CREDIT portion toward the
+/// customer's credit limit. Split payment is online-only, same as CREDIT.
 ///
 /// Offline: if the live quote call fails on a network error, the screen
 /// shows a locally estimated total (from cached selling prices, tax
@@ -38,6 +41,16 @@ class CartScreen extends StatefulWidget {
   State<CartScreen> createState() => _CartScreenState();
 }
 
+/// One editable tender row in split-payment mode.
+class _TenderRow {
+  String method;
+  final TextEditingController amountController;
+
+  _TenderRow({required this.method, String initialAmount = ''}) : amountController = TextEditingController(text: initialAmount);
+
+  void dispose() => amountController.dispose();
+}
+
 class _CartScreenState extends State<CartScreen> {
   QuoteResult? _quote;
   bool _quoting = false;
@@ -49,6 +62,10 @@ class _CartScreenState extends State<CartScreen> {
   Timer? _debounce;
   String _tenderMethod = 'CASH';
   CustomerSummary? _selectedCustomer;
+  bool _splitPayment = false;
+  final List<_TenderRow> _tenderRows = [];
+
+  bool get _anyCreditTender => _splitPayment ? _tenderRows.any((r) => r.method == 'CREDIT') : _tenderMethod == 'CREDIT';
 
   @override
   void initState() {
@@ -163,7 +180,33 @@ class _CartScreenState extends State<CartScreen> {
       setState(() => _error = 'Select a location before checkout');
       return;
     }
-    if (_tenderMethod == 'CREDIT' && _selectedCustomer == null) {
+
+    final quote = _quote;
+
+    List<TenderInput> tenders;
+    if (_splitPayment) {
+      final sum = _splitTenderSum();
+      if (sum == null) {
+        setState(() => _error = 'Enter a valid amount for every tender line');
+        return;
+      }
+      if (quote == null || sum != quote.grandTotal) {
+        setState(() => _error = 'Split tender amounts must add up to exactly the invoice total');
+        return;
+      }
+      tenders = _tenderRows.map((r) => TenderInput(method: r.method, amount: Decimal.parse(r.amountController.text.trim()))).toList();
+    } else {
+      if (quote == null) {
+        if (_offline) {
+          await _queueOfflineSale(cart);
+          return;
+        }
+        return;
+      }
+      tenders = [TenderInput(method: _tenderMethod, amount: quote.grandTotal)];
+    }
+
+    if (_anyCreditTender && _selectedCustomer == null) {
       setState(() => _error = 'Select a customer for a credit sale');
       return;
     }
@@ -173,29 +216,20 @@ class _CartScreenState extends State<CartScreen> {
       return;
     }
 
-    final quote = _quote;
-    if (quote == null) return;
-
     setState(() {
       _checkingOut = true;
       _error = null;
     });
     try {
       final api = PosApi(context.read<ApiClient>());
-      final result = _tenderMethod == 'CREDIT'
-          ? await api.finalizeCreditSale(
-              lines: cart.lines,
-              locationId: _selectedLocationId!,
-              amount: quote.grandTotal,
-              customerId: _selectedCustomer!.id,
-              overrideCreditLimit: overrideCreditLimit,
-              overrideReason: overrideReason,
-            )
-          : await api.finalizeCashSale(
-              lines: cart.lines,
-              locationId: _selectedLocationId!,
-              amount: quote.grandTotal,
-            );
+      final result = await api.finalizeSale(
+        lines: cart.lines,
+        locationId: _selectedLocationId!,
+        tenders: tenders,
+        customerId: _anyCreditTender ? _selectedCustomer!.id : null,
+        overrideCreditLimit: overrideCreditLimit,
+        overrideReason: overrideReason,
+      );
       if (!mounted) return;
       cart.clear();
       setState(() {
@@ -315,14 +349,70 @@ class _CartScreenState extends State<CartScreen> {
   @override
   void dispose() {
     _debounce?.cancel();
+    for (final row in _tenderRows) {
+      row.dispose();
+    }
     super.dispose();
+  }
+
+  Decimal? _splitTenderSum() {
+    Decimal sum = Decimal.zero;
+    for (final row in _tenderRows) {
+      final amount = Decimal.tryParse(row.amountController.text.trim());
+      if (amount == null) return null;
+      sum += amount;
+    }
+    return sum;
+  }
+
+  void _toggleSplitPayment(bool enabled) {
+    setState(() {
+      _splitPayment = enabled;
+      for (final row in _tenderRows) {
+        row.dispose();
+      }
+      _tenderRows.clear();
+      if (enabled) {
+        final total = _quote?.grandTotal;
+        _tenderRows.add(_TenderRow(method: _tenderMethod, initialAmount: total?.toStringAsFixed(2) ?? ''));
+      }
+    });
+  }
+
+  void _addTenderRow() {
+    setState(() {
+      final remaining = _remainingSplitAmount();
+      _tenderRows.add(_TenderRow(
+        method: 'CASH',
+        initialAmount: remaining != null && remaining > Decimal.zero ? remaining.toStringAsFixed(2) : '',
+      ));
+    });
+  }
+
+  void _removeTenderRow(int index) {
+    setState(() {
+      _tenderRows[index].dispose();
+      _tenderRows.removeAt(index);
+    });
+  }
+
+  Decimal? _remainingSplitAmount() {
+    final total = _quote?.grandTotal;
+    final sum = _splitTenderSum();
+    if (total == null || sum == null) return null;
+    return total - sum;
   }
 
   @override
   Widget build(BuildContext context) {
     final cart = context.watch<CartModel>();
     final estimate = _offline ? _estimatedOfflineTotal(cart) : null;
-    final canCheckout = !_checkingOut && !cart.isEmpty && (_quote != null || (_offline && _selectedLocationId != null));
+    final splitRemaining = _splitPayment ? _remainingSplitAmount() : null;
+    final splitValid = !_splitPayment || (splitRemaining != null && splitRemaining == Decimal.zero);
+    final canCheckout = !_checkingOut &&
+        !cart.isEmpty &&
+        splitValid &&
+        (_quote != null || (_offline && _selectedLocationId != null));
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
@@ -491,34 +581,120 @@ class _CartScreenState extends State<CartScreen> {
                       onChanged: (value) => setState(() => _selectedLocationId = value),
                     ),
                   ),
-                // Tender Toggle
-                Row(
-                  children: [
-                    Expanded(
-                      child: SegmentedButton<String>(
-                        key: const Key('tender_method_toggle'),
-                        segments: const [
-                          ButtonSegment(
-                            value: 'CASH',
-                            icon: Icon(Icons.payments_rounded, size: 16),
-                            label: Text('Cash'),
-                          ),
-                          ButtonSegment(
-                            value: 'CREDIT',
-                            icon: Icon(Icons.account_balance_wallet_rounded, size: 16),
-                            label: Text('Credit (Khata)'),
-                            enabled: true,
-                          ),
-                        ],
-                        selected: {_tenderMethod},
-                        onSelectionChanged: _offline
-                            ? null
-                            : (selection) => setState(() => _tenderMethod = selection.first),
+                // Tender Toggle (single-tender mode)
+                if (!_splitPayment)
+                  Row(
+                    children: [
+                      Expanded(
+                        child: SegmentedButton<String>(
+                          key: const Key('tender_method_toggle'),
+                          segments: const [
+                            ButtonSegment(
+                              value: 'CASH',
+                              icon: Icon(Icons.payments_rounded, size: 16),
+                              label: Text('Cash'),
+                            ),
+                            ButtonSegment(
+                              value: 'CREDIT',
+                              icon: Icon(Icons.account_balance_wallet_rounded, size: 16),
+                              label: Text('Credit (Khata)'),
+                              enabled: true,
+                            ),
+                          ],
+                          selected: {_tenderMethod},
+                          onSelectionChanged: _offline
+                              ? null
+                              : (selection) => setState(() => _tenderMethod = selection.first),
+                        ),
                       ),
+                    ],
+                  ),
+                if (!_offline)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Row(
+                      children: [
+                        const Text('Split payment', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                        Switch(
+                          key: const Key('split_payment_switch'),
+                          value: _splitPayment,
+                          onChanged: _toggleSplitPayment,
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-                if (_tenderMethod == 'CREDIT' && !_offline) ...[
+                  ),
+                if (_splitPayment) ...[
+                  const SizedBox(height: 4),
+                  ...List.generate(_tenderRows.length, (index) {
+                    final row = _tenderRows[index];
+                    return Padding(
+                      key: Key('split_tender_row_$index'),
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            flex: 2,
+                            child: DropdownButtonFormField<String>(
+                              key: Key('split_tender_method_$index'),
+                              initialValue: row.method,
+                              isDense: true,
+                              decoration: const InputDecoration(labelText: 'Method'),
+                              items: const [
+                                DropdownMenuItem(value: 'CASH', child: Text('Cash')),
+                                DropdownMenuItem(value: 'CREDIT', child: Text('Credit')),
+                                DropdownMenuItem(value: 'UPI', child: Text('UPI')),
+                                DropdownMenuItem(value: 'BANK', child: Text('Bank')),
+                                DropdownMenuItem(value: 'OTHER', child: Text('Other')),
+                              ],
+                              onChanged: (v) => setState(() => row.method = v ?? 'CASH'),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            flex: 3,
+                            child: TextField(
+                              key: Key('split_tender_amount_$index'),
+                              controller: row.amountController,
+                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                              decoration: const InputDecoration(labelText: 'Amount', isDense: true),
+                              onChanged: (_) => setState(() {}),
+                            ),
+                          ),
+                          if (_tenderRows.length > 1)
+                            IconButton(
+                              key: Key('split_tender_remove_$index'),
+                              icon: const Icon(Icons.remove_circle_outline, size: 20, color: Color(0xFFE11D48)),
+                              onPressed: () => _removeTenderRow(index),
+                            ),
+                        ],
+                      ),
+                    );
+                  }),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      key: const Key('add_tender_button'),
+                      onPressed: _addTenderRow,
+                      icon: const Icon(Icons.add, size: 16),
+                      label: const Text('Add Tender'),
+                    ),
+                  ),
+                  Builder(builder: (context) {
+                    final remaining = _remainingSplitAmount();
+                    if (remaining == null) return const SizedBox.shrink();
+                    final settled = remaining == Decimal.zero;
+                    return Text(
+                      settled ? 'Fully allocated' : 'Remaining: ₹${remaining.toStringAsFixed(2)}',
+                      key: const Key('split_tender_remaining'),
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: settled ? const Color(0xFF059669) : const Color(0xFFE11D48),
+                      ),
+                    );
+                  }),
+                ],
+                if (_anyCreditTender && !_offline) ...[
                   const SizedBox(height: 10),
                   Container(
                     decoration: BoxDecoration(

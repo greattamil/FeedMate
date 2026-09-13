@@ -704,9 +704,34 @@ live-verified on the emulator before being called fully done to the same
 standard as Phases 24/25/27.
 
 Phase A from the gap-analysis report (Customer + Supplier CRUD) is now
-complete. Still open: **split/multi-tender POS billing** (backend already
-supports an array of tenders; `cart_screen.dart` only allows a single
-`CASH`/`CREDIT` selection) — the next recommended P0 item.
+complete.
+
+## Phase 30 — Contra/Buy-Back Flutter Screen
+
+Contra (Phase 8) had a complete backend service, handler, and route
+(`POST /api/v1/contra`) but zero Flutter reachability.
+
+| Area | Status | Evidence |
+|---|---|---|
+| `ContraScreen`, `ContraLineFormScreen`, `ContraApi` | **VERIFIED** | Mirrors `GrnScreen`'s structure (pick customer/location, add lines via the existing product picker, post); wired into the overflow menu gated on `contra.approve` |
+| 2 new widget tests (`test/contra_test.dart`) | **VERIFIED** | One caught the `Decimal.toString()` trailing-zero bug on `valuation_unit_price` before it reached a device, fixed with `.toStringAsFixed(2)` |
+
+## Phase 31 — Split/Multi-Tender POS Billing
+
+POS checkout only ever sent one tender even though
+`pos.FinalizeRequest.Tenders` has always been an array, and the server
+only counts the CREDIT portion of a split payment toward the credit limit
+check — this was a pure frontend gap.
+
+| Area | Status | Evidence |
+|---|---|---|
+| `PosApi.finalizeSale()` — replaces the old `finalizeCashSale`/`finalizeCreditSale` pair with one method taking `List<TenderInput>` | **VERIFIED** | Single-tender callers are just the one-element case; also fixed the same latent trailing-zero risk on tender amounts by switching to `.toStringAsFixed(2)` |
+| Split-payment UI on `CartScreen`: a switch reveals per-row method + amount editors (CASH/CREDIT/UPI/BANK/OTHER), a running "Remaining: ₹X" indicator, checkout disabled until the rows sum to exactly the invoice total, customer picker required whenever any row is CREDIT | **VERIFIED** | Single-tender mode (the common case) is unchanged and still the default; split mode is online-only, same restriction as CREDIT |
+| 2 new widget tests in `test/cart_credit_test.dart` | **VERIFIED** | A CASH+CREDIT split posts both tenders with the exact amounts and requires a customer; checkout stays disabled while the split is unallocated |
+
+Full Flutter suite after Phases 30+31: 67 tests, all passing. `flutter
+analyze` clean (only pre-existing info-level lints). No live emulator
+verification performed for either phase (same caveat as Phases 28/29).
 
 ## Not Yet Started
 

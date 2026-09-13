@@ -59,6 +59,18 @@ class FinalizeResult {
   }
 }
 
+/// One tender line in a (possibly split) sale — e.g. part CASH, part CREDIT,
+/// part UPI, in a single invoice. The server sums all tenders and requires
+/// the total to exactly equal the invoice grand total (see
+/// pos.ErrTenderMismatch); only the CREDIT portion counts toward a
+/// customer's credit limit check.
+class TenderInput {
+  final String method; // CASH, UPI, BANK, CREDIT, OTHER
+  final Decimal amount;
+
+  TenderInput({required this.method, required this.amount});
+}
+
 class LocationInfo {
   final String id;
   final String name;
@@ -88,52 +100,20 @@ class PosApi {
     return QuoteResult.fromJson(response);
   }
 
-  Future<FinalizeResult> finalizeCashSale({
+  /// Finalizes a sale with one or more tenders (CASH, CREDIT, UPI, BANK,
+  /// OTHER) that must sum to exactly the invoice grand total — a single
+  /// full-amount CASH or CREDIT tender is just the one-element case. A
+  /// CREDIT tender requires a customer (the receivable is posted against
+  /// their Khata ledger — see customer.PostLedgerEntry). If the CREDIT
+  /// portion would push the customer over their configured credit limit,
+  /// the server rejects it unless the cashier supplies an explicit override
+  /// reason and holds the credit.override permission — permission alone is
+  /// never sufficient (see docs/IMPLEMENTATION_STATUS.md's credit-override
+  /// fix).
+  Future<FinalizeResult> finalizeSale({
     required List<CartLine> lines,
     required String locationId,
-    required Decimal amount,
-    String? customerId,
-  }) async {
-    return _finalize(
-      lines: lines,
-      locationId: locationId,
-      tenders: [
-        {'method': 'CASH', 'amount': amount.toString()},
-      ],
-      customerId: customerId,
-    );
-  }
-
-  /// A CREDIT sale requires a customer (the receivable is posted against
-  /// their Khata ledger — see customer.PostLedgerEntry). If the sale would
-  /// push the customer over their configured credit limit, the server
-  /// rejects it unless the cashier supplies an explicit override reason and
-  /// holds the credit.override permission — permission alone is never
-  /// sufficient (see docs/IMPLEMENTATION_STATUS.md's credit-override fix).
-  Future<FinalizeResult> finalizeCreditSale({
-    required List<CartLine> lines,
-    required String locationId,
-    required Decimal amount,
-    required String customerId,
-    bool overrideCreditLimit = false,
-    String? overrideReason,
-  }) async {
-    return _finalize(
-      lines: lines,
-      locationId: locationId,
-      tenders: [
-        {'method': 'CREDIT', 'amount': amount.toString()},
-      ],
-      customerId: customerId,
-      overrideCreditLimit: overrideCreditLimit,
-      overrideReason: overrideReason,
-    );
-  }
-
-  Future<FinalizeResult> _finalize({
-    required List<CartLine> lines,
-    required String locationId,
-    required List<Map<String, dynamic>> tenders,
+    required List<TenderInput> tenders,
     String? customerId,
     bool overrideCreditLimit = false,
     String? overrideReason,
@@ -142,7 +122,7 @@ class PosApi {
       'client_transaction_id': const Uuid().v4(),
       'location_id': locationId,
       'lines': _linesPayload(lines),
-      'tenders': tenders,
+      'tenders': tenders.map((t) => {'method': t.method, 'amount': t.amount.toStringAsFixed(2)}).toList(),
       if (customerId != null) 'customer_id': customerId,
       if (overrideCreditLimit) 'override_credit_limit': true,
       if (overrideReason != null) 'override_reason': overrideReason,

@@ -8,6 +8,8 @@ class Product {
   final String sku;
   final String name;
   final String? localNameTa;
+  final String defaultPurchaseUomId;
+  final String? taxProfileId;
   final Decimal? mrp;
   final Decimal? sellingPrice;
   final bool batchRequired;
@@ -20,6 +22,8 @@ class Product {
     required this.sku,
     required this.name,
     this.localNameTa,
+    this.defaultPurchaseUomId = '',
+    this.taxProfileId,
     this.mrp,
     this.sellingPrice,
     required this.batchRequired,
@@ -29,18 +33,23 @@ class Product {
   });
 
   factory Product.fromSearchResult(Map<String, dynamic> json) {
-    final productJson = json['product'] as Map<String, dynamic>;
+    return Product.fromJson(json['product'] as Map<String, dynamic>, matchType: json['match_type'] as String? ?? '');
+  }
+
+  factory Product.fromJson(Map<String, dynamic> productJson, {String matchType = ''}) {
     return Product(
       id: productJson['id'] as String,
       sku: productJson['sku'] as String,
       name: productJson['name'] as String,
       localNameTa: productJson['local_name_ta'] as String?,
+      defaultPurchaseUomId: productJson['default_purchase_uom_id'] as String? ?? '',
+      taxProfileId: productJson['tax_profile_id'] as String?,
       mrp: _decimalOrNull(productJson['mrp']),
       sellingPrice: _decimalOrNull(productJson['selling_price']),
       batchRequired: productJson['batch_required'] as bool? ?? false,
       looseSaleAllowed: productJson['loose_sale_allowed'] as bool? ?? false,
       active: productJson['active'] as bool? ?? false,
-      matchType: json['match_type'] as String? ?? '',
+      matchType: matchType,
     );
   }
 

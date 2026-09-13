@@ -10,6 +10,7 @@ import '../auth/generate_pairing_code_screen.dart';
 import '../auth/login_screen.dart';
 import '../eod/eod_screen.dart';
 import '../khata/khata_customer_list_screen.dart';
+import '../procurement/grn_screen.dart';
 import '../reports/reports_screen.dart';
 import '../supplier/supplier_list_screen.dart';
 import '../sync/outbox_screen.dart';
@@ -18,7 +19,7 @@ import 'cart_screen.dart';
 import 'product.dart';
 import 'product_repository.dart';
 
-enum _MenuAction { khata, suppliers, reports, eod, pairDevice }
+enum _MenuAction { khata, suppliers, grn, reports, eod, pairDevice }
 
 /// Product search, backed by the real Go backend's ranked search endpoint
 /// (barcode > SKU > exact name > alias > fuzzy — see PRD A4). Tapping a
@@ -142,6 +143,11 @@ class _ProductSearchScreenState extends State<ProductSearchScreen> {
                     MaterialPageRoute(builder: (_) => const SupplierListScreen()),
                   );
                   break;
+                case _MenuAction.grn:
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const GrnScreen()),
+                  );
+                  break;
                 case _MenuAction.eod:
                   Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => const EodScreen()),
@@ -175,6 +181,15 @@ class _ProductSearchScreenState extends State<ProductSearchScreen> {
                   child: ListTile(
                     leading: Icon(Icons.local_shipping_outlined),
                     title: Text('Suppliers'),
+                  ),
+                ),
+              if (session.hasPermission('grn.post'))
+                const PopupMenuItem(
+                  key: Key('menu_item_grn'),
+                  value: _MenuAction.grn,
+                  child: ListTile(
+                    leading: Icon(Icons.move_to_inbox_outlined),
+                    title: Text('Receive Stock (GRN)'),
                   ),
                 ),
               if (session.hasPermission('report.view'))

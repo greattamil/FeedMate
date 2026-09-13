@@ -55,6 +55,7 @@ type productResponse struct {
 	DefaultPurchaseUOMID string `json:"default_purchase_uom_id"`
 	BaseInventoryUOMID   string `json:"base_inventory_uom_id"`
 	HSNCode              string `json:"hsn_code,omitempty"`
+	TaxProfileID         string `json:"tax_profile_id,omitempty"`
 	MRP                  string `json:"mrp,omitempty"`
 	SellingPrice         string `json:"selling_price,omitempty"`
 	BatchRequired        bool   `json:"batch_required"`
@@ -85,6 +86,9 @@ func toProductResponse(p *product.Product) productResponse {
 	}
 	if p.HSNCode != nil {
 		resp.HSNCode = *p.HSNCode
+	}
+	if p.TaxProfileID != nil {
+		resp.TaxProfileID = p.TaxProfileID.String()
 	}
 	if p.MRP != nil {
 		resp.MRP = p.MRP.StringFixed(2)
@@ -198,7 +202,7 @@ func (h *ProductHandlers) Get(w http.ResponseWriter, r *http.Request) {
 			WriteError(w, reqID, CodeNotFound, "product not found")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to fetch product")
+		WriteError(w, reqID, CodeInternal, "failed to fetch product: "+err.Error())
 		return
 	}
 	WriteJSON(w, http.StatusOK, toProductResponse(p))
@@ -225,7 +229,7 @@ func (h *ProductHandlers) Search(w http.ResponseWriter, r *http.Request) {
 
 	results, err := h.Product.Search(r.Context(), claims.TenantID, query, limit)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "search failed")
+		WriteError(w, reqID, CodeInternal, "search failed: "+err.Error())
 		return
 	}
 

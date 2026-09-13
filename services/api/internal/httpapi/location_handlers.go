@@ -20,7 +20,7 @@ func (h *LocationHandlers) List(w http.ResponseWriter, r *http.Request) {
 	}
 	locations, err := h.Location.ListActive(r.Context(), claims.TenantID)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to fetch locations")
+		WriteError(w, reqID, CodeInternal, "failed to fetch locations: "+err.Error())
 		return
 	}
 	out := make([]map[string]string, 0, len(locations))

@@ -76,7 +76,7 @@ func (h *POSHandlers) Quote(w http.ResponseWriter, r *http.Request) {
 			WriteError(w, reqID, CodeValidation, err.Error())
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to compute quote")
+		WriteError(w, reqID, CodeInternal, "failed to compute quote: "+err.Error())
 		return
 	}
 

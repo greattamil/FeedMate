@@ -59,7 +59,7 @@ func (h *EODHandlers) OpenSession(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, eod.ErrSessionExists):
 			WriteError(w, reqID, CodeConflict, err.Error())
 		default:
-			WriteError(w, reqID, CodeInternal, "failed to open EOD session")
+			WriteError(w, reqID, CodeInternal, "failed to open EOD session: "+err.Error())
 		}
 		return
 	}
@@ -103,7 +103,7 @@ func (h *EODHandlers) CloseSession(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, eod.ErrSessionNotOpen), errors.Is(err, eod.ErrNotFound):
 			WriteError(w, reqID, CodeConflict, err.Error())
 		default:
-			WriteError(w, reqID, CodeInternal, "failed to close EOD session")
+			WriteError(w, reqID, CodeInternal, "failed to close EOD session: "+err.Error())
 		}
 		return
 	}
@@ -145,7 +145,7 @@ func (h *EODHandlers) ReopenSession(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, eod.ErrNotClosed), errors.Is(err, eod.ErrNotFound):
 			WriteError(w, reqID, CodeConflict, err.Error())
 		default:
-			WriteError(w, reqID, CodeInternal, "failed to reopen EOD session")
+			WriteError(w, reqID, CodeInternal, "failed to reopen EOD session: "+err.Error())
 		}
 		return
 	}
@@ -170,7 +170,7 @@ func (h *EODHandlers) GetSession(w http.ResponseWriter, r *http.Request) {
 			WriteError(w, reqID, CodeNotFound, "no EOD session for this business date")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to fetch EOD session")
+		WriteError(w, reqID, CodeInternal, "failed to fetch EOD session: "+err.Error())
 		return
 	}
 	resp := map[string]interface{}{

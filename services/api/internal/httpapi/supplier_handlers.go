@@ -89,7 +89,7 @@ func (h *SupplierHandlers) List(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query().Get("q")
 	suppliers, err := h.Supplier.List(r.Context(), claims.TenantID, query, 50)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to list suppliers")
+		WriteError(w, reqID, CodeInternal, "failed to list suppliers: "+err.Error())
 		return
 	}
 	out := make([]map[string]interface{}, 0, len(suppliers))
@@ -117,7 +117,7 @@ func (h *SupplierHandlers) Get(w http.ResponseWriter, r *http.Request) {
 			WriteError(w, reqID, CodeNotFound, "supplier not found")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to fetch supplier")
+		WriteError(w, reqID, CodeInternal, "failed to fetch supplier: "+err.Error())
 		return
 	}
 	resp := supplierToJSON(s)
@@ -149,7 +149,7 @@ func (h *SupplierHandlers) Ledger(w http.ResponseWriter, r *http.Request) {
 			WriteError(w, reqID, CodeNotFound, "supplier not found")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to fetch ledger")
+		WriteError(w, reqID, CodeInternal, "failed to fetch ledger: "+err.Error())
 		return
 	}
 	out := make([]map[string]interface{}, 0, len(entries))

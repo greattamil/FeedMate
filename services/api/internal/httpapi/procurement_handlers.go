@@ -206,7 +206,7 @@ func (h *ProcurementHandlers) PostGRN(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, accounting.ErrNoActiveFinancialYear):
 			WriteError(w, reqID, CodeConflict, "no active financial year is configured for this shop")
 		default:
-			WriteError(w, reqID, CodeInternal, "failed to post GRN")
+			WriteError(w, reqID, CodeInternal, "failed to post GRN: "+err.Error())
 		}
 		return
 	}

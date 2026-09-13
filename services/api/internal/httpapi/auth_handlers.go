@@ -60,7 +60,7 @@ func (h *AuthHandlers) Login(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, identity.ErrDeviceNotActive):
 			WriteError(w, reqID, CodeForbidden, "device is not registered or not active")
 		default:
-			WriteError(w, reqID, CodeInternal, "login failed")
+			WriteError(w, reqID, CodeInternal, "login failed: "+err.Error())
 		}
 		return
 	}
@@ -131,7 +131,7 @@ func (h *AuthHandlers) Logout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.Identity.Logout(r.Context(), tenantID, req.RefreshToken); err != nil {
-		WriteError(w, reqID, CodeInternal, "logout failed")
+		WriteError(w, reqID, CodeInternal, "logout failed: "+err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

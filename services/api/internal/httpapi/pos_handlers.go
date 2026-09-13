@@ -165,7 +165,7 @@ func (h *POSHandlers) FinalizeInvoice(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, accounting.ErrNoActiveFinancialYear):
 			WriteError(w, reqID, CodeConflict, "no active financial year is configured for this shop")
 		default:
-			WriteError(w, reqID, CodeInternal, "failed to finalize invoice")
+			WriteError(w, reqID, CodeInternal, "failed to finalize invoice: "+err.Error())
 		}
 		return
 	}

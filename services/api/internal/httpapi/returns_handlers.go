@@ -88,7 +88,7 @@ func (h *ReturnsHandlers) PostReturn(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, accounting.ErrNoActiveFinancialYear):
 			WriteError(w, reqID, CodeConflict, "no active financial year is configured for this shop")
 		default:
-			WriteError(w, reqID, CodeInternal, "failed to post return")
+			WriteError(w, reqID, CodeInternal, "failed to post return: "+err.Error())
 		}
 		return
 	}

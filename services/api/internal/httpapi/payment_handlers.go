@@ -58,7 +58,7 @@ func (h *PaymentHandlers) CreateReceiptIntent(w http.ResponseWriter, r *http.Req
 			WriteError(w, reqID, CodeValidation, err.Error())
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to create payment intent")
+		WriteError(w, reqID, CodeInternal, "failed to create payment intent: "+err.Error())
 		return
 	}
 
@@ -120,7 +120,7 @@ func (h *PaymentHandlers) RecordManualReceipt(w http.ResponseWriter, r *http.Req
 			WriteError(w, reqID, CodeNotFound, "customer not found")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to record receipt")
+		WriteError(w, reqID, CodeInternal, "failed to record receipt: "+err.Error())
 		return
 	}
 
@@ -178,7 +178,7 @@ func (h *PaymentHandlers) RecordSupplierPayment(w http.ResponseWriter, r *http.R
 			WriteError(w, reqID, CodeNotFound, "supplier not found")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to record payment")
+		WriteError(w, reqID, CodeInternal, "failed to record payment: "+err.Error())
 		return
 	}
 
@@ -206,7 +206,7 @@ func (h *PaymentHandlers) GetIntentStatus(w http.ResponseWriter, r *http.Request
 			WriteError(w, reqID, CodeNotFound, "payment intent not found")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to fetch payment status")
+		WriteError(w, reqID, CodeInternal, "failed to fetch payment status: "+err.Error())
 		return
 	}
 	WriteJSON(w, http.StatusOK, map[string]string{"status": status})
@@ -238,7 +238,7 @@ func (h *PaymentHandlers) SandboxWebhook(w http.ResponseWriter, r *http.Request)
 		case errors.Is(err, payment.ErrValidation):
 			WriteError(w, reqID, CodeValidation, err.Error())
 		default:
-			WriteError(w, reqID, CodeInternal, "failed to process webhook")
+			WriteError(w, reqID, CodeInternal, "failed to process webhook: "+err.Error())
 		}
 		return
 	}

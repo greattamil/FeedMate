@@ -43,7 +43,7 @@ func (h *ReportsHandlers) SalesSummary(w http.ResponseWriter, r *http.Request) {
 
 	summary, err := h.Reports.SalesSummary(r.Context(), claims.TenantID, dateFrom, dateTo)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to compute sales summary")
+		WriteError(w, reqID, CodeInternal, "failed to compute sales summary: "+err.Error())
 		return
 	}
 
@@ -80,7 +80,7 @@ func (h *ReportsHandlers) StockOnHand(w http.ResponseWriter, r *http.Request) {
 
 	lines, err := h.Reports.StockOnHand(r.Context(), claims.TenantID, locationID)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to compute stock on hand")
+		WriteError(w, reqID, CodeInternal, "failed to compute stock on hand: "+err.Error())
 		return
 	}
 
@@ -111,7 +111,7 @@ func (h *ReportsHandlers) CustomerBalances(w http.ResponseWriter, r *http.Reques
 	}
 	balances, err := h.Reports.CustomerBalances(r.Context(), claims.TenantID)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to compute customer balances")
+		WriteError(w, reqID, CodeInternal, "failed to compute customer balances: "+err.Error())
 		return
 	}
 	out := make([]map[string]interface{}, 0, len(balances))
@@ -147,7 +147,7 @@ func (h *ReportsHandlers) EODHistory(w http.ResponseWriter, r *http.Request) {
 
 	history, err := h.Reports.EODHistory(r.Context(), claims.TenantID, dateFrom, dateTo)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to fetch EOD history")
+		WriteError(w, reqID, CodeInternal, "failed to fetch EOD history: "+err.Error())
 		return
 	}
 	out := make([]map[string]interface{}, 0, len(history))

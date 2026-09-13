@@ -97,7 +97,7 @@ func (h *CustomerHandlers) List(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query().Get("q")
 	customers, err := h.Customer.List(r.Context(), claims.TenantID, query, 50)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to list customers")
+		WriteError(w, reqID, CodeInternal, "failed to list customers: "+err.Error())
 		return
 	}
 	out := make([]map[string]interface{}, 0, len(customers))
@@ -125,7 +125,7 @@ func (h *CustomerHandlers) Get(w http.ResponseWriter, r *http.Request) {
 			WriteError(w, reqID, CodeNotFound, "customer not found")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to fetch customer")
+		WriteError(w, reqID, CodeInternal, "failed to fetch customer: "+err.Error())
 		return
 	}
 	resp := customerToJSON(c)
@@ -160,7 +160,7 @@ func (h *CustomerHandlers) Ledger(w http.ResponseWriter, r *http.Request) {
 			WriteError(w, reqID, CodeNotFound, "customer not found")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to fetch ledger")
+		WriteError(w, reqID, CodeInternal, "failed to fetch ledger: "+err.Error())
 		return
 	}
 	out := make([]map[string]interface{}, 0, len(entries))
@@ -215,7 +215,7 @@ func (h *CustomerHandlers) SetCreditLimit(w http.ResponseWriter, r *http.Request
 		case errors.Is(err, customer.ErrNotFound):
 			WriteError(w, reqID, CodeNotFound, "customer not found")
 		default:
-			WriteError(w, reqID, CodeInternal, "failed to update credit limit")
+			WriteError(w, reqID, CodeInternal, "failed to update credit limit: "+err.Error())
 		}
 		return
 	}

@@ -117,7 +117,7 @@ func (h *ContraHandlers) PostContra(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, accounting.ErrNoActiveFinancialYear):
 			WriteError(w, reqID, CodeConflict, "no active financial year is configured for this shop")
 		default:
-			WriteError(w, reqID, CodeInternal, "failed to post contra transaction")
+			WriteError(w, reqID, CodeInternal, "failed to post contra transaction: "+err.Error())
 		}
 		return
 	}

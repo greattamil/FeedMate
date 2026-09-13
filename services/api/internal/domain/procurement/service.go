@@ -27,6 +27,65 @@ func NewService(db *dbctx.DB) *Service {
 	return &Service{db: db}
 }
 
+// GRNListPage is one page of the GRN history browse list.
+type GRNListPage struct {
+	GRNs  []GRNSummary
+	Total int
+}
+
+// ListGRNs returns posted GRNs newest-first — the procurement history
+// screen's browse endpoint.
+func (s *Service) ListGRNs(ctx context.Context, tenantID uuid.UUID, query string, limit, offset int) (*GRNListPage, error) {
+	var page GRNListPage
+	err := s.db.WithTenantReadTx(ctx, tenantID, func(tx pgx.Tx) error {
+		grns, total, err := ListGRNs(ctx, tx, query, limit, offset)
+		if err != nil {
+			return err
+		}
+		page.GRNs = grns
+		page.Total = total
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &page, nil
+}
+
+// GRNDetail is the full history view of one posted GRN: header (with the
+// supplier's display name) and its lines.
+type GRNDetail struct {
+	Header       GRNHeader
+	SupplierName string
+	Lines        []GRNLineDetail
+}
+
+func (s *Service) GetGRNDetail(ctx context.Context, tenantID, grnID uuid.UUID) (*GRNDetail, error) {
+	var result GRNDetail
+	err := s.db.WithTenantReadTx(ctx, tenantID, func(tx pgx.Tx) error {
+		header, err := GetGRNByID(ctx, tx, grnID)
+		if err != nil {
+			return err
+		}
+		supplierName, err := GetSupplierName(ctx, tx, header.SupplierID)
+		if err != nil {
+			return err
+		}
+		lines, err := ListGRNLineDetails(ctx, tx, grnID)
+		if err != nil {
+			return err
+		}
+		result.Header = *header
+		result.SupplierName = supplierName
+		result.Lines = lines
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 type GRNLineInput struct {
 	ProductID       uuid.UUID
 	BatchCode       string

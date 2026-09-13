@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 
@@ -16,6 +18,112 @@ import (
 
 type ProcurementHandlers struct {
 	Procurement *procurement.Service
+}
+
+// ListGRNs returns posted GRNs newest-first (the procurement history browse
+// list), optionally filtered by a substring match on GRN number or
+// supplier name via the `q` query param, paginated via `limit`/`offset`.
+func (h *ProcurementHandlers) ListGRNs(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	claims, ok := reqctx.Claims(r.Context())
+	if !ok {
+		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		return
+	}
+	query := r.URL.Query().Get("q")
+	limit := 50
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			limit = n
+		}
+	}
+	offset := 0
+	if v := r.URL.Query().Get("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			offset = n
+		}
+	}
+	page, err := h.Procurement.ListGRNs(r.Context(), claims.TenantID, query, limit, offset)
+	if err != nil {
+		WriteError(w, reqID, CodeInternal, "failed to list GRNs: "+err.Error())
+		return
+	}
+	out := make([]map[string]interface{}, 0, len(page.GRNs))
+	for _, g := range page.GRNs {
+		row := map[string]interface{}{
+			"id":            g.Header.ID.String(),
+			"grn_number":    g.Header.GRNNumber,
+			"supplier_name": g.SupplierName,
+			"status":        g.Header.Status,
+		}
+		if g.Header.SupplierDocumentNo != nil {
+			row["supplier_document_no"] = *g.Header.SupplierDocumentNo
+		}
+		if g.Header.PostedAt != nil {
+			row["posted_at"] = g.Header.PostedAt.Format(time.RFC3339)
+		}
+		out = append(out, row)
+	}
+	WriteJSON(w, http.StatusOK, map[string]interface{}{"grns": out, "total": page.Total})
+}
+
+// GetGRNDetail returns the full history view of one posted GRN: header
+// (with supplier display name) and lines.
+func (h *ProcurementHandlers) GetGRNDetail(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	claims, ok := reqctx.Claims(r.Context())
+	if !ok {
+		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid GRN id")
+		return
+	}
+	detail, err := h.Procurement.GetGRNDetail(r.Context(), claims.TenantID, id)
+	if err != nil {
+		if errors.Is(err, procurement.ErrNotFound) {
+			WriteError(w, reqID, CodeNotFound, "GRN not found")
+			return
+		}
+		WriteError(w, reqID, CodeInternal, "failed to fetch GRN: "+err.Error())
+		return
+	}
+
+	lines := make([]map[string]interface{}, 0, len(detail.Lines))
+	for _, l := range detail.Lines {
+		lines = append(lines, map[string]interface{}{
+			"product_name":   l.ProductName,
+			"sku":            l.SKU,
+			"batch_code":     l.BatchCode,
+			"received_qty":   l.ReceivedQty.StringFixed(3),
+			"uom_code":       l.UOMCode,
+			"unit_cost":      l.UnitCost.StringFixed(2),
+			"quality_status": l.QualityStatus,
+		})
+	}
+	header := detail.Header
+	resp := map[string]interface{}{
+		"id":            header.ID.String(),
+		"grn_number":    header.GRNNumber,
+		"supplier_name": detail.SupplierName,
+		"status":        header.Status,
+		"lines":         lines,
+	}
+	if header.SupplierDocumentNo != nil {
+		resp["supplier_document_no"] = *header.SupplierDocumentNo
+	}
+	if header.VehicleNo != nil {
+		resp["vehicle_no"] = *header.VehicleNo
+	}
+	if header.NetWeightKg != nil {
+		resp["net_weight_kg"] = header.NetWeightKg.StringFixed(3)
+	}
+	if header.PostedAt != nil {
+		resp["posted_at"] = header.PostedAt.Format(time.RFC3339)
+	}
+	WriteJSON(w, http.StatusOK, resp)
 }
 
 type grnLineRequest struct {

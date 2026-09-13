@@ -750,6 +750,25 @@ and the Flutter screens.
 Full Flutter suite: 69 tests, all passing. `flutter analyze` clean. No
 live emulator verification performed for this phase.
 
+## Phase 33 — GRN History (Backend + Flutter)
+
+Same gap as invoices: `PostGRN` existed but there was no way to browse or
+review past goods receipts. Built the missing backend list/detail
+endpoints (joining `suppliers` for the display name, since
+`goods_receipts` keeps no name snapshot, and `products`/`batches`/`uoms`
+for each line) and the Flutter screens, mirroring Phase 32's structure
+exactly.
+
+| Area | Status | Evidence |
+|---|---|---|
+| `procurement.Service.ListGRNs` (paginated, newest-first, filtered by GRN number or supplier name) and `GetGRNDetail` (header + supplier name + lines with product/batch/quality info) | **VERIFIED** | New integration tests `TestListGRNs_ReturnsNewestFirstAndFiltersByQuery` and `TestGetGRNDetail_ReturnsLinesWithProductAndBatchInfo`, both run against live PostgreSQL |
+| `GET /api/v1/procurement/grns` (list) and `GET /api/v1/procurement/grns/{id}` (detail), both gated `grn.post` | **VERIFIED** | `go build`/`go vet` clean |
+| `GrnHistoryScreen` (search list) and `GrnDetailScreen` (read-only: supplier, vehicle, net weight, line items with batch/quality) | **VERIFIED** | Wired into the overflow menu gated on `grn.post` |
+| 2 new widget tests (`test/grn_history_test.dart`) | **VERIFIED** | Search-to-detail navigation and the empty-results state |
+
+Full Flutter suite: 71 tests, all passing. `flutter analyze` clean. No
+live emulator verification performed for this phase.
+
 ## Not Yet Started
 
 Customer/supplier aging (30/60/90-day buckets) and margin reports,

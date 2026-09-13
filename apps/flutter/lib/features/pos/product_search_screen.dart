@@ -14,6 +14,7 @@ import '../auth/login_screen.dart';
 import '../contra/contra_screen.dart';
 import '../eod/eod_screen.dart';
 import '../khata/khata_customer_list_screen.dart';
+import '../procurement/grn_history_screen.dart';
 import '../procurement/grn_screen.dart';
 import '../products/product_list_screen.dart';
 import '../reports/reports_screen.dart';
@@ -26,7 +27,7 @@ import 'invoice_history_screen.dart';
 import 'product.dart';
 import 'product_repository.dart';
 
-enum _MenuAction { khata, suppliers, grn, returnSale, contra, products, invoiceHistory, reports, eod, pairDevice }
+enum _MenuAction { khata, suppliers, grn, grnHistory, returnSale, contra, products, invoiceHistory, reports, eod, pairDevice }
 
 /// Modernized POS Counter & Product Catalog for FeedMate.
 /// Backed by ranked search (barcode > SKU > exact name > alias > fuzzy).
@@ -168,6 +169,11 @@ class _ProductSearchScreenState extends State<ProductSearchScreen> {
                     MaterialPageRoute(builder: (_) => const GrnScreen()),
                   );
                   break;
+                case _MenuAction.grnHistory:
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const GrnHistoryScreen()),
+                  );
+                  break;
                 case _MenuAction.returnSale:
                   Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => const ReturnScreen()),
@@ -230,6 +236,15 @@ class _ProductSearchScreenState extends State<ProductSearchScreen> {
                   child: ListTile(
                     leading: Icon(Icons.move_to_inbox_outlined),
                     title: Text('Receive Stock (GRN)'),
+                  ),
+                ),
+              if (session.hasPermission('grn.post'))
+                const PopupMenuItem(
+                  key: Key('menu_item_grn_history'),
+                  value: _MenuAction.grnHistory,
+                  child: ListTile(
+                    leading: Icon(Icons.history_rounded),
+                    title: Text('GRN History'),
                   ),
                 ),
               if (session.hasPermission('return.create'))

@@ -142,6 +142,8 @@ func main() {
 			r.With(appmw.RequirePermission("device.manage")).Post("/devices/pairing-codes", deviceHandlers.GeneratePairingCode)
 
 			r.With(appmw.RequirePermission("grn.post")).Post("/procurement/grns", procurementHandlers.PostGRN)
+			r.With(appmw.RequirePermission("grn.post")).Get("/procurement/grns", procurementHandlers.ListGRNs)
+			r.With(appmw.RequirePermission("grn.post")).Get("/procurement/grns/{id}", procurementHandlers.GetGRNDetail)
 
 			r.With(appmw.RequirePermission("return.create")).Post("/pos/returns", returnsHandlers.PostReturn)
 

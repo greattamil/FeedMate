@@ -301,6 +301,105 @@ func TestPostGRN_RejectedQualityNeverEntersSellableStock(t *testing.T) {
 	}
 }
 
+func TestListGRNs_ReturnsNewestFirstAndFiltersByQuery(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	f := seedFixture(t, db, "5.0")
+	svc := procurement.NewService(db)
+
+	first, err := svc.PostGRN(context.Background(), f.tenantID, f.deviceID, f.userID, procurement.PostGRNRequest{
+		SupplierID: f.supplierID,
+		Lines: []procurement.GRNLineInput{{
+			ProductID: f.productID, BatchCode: "HIST-1", ReceivedQty: decimal.RequireFromString("10"),
+			UOMID: uomBag, LocationID: f.locationID, UnitCost: decimal.RequireFromString("1000.00"),
+			QualityStatus: "ACCEPTED",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("post first GRN: %v", err)
+	}
+	second, err := svc.PostGRN(context.Background(), f.tenantID, f.deviceID, f.userID, procurement.PostGRNRequest{
+		SupplierID: f.supplierID,
+		Lines: []procurement.GRNLineInput{{
+			ProductID: f.productID, BatchCode: "HIST-2", ReceivedQty: decimal.RequireFromString("5"),
+			UOMID: uomBag, LocationID: f.locationID, UnitCost: decimal.RequireFromString("1000.00"),
+			QualityStatus: "ACCEPTED",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("post second GRN: %v", err)
+	}
+
+	page, err := svc.ListGRNs(context.Background(), f.tenantID, "", 10, 0)
+	if err != nil {
+		t.Fatalf("list GRNs: %v", err)
+	}
+	if page.Total != 2 {
+		t.Fatalf("expected total 2, got %d", page.Total)
+	}
+	if len(page.GRNs) != 2 || page.GRNs[0].Header.ID != second.GRNID || page.GRNs[1].Header.ID != first.GRNID {
+		t.Fatalf("expected [second, first] newest-first order, got %+v", page.GRNs)
+	}
+	if page.GRNs[0].SupplierName == "" {
+		t.Fatal("expected the supplier's display name to be joined in")
+	}
+
+	byNumber, err := svc.ListGRNs(context.Background(), f.tenantID, first.GRNNumber, 10, 0)
+	if err != nil {
+		t.Fatalf("list by number: %v", err)
+	}
+	if len(byNumber.GRNs) != 1 || byNumber.GRNs[0].Header.ID != first.GRNID {
+		t.Fatalf("expected exactly the matching GRN, got %+v", byNumber.GRNs)
+	}
+}
+
+func TestGetGRNDetail_ReturnsLinesWithProductAndBatchInfo(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	f := seedFixture(t, db, "5.0")
+	svc := procurement.NewService(db)
+
+	result, err := svc.PostGRN(context.Background(), f.tenantID, f.deviceID, f.userID, procurement.PostGRNRequest{
+		SupplierID: f.supplierID,
+		Lines: []procurement.GRNLineInput{{
+			ProductID: f.productID, BatchCode: "DETAIL-1", ReceivedQty: decimal.RequireFromString("10"),
+			UOMID: uomBag, LocationID: f.locationID, UnitCost: decimal.RequireFromString("1000.00"),
+			QualityStatus: "ACCEPTED",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("post GRN: %v", err)
+	}
+
+	detail, err := svc.GetGRNDetail(context.Background(), f.tenantID, result.GRNID)
+	if err != nil {
+		t.Fatalf("get GRN detail: %v", err)
+	}
+	if detail.Header.ID != result.GRNID {
+		t.Fatalf("expected header id %s, got %s", result.GRNID, detail.Header.ID)
+	}
+	if detail.SupplierName == "" {
+		t.Fatal("expected supplier name")
+	}
+	if len(detail.Lines) != 1 {
+		t.Fatalf("expected 1 line, got %d", len(detail.Lines))
+	}
+	line := detail.Lines[0]
+	if line.BatchCode != "DETAIL-1" {
+		t.Fatalf("expected batch code DETAIL-1, got %q", line.BatchCode)
+	}
+	if !line.ReceivedQty.Equal(decimal.RequireFromString("10")) {
+		t.Fatalf("expected received qty 10, got %s", line.ReceivedQty)
+	}
+	if line.ProductName == "" || line.SKU == "" {
+		t.Fatalf("expected product name and SKU to be joined in, got %+v", line)
+	}
+
+	if _, err := svc.GetGRNDetail(context.Background(), f.tenantID, uuid.New()); !errors.Is(err, procurement.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for a nonexistent GRN, got: %v", err)
+	}
+}
+
 func getPayable(db *dbctx.DB, supplierID uuid.UUID) (decimal.Decimal, error) {
 	var balance decimal.Decimal
 	err := db.WithAdminTx(context.Background(), func(tx pgx.Tx) error {

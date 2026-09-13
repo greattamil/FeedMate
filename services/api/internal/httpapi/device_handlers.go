@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
+	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
 	"github.com/andipatti/feedmate/services/api/internal/domain/devicepairing"
@@ -13,6 +16,87 @@ import (
 
 type DeviceHandlers struct {
 	DevicePairing *devicepairing.Service
+}
+
+// List returns registered devices newest-first, optionally filtered by a
+// substring match on display name via the `q` query param.
+func (h *DeviceHandlers) List(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	claims, ok := reqctx.Claims(r.Context())
+	if !ok {
+		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		return
+	}
+	query := r.URL.Query().Get("q")
+	limit := 50
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			limit = n
+		}
+	}
+	offset := 0
+	if v := r.URL.Query().Get("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			offset = n
+		}
+	}
+	page, err := h.DevicePairing.ListDevices(r.Context(), claims.TenantID, query, limit, offset)
+	if err != nil {
+		WriteError(w, reqID, CodeInternal, "failed to list devices: "+err.Error())
+		return
+	}
+	out := make([]map[string]interface{}, 0, len(page.Devices))
+	for _, d := range page.Devices {
+		row := map[string]interface{}{
+			"id":             d.ID.String(),
+			"device_uuid":    d.DeviceUUID.String(),
+			"display_name":   d.DisplayName,
+			"platform":       d.Platform,
+			"status":         d.Status,
+			"security_state": d.SecurityState,
+			"registered_at":  d.RegisteredAt.Format(time.RFC3339),
+		}
+		if d.LastSeenAt != nil {
+			row["last_seen_at"] = d.LastSeenAt.Format(time.RFC3339)
+		}
+		out = append(out, row)
+	}
+	WriteJSON(w, http.StatusOK, map[string]interface{}{"devices": out, "total": page.Total})
+}
+
+type revokeDeviceRequest struct {
+	Reason string `json:"reason,omitempty"`
+}
+
+// Revoke locks a device out immediately (see
+// devicepairing.Service.RevokeDevice's doc comment): flips its status to
+// REVOKED and invalidates every one of its still-valid refresh tokens.
+func (h *DeviceHandlers) Revoke(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	claims, ok := reqctx.Claims(r.Context())
+	if !ok {
+		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid device id")
+		return
+	}
+	var req revokeDeviceRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid request body")
+		return
+	}
+	if err := h.DevicePairing.RevokeDevice(r.Context(), claims.TenantID, id, claims.UserID, req.Reason); err != nil {
+		if errors.Is(err, devicepairing.ErrDeviceNotFound) {
+			WriteError(w, reqID, CodeNotFound, "device not found")
+			return
+		}
+		WriteError(w, reqID, CodeInternal, "failed to revoke device: "+err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // GeneratePairingCode is called by an authenticated user holding

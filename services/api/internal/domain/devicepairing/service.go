@@ -16,8 +16,8 @@ import (
 )
 
 var (
-	ErrValidation      = errors.New("validation error")
-	ErrCodeInvalid     = errors.New("pairing code is invalid, expired, or already used")
+	ErrValidation  = errors.New("validation error")
+	ErrCodeInvalid = errors.New("pairing code is invalid, expired, or already used")
 )
 
 const (
@@ -130,4 +130,58 @@ func (s *Service) RegisterDevice(ctx context.Context, code string, deviceUUID uu
 		return nil, err
 	}
 	return &RegisterResult{TenantID: tenantID}, nil
+}
+
+// DeviceListPage is one page of the device-management browse list.
+type DeviceListPage struct {
+	Devices []Device
+	Total   int
+}
+
+func (s *Service) ListDevices(ctx context.Context, tenantID uuid.UUID, query string, limit, offset int) (*DeviceListPage, error) {
+	var page DeviceListPage
+	err := s.db.WithTenantReadTx(ctx, tenantID, func(tx pgx.Tx) error {
+		devices, total, err := ListDevices(ctx, tx, query, limit, offset)
+		if err != nil {
+			return err
+		}
+		page.Devices = devices
+		page.Total = total
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &page, nil
+}
+
+// RevokeDevice locks a device out immediately: it flips the device's status
+// to REVOKED (so it can never again complete a fresh login — see
+// identity.Service.Login's status check) and, critically, also revokes
+// every one of its still-valid refresh tokens (see
+// RevokeAllSessionsForDevice's doc comment on why the status flag alone is
+// not sufficient). This is the operation a shop owner uses when a device is
+// lost or stolen.
+func (s *Service) RevokeDevice(ctx context.Context, tenantID, deviceID, actorUserID uuid.UUID, reason string) error {
+	return s.db.WithTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
+		device, err := GetDeviceByID(ctx, tx, deviceID)
+		if err != nil {
+			return err
+		}
+		if err := SetDeviceStatus(ctx, tx, deviceID, "REVOKED"); err != nil {
+			return err
+		}
+		if err := RevokeAllSessionsForDevice(ctx, tx, deviceID); err != nil {
+			return err
+		}
+		auditPayload := map[string]interface{}{"display_name": device.DisplayName, "previous_status": device.Status}
+		if reason != "" {
+			auditPayload["reason"] = reason
+		}
+		_, err = tx.Exec(ctx, `
+			INSERT INTO audit_logs (tenant_id, actor_user_id, action_code, entity_type, entity_id, reason, after_json)
+			VALUES ($1,$2,'DEVICE_REVOKED','device',$3,$4,$5)
+		`, tenantID, actorUserID, deviceID, reason, auditPayload)
+		return err
+	})
 }

@@ -143,6 +143,8 @@ func main() {
 			r.With(appmw.RequirePermission("pos.sell")).Get("/locations", locationHandlers.List)
 
 			r.With(appmw.RequirePermission("device.manage")).Post("/devices/pairing-codes", deviceHandlers.GeneratePairingCode)
+			r.With(appmw.RequirePermission("device.manage")).Get("/devices", deviceHandlers.List)
+			r.With(appmw.RequirePermission("device.manage")).Post("/devices/{id}/revoke", deviceHandlers.Revoke)
 
 			r.With(appmw.RequirePermission("grn.post")).Post("/procurement/grns", procurementHandlers.PostGRN)
 			r.With(appmw.RequirePermission("grn.post")).Get("/procurement/grns", procurementHandlers.ListGRNs)

@@ -67,3 +67,99 @@ func InsertDevice(ctx context.Context, tx pgx.Tx, tenantID, deviceUUID uuid.UUID
 	`, tenantID, deviceUUID, displayName, platform).Scan(&id)
 	return id, err
 }
+
+var ErrDeviceNotFound = errors.New("device not found")
+
+// Device is one registered device row, for the device-management screen.
+type Device struct {
+	ID            uuid.UUID
+	DeviceUUID    uuid.UUID
+	DisplayName   string
+	Platform      string
+	Status        string
+	SecurityState string
+	LastSeenAt    *time.Time
+	RegisteredAt  time.Time
+}
+
+// ListDevices returns devices newest-registered-first, optionally filtered
+// by a case-insensitive substring match on display name.
+func ListDevices(ctx context.Context, tx pgx.Tx, query string, limit, offset int) ([]Device, int, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	var total int
+	if err := tx.QueryRow(ctx, `
+		SELECT COUNT(*) FROM devices WHERE $1 = '' OR display_name ILIKE '%' || $1 || '%'
+	`, query).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	rows, err := tx.Query(ctx, `
+		SELECT id, device_uuid, display_name, platform, status, security_state, last_seen_at, registered_at
+		FROM devices
+		WHERE $1 = '' OR display_name ILIKE '%' || $1 || '%'
+		ORDER BY registered_at DESC
+		LIMIT $2 OFFSET $3
+	`, query, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var out []Device
+	for rows.Next() {
+		var d Device
+		if err := rows.Scan(&d.ID, &d.DeviceUUID, &d.DisplayName, &d.Platform, &d.Status, &d.SecurityState, &d.LastSeenAt, &d.RegisteredAt); err != nil {
+			return nil, 0, err
+		}
+		out = append(out, d)
+	}
+	return out, total, rows.Err()
+}
+
+func GetDeviceByID(ctx context.Context, tx pgx.Tx, id uuid.UUID) (*Device, error) {
+	row := tx.QueryRow(ctx, `
+		SELECT id, device_uuid, display_name, platform, status, security_state, last_seen_at, registered_at
+		FROM devices WHERE id = $1
+	`, id)
+	var d Device
+	if err := row.Scan(&d.ID, &d.DeviceUUID, &d.DisplayName, &d.Platform, &d.Status, &d.SecurityState, &d.LastSeenAt, &d.RegisteredAt); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrDeviceNotFound
+		}
+		return nil, err
+	}
+	return &d, nil
+}
+
+// SetDeviceStatus flips a device's status flag (e.g. to REVOKED) — never a
+// hard delete, since device_sessions/sync_cursors/sync_transactions all
+// reference it.
+func SetDeviceStatus(ctx context.Context, tx pgx.Tx, id uuid.UUID, status string) error {
+	var deactivatedAt *time.Time
+	if status != "ACTIVE" {
+		now := time.Now()
+		deactivatedAt = &now
+	}
+	tag, err := tx.Exec(ctx, `UPDATE devices SET status = $2, deactivated_at = $3 WHERE id = $1`, id, status, deactivatedAt)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrDeviceNotFound
+	}
+	return nil
+}
+
+// RevokeAllSessionsForDevice invalidates every still-valid refresh token
+// issued to this device. Flipping devices.status alone is not enough to cut
+// off access: identity.Service.Refresh never checks device status, only
+// whether the specific session is revoked/expired — so an already-issued,
+// not-yet-expired refresh token would otherwise keep working after a
+// device is marked REVOKED. This is the operation that actually locks a
+// lost/stolen device out immediately.
+func RevokeAllSessionsForDevice(ctx context.Context, tx pgx.Tx, deviceID uuid.UUID) error {
+	_, err := tx.Exec(ctx, `UPDATE device_sessions SET revoked_at = now() WHERE device_id = $1 AND revoked_at IS NULL`, deviceID)
+	return err
+}

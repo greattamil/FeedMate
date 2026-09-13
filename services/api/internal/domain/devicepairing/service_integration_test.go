@@ -13,8 +13,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/andipatti/feedmate/services/api/internal/auth"
 	"github.com/andipatti/feedmate/services/api/internal/dbctx"
 	"github.com/andipatti/feedmate/services/api/internal/domain/devicepairing"
+	"github.com/andipatti/feedmate/services/api/internal/domain/identity"
 )
 
 func mustEnv(t *testing.T, key string) string {
@@ -195,5 +197,111 @@ func TestDevicePairing_ConcurrentRedemptionOnlyOneSucceeds(t *testing.T) {
 	}
 	if successCount != 1 {
 		t.Fatalf("expected exactly 1 of 2 concurrent redemptions to succeed, got %d", successCount)
+	}
+}
+
+func TestListDevices_ReturnsNewestFirstAndFiltersByQuery(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	tenantID, userID := seedTenant(t, db)
+	svc := devicepairing.NewService(db)
+
+	code1, err := svc.GeneratePairingCode(context.Background(), tenantID, userID)
+	if err != nil {
+		t.Fatalf("generate pairing code 1: %v", err)
+	}
+	if _, err := svc.RegisterDevice(context.Background(), code1.Code, uuid.New(), "Front Counter Tablet", "ANDROID"); err != nil {
+		t.Fatalf("register device 1: %v", err)
+	}
+
+	code2, err := svc.GeneratePairingCode(context.Background(), tenantID, userID)
+	if err != nil {
+		t.Fatalf("generate pairing code 2: %v", err)
+	}
+	if _, err := svc.RegisterDevice(context.Background(), code2.Code, uuid.New(), "Back Office Laptop", "WEB"); err != nil {
+		t.Fatalf("register device 2: %v", err)
+	}
+
+	page, err := svc.ListDevices(context.Background(), tenantID, "", 10, 0)
+	if err != nil {
+		t.Fatalf("list devices: %v", err)
+	}
+	if page.Total != 2 {
+		t.Fatalf("expected total 2, got %d", page.Total)
+	}
+	if len(page.Devices) != 2 || page.Devices[0].DisplayName != "Back Office Laptop" || page.Devices[1].DisplayName != "Front Counter Tablet" {
+		t.Fatalf("expected [Back Office Laptop, Front Counter Tablet] newest-first order, got %+v", page.Devices)
+	}
+
+	byName, err := svc.ListDevices(context.Background(), tenantID, "Front Counter", 10, 0)
+	if err != nil {
+		t.Fatalf("list by name: %v", err)
+	}
+	if len(byName.Devices) != 1 || byName.Devices[0].DisplayName != "Front Counter Tablet" {
+		t.Fatalf("expected exactly the matching device, got %+v", byName.Devices)
+	}
+}
+
+func TestRevokeDevice_BlocksFutureLoginAndInvalidatesExistingRefreshToken(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	tenantID, adminUserID := seedTenant(t, db)
+	devicePairingSvc := devicepairing.NewService(db)
+	identitySvc := identity.NewService(db, "test_signing_key", 15*time.Minute, 30*24*time.Hour, 4)
+
+	code, err := devicePairingSvc.GeneratePairingCode(context.Background(), tenantID, adminUserID)
+	if err != nil {
+		t.Fatalf("generate pairing code: %v", err)
+	}
+	deviceUUID := uuid.New()
+	if _, err := devicePairingSvc.RegisterDevice(context.Background(), code.Code, deviceUUID, "Cashier Phone", "ANDROID"); err != nil {
+		t.Fatalf("register device: %v", err)
+	}
+
+	password := "correct horse battery staple"
+	hash, err := auth.HashPassword(password, 4)
+	if err != nil {
+		t.Fatalf("hash password: %v", err)
+	}
+	username := "cashier_" + uuid.NewString()[:8]
+	err = db.WithAdminTx(context.Background(), func(tx pgx.Tx) error {
+		_, err := tx.Exec(context.Background(), `INSERT INTO users (id, tenant_id, username, password_hash, display_name, status) VALUES ($1,$2,$3,$4,'Cashier','ACTIVE')`, uuid.New(), tenantID, username, hash)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("seed cashier user: %v", err)
+	}
+
+	loginResult, err := identitySvc.Login(context.Background(), deviceUUID, username, password)
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+
+	var deviceID uuid.UUID
+	if err := db.WithAdminTx(context.Background(), func(tx pgx.Tx) error {
+		return tx.QueryRow(context.Background(), `SELECT id FROM devices WHERE device_uuid = $1`, deviceUUID).Scan(&deviceID)
+	}); err != nil {
+		t.Fatalf("look up device id: %v", err)
+	}
+
+	if err := devicePairingSvc.RevokeDevice(context.Background(), tenantID, deviceID, adminUserID, "Lost by cashier"); err != nil {
+		t.Fatalf("revoke device: %v", err)
+	}
+
+	// The refresh token issued before revocation must stop working —
+	// flipping devices.status alone would not be enough, since Refresh only
+	// checks the session's own revoked_at/expires_at (see
+	// RevokeAllSessionsForDevice's doc comment).
+	if _, err := identitySvc.Refresh(context.Background(), tenantID, loginResult.RefreshToken); !errors.Is(err, identity.ErrRefreshTokenInvalid) {
+		t.Fatalf("expected ErrRefreshTokenInvalid for a revoked device's refresh token, got: %v", err)
+	}
+
+	// A fresh login attempt on the same device must also be rejected now.
+	if _, err := identitySvc.Login(context.Background(), deviceUUID, username, password); err == nil {
+		t.Fatal("expected login to be rejected for a revoked device")
+	}
+
+	if err := devicePairingSvc.RevokeDevice(context.Background(), tenantID, uuid.New(), adminUserID, ""); !errors.Is(err, devicepairing.ErrDeviceNotFound) {
+		t.Fatalf("expected ErrDeviceNotFound for a nonexistent device, got: %v", err)
 	}
 }

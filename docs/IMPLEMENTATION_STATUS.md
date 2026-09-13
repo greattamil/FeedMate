@@ -812,6 +812,24 @@ Full Flutter suite: 76 tests, all passing. Full Go integration suite: 14
 packages, all passing. `flutter analyze`/`go vet` clean. No live emulator
 verification performed for this phase.
 
+## Phase 36 — Device Management: List + Revoke (Backend + Flutter)
+
+Before this phase there was **no way to revoke a lost or stolen device** —
+`GeneratePairingCode`/`RegisterDevice` were the only two operations on the
+`devicepairing` domain. This is a genuine security gap fix, not just a
+missing screen.
+
+| Area | Status | Evidence |
+|---|---|---|
+| `devicepairing.Service.ListDevices` / `RevokeDevice` — revoke flips `devices.status` to `REVOKED` **and** invalidates every one of the device's still-valid refresh tokens; flipping status alone would not be enough, since `identity.Service.Refresh` only checks a session's own `revoked_at`/`expires_at`, never the owning device's status | **VERIFIED, and a real bug caught before shipping** | New integration test `TestRevokeDevice_BlocksFutureLoginAndInvalidatesExistingRefreshToken` logs in for a real refresh token, revokes the device, then proves both a fresh login *and* a refresh with the pre-revocation token are rejected. Writing this test surfaced an unrelated real bug: `SetDeviceStatus`'s SQL reused the `$2` placeholder in two different expression contexts (`status = $2` and `CASE WHEN $2 = 'ACTIVE'`), which Postgres rejected outright with `42P08 ambiguous_parameter` — fixed by computing `deactivated_at` in Go and passing it as its own parameter. Never reached a device; caught entirely by the test |
+| `GET /api/v1/devices` (list, filtered by display-name substring) and `POST /api/v1/devices/{id}/revoke`, both gated `device.manage` | **VERIFIED** | `go build`/`go vet` clean |
+| `DeviceManagementScreen` (search list, status shown per device, revoke button only on ACTIVE/PENDING devices, confirmation dialog with an optional reason) | **VERIFIED** | Wired into the overflow menu gated on `device.manage` |
+| 3 new widget tests (`test/device_management_test.dart`) | **VERIFIED** | List with per-status revoke-button visibility, confirm-and-revoke posts the exact body, cancel does not call the server |
+
+Full Flutter suite: 79 tests, all passing. Full Go integration suite: 14
+packages, all passing (the fixed package included). `flutter analyze`/
+`go vet` clean. No live emulator verification performed for this phase.
+
 ## Not Yet Started
 
 Customer/supplier aging (30/60/90-day buckets) and margin reports,

@@ -10,6 +10,7 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_decorations.dart';
 import '../../core/theme/app_typography.dart';
 import '../auditlog/audit_log_screen.dart';
+import '../auth/device_management_screen.dart';
 import '../auth/generate_pairing_code_screen.dart';
 import '../auth/login_screen.dart';
 import '../contra/contra_screen.dart';
@@ -28,7 +29,7 @@ import 'invoice_history_screen.dart';
 import 'product.dart';
 import 'product_repository.dart';
 
-enum _MenuAction { khata, suppliers, grn, grnHistory, returnSale, contra, products, invoiceHistory, reports, eod, pairDevice, auditLog }
+enum _MenuAction { khata, suppliers, grn, grnHistory, returnSale, contra, products, invoiceHistory, reports, eod, pairDevice, manageDevices, auditLog }
 
 /// Modernized POS Counter & Product Catalog for FeedMate.
 /// Backed by ranked search (barcode > SKU > exact name > alias > fuzzy).
@@ -210,6 +211,11 @@ class _ProductSearchScreenState extends State<ProductSearchScreen> {
                     MaterialPageRoute(builder: (_) => const GeneratePairingCodeScreen()),
                   );
                   break;
+                case _MenuAction.manageDevices:
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const DeviceManagementScreen()),
+                  );
+                  break;
                 case _MenuAction.auditLog:
                   Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => const AuditLogScreen()),
@@ -314,6 +320,15 @@ class _ProductSearchScreenState extends State<ProductSearchScreen> {
                   child: ListTile(
                     leading: Icon(Icons.qr_code_2),
                     title: Text('Pair a new device'),
+                  ),
+                ),
+              if (session.hasPermission('device.manage'))
+                const PopupMenuItem(
+                  key: Key('menu_item_manage_devices'),
+                  value: _MenuAction.manageDevices,
+                  child: ListTile(
+                    leading: Icon(Icons.devices_other_outlined),
+                    title: Text('Manage Devices'),
                   ),
                 ),
               if (session.hasPermission('tenant.admin'))

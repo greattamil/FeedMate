@@ -913,6 +913,27 @@ Full Flutter suite: 92 tests, all passing. Full Go integration suite: 16
 packages, all passing. `flutter analyze`/`go vet` clean. No live emulator
 verification performed for this phase.
 
+## Phase 41 — Report Exports (CSV + Share), Flutter-only
+
+None of Sales Summary, Stock on Hand, Customer Balances, EOD History,
+Stock Counts, or the Audit Log could be exported — a shop owner or tax
+consultant had no way to get report data into a spreadsheet or send it
+anywhere. Pure frontend addition: every number already came from the
+server (see `reports_api.dart`'s own doc comment), so this only needed a
+CSV encoder and a share sheet, no new backend endpoints.
+
+| Area | Status | Evidence |
+|---|---|---|
+| `core/csv_export.dart`: `buildCsv()` (RFC 4180 quoting — commas, quotes, newlines) and `shareCsv()` (writes to a temp file via `path_provider`, opens the native share sheet via `share_plus` so the file arrives as a real `.csv` attachment, not mangled plain text) | **VERIFIED** | 6 new unit tests on `buildCsv()` covering the quoting rules directly — `shareCsv()` itself isn't exercised in tests since invoking the real platform share sheet needs platform bindings this headless test environment doesn't have |
+| Added `share_plus` and `path_provider` packages | **VERIFIED** | `flutter pub add`, `flutter analyze` clean |
+| "Export CSV" action added to all 4 report tabs (Sales, Stock, Balances, EOD History), the Stock Count detail screen, and the Audit Log screen — every report the gap-analysis named | **VERIFIED** | Button only rendered once there is data to export (hidden on the empty state, confirmed for Audit Log); each button exports exactly the fields visible on screen |
+| 4 existing report widget tests extended with export-button-presence assertions per tab; Stock Count and Audit Log tests likewise extended | **VERIFIED** | All existing tests still pass unchanged otherwise — this was an additive, non-breaking change to every screen it touched |
+
+Full Flutter suite: 98 tests, all passing. `flutter analyze` clean. Go
+backend unchanged this phase (no new endpoints — the export button
+reshapes data the client already had). No live emulator verification
+performed for this phase.
+
 ## Not Yet Started
 
 Customer/supplier aging (30/60/90-day buckets) and margin reports,

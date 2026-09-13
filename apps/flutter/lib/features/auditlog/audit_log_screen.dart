@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/api_client.dart';
 import '../../core/api_error.dart';
+import '../../core/csv_export.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_decorations.dart';
 import '../../core/theme/app_typography.dart';
@@ -73,6 +74,24 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
     super.dispose();
   }
 
+  Future<void> _export() async {
+    await shareCsv(
+      fileName: 'audit-log-${DateFormat('yyyy-MM-dd').format(DateTime.now())}.csv',
+      headers: const ['Date/Time', 'Action', 'Entity Type', 'Entity Id', 'Actor', 'Reason'],
+      rows: [
+        for (final e in _results)
+          [
+            _dateFormat.format(e.createdAt.toLocal()),
+            e.actionCode,
+            e.entityType,
+            e.entityId ?? '',
+            e.actorName ?? '',
+            e.reason ?? '',
+          ],
+      ],
+    );
+  }
+
   void _showDetail(AuditLogEntry entry) {
     const encoder = JsonEncoder.withIndent('  ');
     showDialog<void>(
@@ -117,6 +136,15 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
       backgroundColor: AppColors.background,
       appBar: AppBar(
         title: const Text('Audit Log', style: AppTypography.headline),
+        actions: [
+          if (_results.isNotEmpty)
+            IconButton(
+              key: const Key('audit_log_export_csv_button'),
+              onPressed: _export,
+              icon: const Icon(Icons.ios_share_rounded),
+              tooltip: 'Export CSV',
+            ),
+        ],
       ),
       body: Column(
         children: [

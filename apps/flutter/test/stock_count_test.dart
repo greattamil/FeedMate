@@ -148,6 +148,7 @@ void main() {
     expect(postedLineBody!['counted_qty'], '18');
 
     expect(find.byKey(const Key('stock_count_line_line-1')), findsOneWidget);
+    expect(find.byKey(const Key('stock_count_export_csv_button')), findsOneWidget);
     expect(find.textContaining('Expected 20 · Counted 18'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('stock_count_post_button')));

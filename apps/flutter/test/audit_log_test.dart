@@ -56,6 +56,7 @@ void main() {
     expect(find.text('EOD_CLOSED'), findsOneWidget);
     expect(find.text('CREDIT_LIMIT_OVERRIDE'), findsOneWidget);
     expect(find.textContaining('Store Owner'), findsOneWidget);
+    expect(find.byKey(const Key('audit_log_export_csv_button')), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('audit_log_item_log-2')));
     await tester.pumpAndSettle();
@@ -76,6 +77,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('No audit entries found'), findsOneWidget);
+    expect(find.byKey(const Key('audit_log_export_csv_button')), findsNothing);
   });
 
   testWidgets('Audit log search filters via the q query param', (tester) async {

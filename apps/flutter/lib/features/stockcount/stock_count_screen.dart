@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/api_client.dart';
 import '../../core/api_error.dart';
+import '../../core/csv_export.dart';
 import '../procurement/product_picker_screen.dart';
 import 'stock_count_api.dart';
 import 'stock_count_line_form_screen.dart';
@@ -161,12 +162,36 @@ class _StockCountScreenState extends State<StockCountScreen> {
     }
   }
 
+  Future<void> _export() async {
+    final detail = _detail;
+    if (detail == null) return;
+    await shareCsv(
+      fileName: 'stock-count-${detail.id}.csv',
+      headers: const ['SKU', 'Product', 'Batch', 'Expected Qty', 'Counted Qty', 'Variance', 'Reason'],
+      rows: [
+        for (final l in detail.lines)
+          [l.sku, l.productName, l.batchCode, l.expectedQty.toString(), l.countedQty.toString(), l.varianceQty.toString(), l.reason ?? ''],
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final detail = _detail;
     final isOpen = detail?.status == 'IN_PROGRESS';
     return Scaffold(
-      appBar: AppBar(title: Text('Stock Count · ${detail?.countMode ?? ''}')),
+      appBar: AppBar(
+        title: Text('Stock Count · ${detail?.countMode ?? ''}'),
+        actions: [
+          if (detail != null && detail.lines.isNotEmpty)
+            IconButton(
+              key: const Key('stock_count_export_csv_button'),
+              onPressed: _export,
+              icon: const Icon(Icons.ios_share_rounded),
+              tooltip: 'Export CSV',
+            ),
+        ],
+      ),
       floatingActionButton: isOpen
           ? FloatingActionButton.extended(
               key: const Key('stock_count_add_item_fab'),

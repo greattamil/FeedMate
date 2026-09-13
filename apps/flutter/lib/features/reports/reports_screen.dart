@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/api_client.dart';
 import '../../core/api_error.dart';
+import '../../core/csv_export.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_decorations.dart';
 import 'reports_api.dart';
@@ -67,6 +68,7 @@ class _SalesSummaryTabState extends State<_SalesSummaryTab> {
   late DateTime _dateTo;
 
   static final _dateFormat = DateFormat('dd MMM yyyy');
+  static final _fileDateFormat = DateFormat('yyyy-MM-dd');
 
   @override
   void initState() {
@@ -114,6 +116,24 @@ class _SalesSummaryTabState extends State<_SalesSummaryTab> {
     await _load();
   }
 
+  Future<void> _export() async {
+    final summary = _summary;
+    if (summary == null) return;
+    final rows = <List<String>>[
+      ['Invoices', summary.invoiceCount.toString()],
+      ['Gross Sales', summary.grossSales.toStringAsFixed(2)],
+      ['Discounts', summary.discountTotal.toStringAsFixed(2)],
+      ['Tax', summary.taxTotal.toStringAsFixed(2)],
+      ['Net Sales', summary.netSales.toStringAsFixed(2)],
+      for (final t in summary.byTender) ['Tender: ${t.method}', t.total.toStringAsFixed(2)],
+    ];
+    await shareCsv(
+      fileName: 'sales-summary-${_fileDateFormat.format(_dateFrom)}-to-${_fileDateFormat.format(_dateTo)}.csv',
+      headers: const ['Metric', 'Amount'],
+      rows: rows,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final summary = _summary;
@@ -158,7 +178,17 @@ class _SalesSummaryTabState extends State<_SalesSummaryTab> {
               ),
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
+          if (summary != null)
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                key: const Key('sales_export_csv_button'),
+                onPressed: _export,
+                icon: const Icon(Icons.ios_share_rounded, size: 16),
+                label: const Text('Export CSV'),
+              ),
+            ),
           if (_loading) const Center(child: CircularProgressIndicator()),
           if (_error != null)
             Container(
@@ -273,6 +303,23 @@ class _StockOnHandTabState extends State<_StockOnHandTab> {
     }
   }
 
+  Future<void> _export() async {
+    await shareCsv(
+      fileName: 'stock-on-hand-${DateFormat('yyyy-MM-dd').format(DateTime.now())}.csv',
+      headers: const ['SKU', 'Product', 'Available Qty', 'Batch Count', 'Nearest Expiry'],
+      rows: [
+        for (final l in _lines)
+          [
+            l.sku,
+            l.name,
+            l.totalAvailable.toString(),
+            l.batchCount.toString(),
+            l.nearestExpiry != null ? DateFormat('yyyy-MM-dd').format(l.nearestExpiry!) : '',
+          ],
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
@@ -288,8 +335,20 @@ class _StockOnHandTabState extends State<_StockOnHandTab> {
           : ListView.builder(
               key: const Key('stock_list'),
               padding: const EdgeInsets.all(16),
-              itemCount: _lines.length,
+              itemCount: _lines.length + 1,
               itemBuilder: (context, index) {
+                if (index == 0) {
+                  return Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton.icon(
+                      key: const Key('stock_export_csv_button'),
+                      onPressed: _export,
+                      icon: const Icon(Icons.ios_share_rounded, size: 16),
+                      label: const Text('Export CSV'),
+                    ),
+                  );
+                }
+                index -= 1;
                 final l = _lines[index];
                 return Container(
                   key: Key('stock_${l.productId}'),
@@ -386,6 +445,16 @@ class _CustomerBalancesTabState extends State<_CustomerBalancesTab> {
     }
   }
 
+  Future<void> _export() async {
+    await shareCsv(
+      fileName: 'customer-balances-${DateFormat('yyyy-MM-dd').format(DateTime.now())}.csv',
+      headers: const ['Customer', 'Outstanding Balance', 'Credit Limit'],
+      rows: [
+        for (final b in _balances) [b.name, b.balance.toStringAsFixed(2), b.creditLimit.toStringAsFixed(2)],
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
@@ -401,8 +470,20 @@ class _CustomerBalancesTabState extends State<_CustomerBalancesTab> {
           : ListView.builder(
               key: const Key('balances_list'),
               padding: const EdgeInsets.all(16),
-              itemCount: _balances.length,
+              itemCount: _balances.length + 1,
               itemBuilder: (context, index) {
+                if (index == 0) {
+                  return Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton.icon(
+                      key: const Key('balances_export_csv_button'),
+                      onPressed: _export,
+                      icon: const Icon(Icons.ios_share_rounded, size: 16),
+                      label: const Text('Export CSV'),
+                    ),
+                  );
+                }
+                index -= 1;
                 final b = _balances[index];
                 final overLimit = b.balance > b.creditLimit;
                 return Container(
@@ -471,6 +552,26 @@ class _EodHistoryTabState extends State<_EodHistoryTab> {
     }
   }
 
+  Future<void> _export() async {
+    await shareCsv(
+      fileName: 'eod-history-${DateFormat('yyyy-MM-dd').format(DateTime.now())}.csv',
+      headers: const ['Business Date', 'Opening Cash', 'Cash Sales', 'Cash Refunds', 'Expected Cash', 'Actual Cash', 'Variance', 'Status'],
+      rows: [
+        for (final s in _sessions)
+          [
+            _dateFormat.format(s.businessDate),
+            s.openingCash.toStringAsFixed(2),
+            s.cashSales.toStringAsFixed(2),
+            s.cashRefunds.toStringAsFixed(2),
+            s.expectedCash.toStringAsFixed(2),
+            s.actualCash?.toStringAsFixed(2) ?? '',
+            s.variance?.toStringAsFixed(2) ?? '',
+            s.status,
+          ],
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
@@ -486,8 +587,20 @@ class _EodHistoryTabState extends State<_EodHistoryTab> {
           : ListView.builder(
               key: const Key('eod_history_list'),
               padding: const EdgeInsets.all(16),
-              itemCount: _sessions.length,
+              itemCount: _sessions.length + 1,
               itemBuilder: (context, index) {
+                if (index == 0) {
+                  return Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton.icon(
+                      key: const Key('eod_export_csv_button'),
+                      onPressed: _export,
+                      icon: const Icon(Icons.ios_share_rounded, size: 16),
+                      label: const Text('Export CSV'),
+                    ),
+                  );
+                }
+                index -= 1;
                 final s = _sessions[index];
                 return Container(
                   key: Key('eod_history_${_dateFormat.format(s.businessDate)}'),

@@ -97,6 +97,7 @@ void main() {
     expect(find.text('₹52000.00'), findsOneWidget); // net
     expect(find.text('₹30000.00'), findsOneWidget); // CASH tender
     expect(find.text('₹22000.00'), findsOneWidget); // CREDIT tender
+    expect(find.byKey(const Key('sales_export_csv_button')), findsOneWidget);
   });
 
   testWidgets('Stock tab lists products with expiry warnings', (tester) async {
@@ -111,6 +112,7 @@ void main() {
     expect(find.text('Poultry Feed 25kg'), findsOneWidget);
     expect(find.text('Expiring soon'), findsOneWidget);
     expect(find.textContaining('nearest expiry'), findsOneWidget);
+    expect(find.byKey(const Key('stock_export_csv_button')), findsOneWidget);
   });
 
   testWidgets('Balances tab highlights an over-limit customer', (tester) async {
@@ -127,6 +129,7 @@ void main() {
 
     final overLimitText = tester.widget<Text>(find.text('₹12000.00'));
     expect(overLimitText.style?.color, Colors.red);
+    expect(find.byKey(const Key('balances_export_csv_button')), findsOneWidget);
   });
 
   testWidgets('EOD History tab lists sessions with variance coloring', (tester) async {
@@ -141,5 +144,6 @@ void main() {
     expect(find.textContaining('11 Sep 2026'), findsOneWidget);
     expect(find.text('₹0.00'), findsOneWidget);
     expect(find.text('₹-300.00'), findsOneWidget);
+    expect(find.byKey(const Key('eod_export_csv_button')), findsOneWidget);
   });
 }

@@ -237,6 +237,76 @@ func InsertTender(ctx context.Context, tx pgx.Tx, tenantID, invoiceID uuid.UUID,
 	return err
 }
 
+// ListInvoices returns finalized invoices newest-first, for the invoice
+// history/reprint screen. query optionally filters by a case-insensitive
+// substring match on invoice_number or the customer's name snapshot.
+func ListInvoices(ctx context.Context, tx pgx.Tx, query string, limit, offset int) ([]InvoiceHeader, int, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	var total int
+	if err := tx.QueryRow(ctx, `
+		SELECT COUNT(*) FROM sales_invoices
+		WHERE status = 'FINALIZED'
+		  AND ($1 = '' OR invoice_number ILIKE '%' || $1 || '%' OR customer_name_snapshot ILIKE '%' || $1 || '%')
+	`, query).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	rows, err := tx.Query(ctx, `
+		SELECT id, financial_year_id, invoice_number, customer_id, customer_name_snapshot,
+		       subtotal, discount_total, taxable_total, tax_total, rounding_amount, grand_total,
+		       payment_status, status, source, client_transaction_id, device_id, cashier_user_id, finalized_at
+		FROM sales_invoices
+		WHERE status = 'FINALIZED'
+		  AND ($1 = '' OR invoice_number ILIKE '%' || $1 || '%' OR customer_name_snapshot ILIKE '%' || $1 || '%')
+		ORDER BY finalized_at DESC
+		LIMIT $2 OFFSET $3
+	`, query, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var out []InvoiceHeader
+	for rows.Next() {
+		h, err := scanInvoiceHeader(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		out = append(out, *h)
+	}
+	return out, total, rows.Err()
+}
+
+// InvoiceTenderRecord is the read-side shape of one tender line on a
+// finalized invoice, for the reprint/detail view.
+type InvoiceTenderRecord struct {
+	Method    string
+	Amount    decimal.Decimal
+	Reference *string
+}
+
+func ListTenders(ctx context.Context, tx pgx.Tx, invoiceID uuid.UUID) ([]InvoiceTenderRecord, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT tender_method, amount, reference FROM invoice_tenders WHERE invoice_id = $1
+	`, invoiceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []InvoiceTenderRecord
+	for rows.Next() {
+		var t InvoiceTenderRecord
+		if err := rows.Scan(&t.Method, &t.Amount, &t.Reference); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
 func GetUOMCode(ctx context.Context, tx pgx.Tx, uomID uuid.UUID) (string, error) {
 	var code string
 	err := tx.QueryRow(ctx, `SELECT code FROM uoms WHERE id = $1`, uomID).Scan(&code)

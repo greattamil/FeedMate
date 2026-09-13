@@ -432,3 +432,83 @@ func TestGetInvoiceForReturn(t *testing.T) {
 		}
 	})
 }
+
+func TestListInvoices_ReturnsNewestFirstAndFiltersByQuery(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	f := seedFixture(t, db)
+	svc := pos.NewService(db)
+
+	first, err := svc.FinalizeInvoice(context.Background(), f.tenantID, f.deviceID, f.userID, pos.FinalizeRequest{
+		ClientTransactionID: uuid.New(),
+		LocationID:          f.locationID,
+		Lines:               []pos.SaleLine{{ProductID: f.productID, Quantity: decimal.RequireFromString("1")}},
+		Tenders:             []pos.Tender{{Method: "CASH", Amount: decimal.RequireFromString("1260.00")}},
+	})
+	if err != nil {
+		t.Fatalf("finalize first: %v", err)
+	}
+	second, err := svc.FinalizeInvoice(context.Background(), f.tenantID, f.deviceID, f.userID, pos.FinalizeRequest{
+		ClientTransactionID: uuid.New(),
+		LocationID:          f.locationID,
+		Lines:               []pos.SaleLine{{ProductID: f.productID, Quantity: decimal.RequireFromString("2")}},
+		Tenders:             []pos.Tender{{Method: "CASH", Amount: decimal.RequireFromString("2520.00")}},
+	})
+	if err != nil {
+		t.Fatalf("finalize second: %v", err)
+	}
+
+	page, err := svc.ListInvoices(context.Background(), f.tenantID, "", 10, 0)
+	if err != nil {
+		t.Fatalf("list invoices: %v", err)
+	}
+	if page.Total != 2 {
+		t.Fatalf("expected total 2, got %d", page.Total)
+	}
+	if len(page.Invoices) != 2 || page.Invoices[0].ID != second.InvoiceID || page.Invoices[1].ID != first.InvoiceID {
+		t.Fatalf("expected [second, first] newest-first order, got %+v", page.Invoices)
+	}
+
+	byNumber, err := svc.ListInvoices(context.Background(), f.tenantID, first.InvoiceNumber, 10, 0)
+	if err != nil {
+		t.Fatalf("list by number: %v", err)
+	}
+	if len(byNumber.Invoices) != 1 || byNumber.Invoices[0].ID != first.InvoiceID {
+		t.Fatalf("expected exactly the matching invoice, got %+v", byNumber.Invoices)
+	}
+}
+
+func TestGetInvoiceDetail_ReturnsLinesAndTenders(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	f := seedFixture(t, db)
+	svc := pos.NewService(db)
+
+	result, err := svc.FinalizeInvoice(context.Background(), f.tenantID, f.deviceID, f.userID, pos.FinalizeRequest{
+		ClientTransactionID: uuid.New(),
+		LocationID:          f.locationID,
+		Lines:               []pos.SaleLine{{ProductID: f.productID, Quantity: decimal.RequireFromString("3")}},
+		Tenders:             []pos.Tender{{Method: "CASH", Amount: decimal.RequireFromString("3780.00")}},
+	})
+	if err != nil {
+		t.Fatalf("finalize: %v", err)
+	}
+
+	detail, err := svc.GetInvoiceDetail(context.Background(), f.tenantID, result.InvoiceID)
+	if err != nil {
+		t.Fatalf("get invoice detail: %v", err)
+	}
+	if detail.Header.ID != result.InvoiceID {
+		t.Fatalf("expected header id %s, got %s", result.InvoiceID, detail.Header.ID)
+	}
+	if len(detail.Lines) != 1 || !detail.Lines[0].Quantity.Equal(decimal.RequireFromString("3")) {
+		t.Fatalf("expected 1 line with quantity 3, got %+v", detail.Lines)
+	}
+	if len(detail.Tenders) != 1 || detail.Tenders[0].Method != "CASH" || !detail.Tenders[0].Amount.Equal(decimal.RequireFromString("3780.00")) {
+		t.Fatalf("expected 1 CASH tender for 3780.00, got %+v", detail.Tenders)
+	}
+
+	if _, err := svc.GetInvoiceDetail(context.Background(), f.tenantID, uuid.New()); !errors.Is(err, pos.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for a nonexistent invoice, got: %v", err)
+	}
+}

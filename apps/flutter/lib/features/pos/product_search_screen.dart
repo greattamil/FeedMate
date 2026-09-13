@@ -22,10 +22,11 @@ import '../supplier/supplier_list_screen.dart';
 import '../sync/outbox_screen.dart';
 import 'cart_model.dart';
 import 'cart_screen.dart';
+import 'invoice_history_screen.dart';
 import 'product.dart';
 import 'product_repository.dart';
 
-enum _MenuAction { khata, suppliers, grn, returnSale, contra, products, reports, eod, pairDevice }
+enum _MenuAction { khata, suppliers, grn, returnSale, contra, products, invoiceHistory, reports, eod, pairDevice }
 
 /// Modernized POS Counter & Product Catalog for FeedMate.
 /// Backed by ranked search (barcode > SKU > exact name > alias > fuzzy).
@@ -182,6 +183,11 @@ class _ProductSearchScreenState extends State<ProductSearchScreen> {
                     MaterialPageRoute(builder: (_) => const ProductListScreen()),
                   );
                   break;
+                case _MenuAction.invoiceHistory:
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const InvoiceHistoryScreen()),
+                  );
+                  break;
                 case _MenuAction.eod:
                   Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => const EodScreen()),
@@ -251,6 +257,15 @@ class _ProductSearchScreenState extends State<ProductSearchScreen> {
                   child: ListTile(
                     leading: Icon(Icons.inventory_2_outlined),
                     title: Text('Products'),
+                  ),
+                ),
+              if (session.hasPermission('pos.sell'))
+                const PopupMenuItem(
+                  key: Key('menu_item_invoice_history'),
+                  value: _MenuAction.invoiceHistory,
+                  child: ListTile(
+                    leading: Icon(Icons.receipt_long_outlined),
+                    title: Text('Invoice History'),
                   ),
                 ),
               if (session.hasPermission('report.view'))

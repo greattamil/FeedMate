@@ -106,6 +106,66 @@ type FinalizeResult struct {
 	Duplicate     bool // true if this was an idempotent replay of an already-finalized invoice
 }
 
+// InvoiceListPage is one page of the invoice history/reprint list.
+type InvoiceListPage struct {
+	Invoices []InvoiceHeader
+	Total    int
+}
+
+// ListInvoices returns finalized invoices newest-first — the history/reprint
+// screen's browse endpoint (distinct from GetInvoiceForReturn's single
+// lookup-by-number, which exists purely to feed the returns line picker).
+func (s *Service) ListInvoices(ctx context.Context, tenantID uuid.UUID, query string, limit, offset int) (*InvoiceListPage, error) {
+	var page InvoiceListPage
+	err := s.db.WithTenantReadTx(ctx, tenantID, func(tx pgx.Tx) error {
+		invoices, total, err := ListInvoices(ctx, tx, query, limit, offset)
+		if err != nil {
+			return err
+		}
+		page.Invoices = invoices
+		page.Total = total
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &page, nil
+}
+
+// InvoiceDetail is the full reprint view of one past sale: header, lines,
+// and how it was actually paid for.
+type InvoiceDetail struct {
+	Header  *InvoiceHeader
+	Lines   []InvoiceLineSummary
+	Tenders []InvoiceTenderRecord
+}
+
+func (s *Service) GetInvoiceDetail(ctx context.Context, tenantID, invoiceID uuid.UUID) (*InvoiceDetail, error) {
+	var result InvoiceDetail
+	err := s.db.WithTenantReadTx(ctx, tenantID, func(tx pgx.Tx) error {
+		header, err := GetInvoiceByID(ctx, tx, invoiceID)
+		if err != nil {
+			return err
+		}
+		lines, err := ListInvoiceLines(ctx, tx, header.ID)
+		if err != nil {
+			return err
+		}
+		tenders, err := ListTenders(ctx, tx, header.ID)
+		if err != nil {
+			return err
+		}
+		result.Header = header
+		result.Lines = lines
+		result.Tenders = tenders
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 // FinalizeInvoice is the single authoritative, atomic transaction for a POS
 // sale: it validates stock, allocates batches (FEFO/FIFO), calculates tax
 // from the current tax-profile snapshot, validates the tender split,

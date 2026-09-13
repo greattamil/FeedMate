@@ -733,6 +733,23 @@ Full Flutter suite after Phases 30+31: 67 tests, all passing. `flutter
 analyze` clean (only pre-existing info-level lints). No live emulator
 verification performed for either phase (same caveat as Phases 28/29).
 
+## Phase 32 — Invoice History / Reprint (Backend + Flutter)
+
+Only a single-invoice lookup-by-number existed (`GetInvoiceForReturn`, built
+purely to feed the returns line picker) — there was no way to browse past
+sales or view one in full. Built the missing backend list/detail endpoints
+and the Flutter screens.
+
+| Area | Status | Evidence |
+|---|---|---|
+| `pos.Service.ListInvoices` (paginated, newest-first, filtered by invoice number or customer name) and `pos.Service.GetInvoiceDetail` (header + lines + tenders) | **VERIFIED** | New integration tests: `TestListInvoices_ReturnsNewestFirstAndFiltersByQuery` and `TestGetInvoiceDetail_ReturnsLinesAndTenders` (asserts a split CASH+CREDIT invoice's tenders round-trip correctly), both run against live PostgreSQL |
+| `GET /api/v1/pos/invoices/history` (list) and `GET /api/v1/pos/invoices/{id}` (detail) — both gated `pos.sell`, distinct from the existing `GET /api/v1/pos/invoices?number=` used by the returns picker | **VERIFIED** | chi correctly prioritizes the static `/history` segment over the `/{id}` param route regardless of registration order; `go build`/`go vet` clean |
+| `InvoiceHistoryScreen` (search list) and `InvoiceDetailScreen` (read-only reprint view: line items, tender breakdown, totals) | **VERIFIED** | Wired into the overflow menu gated on `pos.sell`. No physical printer/receipt-hardware integration exists in this app (see Not Yet Started) — this is the on-screen equivalent of a reprinted receipt, not an actual print job |
+| 2 new widget tests (`test/invoice_history_test.dart`) | **VERIFIED** | Search-to-detail navigation, and a split-tender invoice's breakdown rendering correctly |
+
+Full Flutter suite: 69 tests, all passing. `flutter analyze` clean. No
+live emulator verification performed for this phase.
+
 ## Not Yet Started
 
 Customer/supplier aging (30/60/90-day buckets) and margin reports,

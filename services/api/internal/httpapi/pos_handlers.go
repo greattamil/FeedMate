@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
+	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 
@@ -16,6 +19,124 @@ import (
 
 type POSHandlers struct {
 	POS *pos.Service
+}
+
+// ListInvoices returns finalized invoices newest-first (the invoice
+// history/reprint browse list), optionally filtered by a substring match on
+// invoice number or customer name via the `q` query param, paginated via
+// `limit`/`offset`.
+func (h *POSHandlers) ListInvoices(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	claims, ok := reqctx.Claims(r.Context())
+	if !ok {
+		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		return
+	}
+	query := r.URL.Query().Get("q")
+	limit := 50
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			limit = n
+		}
+	}
+	offset := 0
+	if v := r.URL.Query().Get("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			offset = n
+		}
+	}
+	page, err := h.POS.ListInvoices(r.Context(), claims.TenantID, query, limit, offset)
+	if err != nil {
+		WriteError(w, reqID, CodeInternal, "failed to list invoices: "+err.Error())
+		return
+	}
+	out := make([]map[string]interface{}, 0, len(page.Invoices))
+	for _, inv := range page.Invoices {
+		row := map[string]interface{}{
+			"id":             inv.ID.String(),
+			"invoice_number": inv.InvoiceNumber,
+			"grand_total":    inv.GrandTotal.StringFixed(2),
+			"payment_status": inv.PaymentStatus,
+			"status":         inv.Status,
+		}
+		if inv.CustomerNameSnap != nil {
+			row["customer_name"] = *inv.CustomerNameSnap
+		}
+		if inv.FinalizedAt != nil {
+			row["finalized_at"] = inv.FinalizedAt.Format(time.RFC3339)
+		}
+		out = append(out, row)
+	}
+	WriteJSON(w, http.StatusOK, map[string]interface{}{"invoices": out, "total": page.Total})
+}
+
+// GetInvoiceDetail returns the full reprint view of one past sale: header,
+// lines, and how it was actually paid for.
+func (h *POSHandlers) GetInvoiceDetail(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	claims, ok := reqctx.Claims(r.Context())
+	if !ok {
+		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid invoice id")
+		return
+	}
+	detail, err := h.POS.GetInvoiceDetail(r.Context(), claims.TenantID, id)
+	if err != nil {
+		if errors.Is(err, pos.ErrNotFound) {
+			WriteError(w, reqID, CodeNotFound, "invoice not found")
+			return
+		}
+		WriteError(w, reqID, CodeInternal, "failed to fetch invoice: "+err.Error())
+		return
+	}
+
+	lines := make([]map[string]interface{}, 0, len(detail.Lines))
+	for _, l := range detail.Lines {
+		lines = append(lines, map[string]interface{}{
+			"id":           l.ID.String(),
+			"product_id":   l.ProductID.String(),
+			"product_name": l.ProductName,
+			"sku":          l.SKU,
+			"uom_code":     l.UOMCode,
+			"quantity":     l.Quantity.StringFixed(3),
+			"unit_price":   l.UnitPrice.StringFixed(2),
+			"line_total":   l.LineTotal.StringFixed(2),
+		})
+	}
+	tenders := make([]map[string]interface{}, 0, len(detail.Tenders))
+	for _, t := range detail.Tenders {
+		row := map[string]interface{}{"method": t.Method, "amount": t.Amount.StringFixed(2)}
+		if t.Reference != nil {
+			row["reference"] = *t.Reference
+		}
+		tenders = append(tenders, row)
+	}
+	header := detail.Header
+	resp := map[string]interface{}{
+		"id":              header.ID.String(),
+		"invoice_number":  header.InvoiceNumber,
+		"subtotal":        header.Subtotal.StringFixed(2),
+		"discount_total":  header.DiscountTotal.StringFixed(2),
+		"taxable_total":   header.TaxableTotal.StringFixed(2),
+		"tax_total":       header.TaxTotal.StringFixed(2),
+		"rounding_amount": header.RoundingAmount.StringFixed(2),
+		"grand_total":     header.GrandTotal.StringFixed(2),
+		"payment_status":  header.PaymentStatus,
+		"status":          header.Status,
+		"lines":           lines,
+		"tenders":         tenders,
+	}
+	if header.CustomerNameSnap != nil {
+		resp["customer_name"] = *header.CustomerNameSnap
+	}
+	if header.FinalizedAt != nil {
+		resp["finalized_at"] = header.FinalizedAt.Format(time.RFC3339)
+	}
+	WriteJSON(w, http.StatusOK, resp)
 }
 
 // GetInvoiceForReturn looks an invoice up by its human-facing number (the

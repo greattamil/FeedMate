@@ -1,10 +1,12 @@
 import 'dart:async';
 
+import 'package:decimal/decimal.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/api_client.dart';
 import '../../core/api_error.dart';
+import '../../core/auth_session.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_decorations.dart';
 import '../../core/theme/app_typography.dart';
@@ -66,13 +68,51 @@ class _KhataCustomerListScreenState extends State<KhataCustomerListScreen> {
     super.dispose();
   }
 
+  Future<void> _addCustomer() async {
+    final draft = await showDialog<_CustomerFormResult>(
+      context: context,
+      builder: (context) => const _CustomerFormDialog(),
+    );
+    if (draft == null) return;
+
+    try {
+      final api = CustomerApi(context.read<ApiClient>());
+      await api.create(
+        customerCode: draft.customerCode,
+        name: draft.name,
+        phone: draft.phone,
+        customerType: draft.customerType,
+        creditLimit: draft.creditLimit,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${draft.name} added to Khata directory')),
+      );
+      await _search(_controller.text);
+    } on ApiError catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final session = context.watch<AuthSession>();
+    final canManage = session.hasPermission('credit.configure');
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
         title: const Text('Customer Khata Directory', style: AppTypography.headline),
       ),
+      floatingActionButton: canManage
+          ? FloatingActionButton.extended(
+              key: const Key('add_customer_fab'),
+              onPressed: _addCustomer,
+              icon: const Icon(Icons.person_add_alt_1_rounded),
+              label: const Text('Add Customer'),
+              backgroundColor: AppColors.primary,
+            )
+          : null,
       body: Column(
         children: [
           Container(
@@ -183,6 +223,135 @@ class _KhataCustomerListScreenState extends State<KhataCustomerListScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _CustomerFormResult {
+  final String customerCode;
+  final String name;
+  final String? phone;
+  final String customerType;
+  final Decimal? creditLimit;
+
+  _CustomerFormResult({
+    required this.customerCode,
+    required this.name,
+    this.phone,
+    required this.customerType,
+    this.creditLimit,
+  });
+}
+
+class _CustomerFormDialog extends StatefulWidget {
+  const _CustomerFormDialog();
+
+  @override
+  State<_CustomerFormDialog> createState() => _CustomerFormDialogState();
+}
+
+class _CustomerFormDialogState extends State<_CustomerFormDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _codeController = TextEditingController();
+  final _nameController = TextEditingController();
+  final _phoneController = TextEditingController();
+  final _creditLimitController = TextEditingController();
+  String _customerType = 'RETAIL';
+
+  @override
+  void dispose() {
+    _codeController.dispose();
+    _nameController.dispose();
+    _phoneController.dispose();
+    _creditLimitController.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    if (!_formKey.currentState!.validate()) return;
+    Navigator.of(context).pop(
+      _CustomerFormResult(
+        customerCode: _codeController.text.trim(),
+        name: _nameController.text.trim(),
+        phone: _phoneController.text.trim().isEmpty ? null : _phoneController.text.trim(),
+        customerType: _customerType,
+        creditLimit: _creditLimitController.text.trim().isEmpty
+            ? null
+            : Decimal.parse(_creditLimitController.text.trim()),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Add Customer', style: AppTypography.headline),
+      content: Form(
+        key: _formKey,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                key: const Key('customer_code_field'),
+                controller: _codeController,
+                decoration: const InputDecoration(labelText: 'Customer Code'),
+                validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                key: const Key('customer_name_field'),
+                controller: _nameController,
+                decoration: const InputDecoration(labelText: 'Name'),
+                validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                key: const Key('customer_phone_field'),
+                controller: _phoneController,
+                decoration: const InputDecoration(labelText: 'Phone (optional)'),
+                keyboardType: TextInputType.phone,
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                key: const Key('customer_type_field'),
+                initialValue: _customerType,
+                decoration: const InputDecoration(labelText: 'Customer Type'),
+                items: const [
+                  DropdownMenuItem(value: 'RETAIL', child: Text('Retail')),
+                  DropdownMenuItem(value: 'WHOLESALE', child: Text('Wholesale')),
+                  DropdownMenuItem(value: 'FARMER', child: Text('Farmer')),
+                ],
+                onChanged: (v) => setState(() => _customerType = v ?? 'RETAIL'),
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                key: const Key('customer_credit_limit_field'),
+                controller: _creditLimitController,
+                decoration: const InputDecoration(labelText: 'Initial Credit Limit (optional)'),
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                validator: (v) {
+                  if (v == null || v.trim().isEmpty) return null;
+                  try {
+                    Decimal.parse(v.trim());
+                    return null;
+                  } catch (_) {
+                    return 'Invalid amount';
+                  }
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
+        FilledButton(
+          key: const Key('customer_form_submit'),
+          onPressed: _submit,
+          child: const Text('Add'),
+        ),
+      ],
     );
   }
 }

@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/api_client.dart';
 import '../../core/api_error.dart';
+import '../../core/auth_session.dart';
 import '../pos/customer_api.dart';
 import 'receipt_api.dart';
 
@@ -87,11 +88,48 @@ class _KhataDetailScreenState extends State<KhataDetailScreen> {
     }
   }
 
+  Future<void> _editCreditLimit() async {
+    final detail = _detail;
+    if (detail == null) return;
+    final newLimit = await showDialog<Decimal>(
+      context: context,
+      builder: (context) => _EditCreditLimitDialog(currentLimit: detail.creditLimit),
+    );
+    if (newLimit == null) return;
+
+    try {
+      final api = CustomerApi(context.read<ApiClient>());
+      await api.setCreditLimit(widget.customerId, newLimit);
+      if (!mounted) return;
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Credit limit updated to ₹${newLimit.toStringAsFixed(2)}'),
+      ));
+    } on ApiError catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final detail = _detail;
+    final session = context.watch<AuthSession>();
+    final canManage = session.hasPermission('credit.configure');
     return Scaffold(
-      appBar: AppBar(title: Text(detail?.name ?? 'Khata')),
+      appBar: AppBar(
+        title: Text(detail?.name ?? 'Khata'),
+        actions: [
+          if (detail != null && canManage)
+            IconButton(
+              key: const Key('edit_credit_limit_button'),
+              onPressed: _editCreditLimit,
+              icon: const Icon(Icons.edit_note_rounded),
+              tooltip: 'Edit Credit Limit',
+            ),
+        ],
+      ),
       floatingActionButton: detail == null
           ? null
           : FloatingActionButton.extended(
@@ -275,6 +313,75 @@ class _KhataDetailScreenState extends State<KhataDetailScreen> {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Lets a credit.configure-permitted user revise a customer's ceiling.
+/// The server is what actually enforces the new limit against the ledger —
+/// this dialog only collects the target value.
+class _EditCreditLimitDialog extends StatefulWidget {
+  final Decimal currentLimit;
+  const _EditCreditLimitDialog({required this.currentLimit});
+
+  @override
+  State<_EditCreditLimitDialog> createState() => _EditCreditLimitDialogState();
+}
+
+class _EditCreditLimitDialogState extends State<_EditCreditLimitDialog> {
+  late final TextEditingController _controller;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.currentLimit.toStringAsFixed(2));
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final value = Decimal.tryParse(_controller.text.trim());
+    if (value == null || value < Decimal.zero) {
+      setState(() => _error = 'Enter a valid, non-negative amount');
+      return;
+    }
+    Navigator.of(context).pop(value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Edit Credit Limit'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextField(
+            key: const Key('credit_limit_field'),
+            controller: _controller,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(labelText: 'New credit limit'),
+          ),
+          if (_error != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(_error!, style: const TextStyle(color: Colors.red)),
+            ),
+        ],
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
+        FilledButton(
+          key: const Key('credit_limit_submit_button'),
+          onPressed: _submit,
+          child: const Text('Save'),
+        ),
+      ],
     );
   }
 }

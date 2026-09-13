@@ -12,20 +12,29 @@ import 'package:http/testing.dart';
 import 'package:provider/provider.dart';
 
 import 'package:feedmate_app/core/api_client.dart';
+import 'package:feedmate_app/core/auth_session.dart';
 import 'package:feedmate_app/core/secure_storage.dart';
 import 'package:feedmate_app/features/khata/khata_customer_list_screen.dart';
 import 'package:feedmate_app/features/khata/khata_detail_screen.dart';
 
 http.Response _jsonOk(Map<String, dynamic> body) => http.Response(jsonEncode(body), 200);
 
-Widget _wrapWithProviders({required http.Client httpClient, required Widget child}) {
+Widget _wrapWithProviders({
+  required http.Client httpClient,
+  required Widget child,
+  List<String> permissions = const [],
+}) {
   final storage = SecureStorage(store: InMemoryKeyValueStore());
   storage.saveTokens(accessToken: 'tok', refreshToken: 'ref', tenantId: 'tenant-123');
   final apiClient = ApiClient(baseUrl: 'http://test.invalid', storage: storage, httpClient: httpClient);
+  final session = AuthSession(apiClient: apiClient, storage: storage)
+    ..status = AuthStatus.loggedIn
+    ..permissions = permissions;
   return MultiProvider(
     providers: [
       Provider<SecureStorage>.value(value: storage),
       Provider<ApiClient>.value(value: apiClient),
+      ChangeNotifierProvider<AuthSession>.value(value: session),
     ],
     child: MaterialApp(home: child),
   );
@@ -205,5 +214,220 @@ void main() {
 
     expect(find.text('Enter a valid amount greater than zero'), findsOneWidget);
     expect(receiptCallCount, 0);
+  });
+
+  testWidgets('Add Customer FAB is hidden without credit.configure permission', (tester) async {
+    final client = MockClient((request) async {
+      if (request.url.path == '/api/v1/customers') {
+        return _jsonOk({'customers': []});
+      }
+      return http.Response('not found', 404);
+    });
+
+    await tester.pumpWidget(_wrapWithProviders(
+      httpClient: client,
+      child: const KhataCustomerListScreen(),
+      permissions: const [],
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('add_customer_fab')), findsNothing);
+  });
+
+  testWidgets('Add Customer creates a new Khata customer and refreshes the list', (tester) async {
+    Map<String, dynamic>? createdBody;
+    var searchCallCount = 0;
+
+    final client = MockClient((request) async {
+      if (request.method == 'POST' && request.url.path == '/api/v1/customers') {
+        createdBody = jsonDecode(request.body) as Map<String, dynamic>;
+        return http.Response(jsonEncode({
+          'id': 'cust-new', 'customer_code': createdBody!['customer_code'], 'name': createdBody!['name'],
+          'customer_type': createdBody!['customer_type'],
+        }), 201);
+      }
+      if (request.url.path == '/api/v1/customers/cust-new') {
+        return _jsonOk({
+          'id': 'cust-new', 'customer_code': 'FARM010', 'name': 'New Farmer',
+          'customer_type': 'FARMER', 'phone': '9000000000',
+          'credit_limit': '3000.00', 'outstanding_balance': '0.00',
+          'available_credit': '3000.00', 'risk_status': 'NORMAL',
+        });
+      }
+      if (request.url.path == '/api/v1/customers') {
+        searchCallCount++;
+        if (searchCallCount == 1) return _jsonOk({'customers': []});
+        return _jsonOk({
+          'customers': [
+            {'id': 'cust-new', 'customer_code': 'FARM010', 'name': 'New Farmer', 'customer_type': 'FARMER', 'phone': '9000000000'}
+          ]
+        });
+      }
+      return http.Response('not found', 404);
+    });
+
+    await tester.pumpWidget(_wrapWithProviders(
+      httpClient: client,
+      child: const KhataCustomerListScreen(),
+      permissions: const ['credit.configure'],
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('add_customer_fab')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('add_customer_fab')));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byKey(const Key('customer_code_field')), 'FARM010');
+    await tester.enterText(find.byKey(const Key('customer_name_field')), 'New Farmer');
+    await tester.enterText(find.byKey(const Key('customer_phone_field')), '9000000000');
+    await tester.enterText(find.byKey(const Key('customer_credit_limit_field')), '3000.00');
+    await tester.tap(find.byKey(const Key('customer_form_submit')));
+    await tester.pumpAndSettle();
+
+    expect(createdBody, isNotNull);
+    expect(createdBody!['customer_code'], 'FARM010');
+    expect(createdBody!['name'], 'New Farmer');
+    expect(createdBody!['phone'], '9000000000');
+    expect(createdBody!['customer_type'], 'RETAIL');
+    expect(Decimal.parse(createdBody!['credit_limit'] as String), Decimal.parse('3000.00'));
+
+    expect(find.textContaining('New Farmer added to Khata directory'), findsOneWidget);
+    expect(find.text('New Farmer'), findsOneWidget);
+  });
+
+  testWidgets('Add Customer form rejects missing required fields client-side', (tester) async {
+    final client = MockClient((request) async {
+      if (request.url.path == '/api/v1/customers') {
+        return _jsonOk({'customers': []});
+      }
+      return http.Response('not found', 404);
+    });
+
+    await tester.pumpWidget(_wrapWithProviders(
+      httpClient: client,
+      child: const KhataCustomerListScreen(),
+      permissions: const ['credit.configure'],
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('add_customer_fab')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('customer_form_submit')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Required'), findsWidgets);
+  });
+
+  testWidgets('Edit Credit Limit button is hidden without credit.configure permission', (tester) async {
+    final client = MockClient((request) async {
+      if (request.url.path == '/api/v1/customers/cust-5') {
+        return _jsonOk({
+          'id': 'cust-5', 'customer_code': 'FARM005', 'name': 'No Permission Farmer',
+          'customer_type': 'FARMER', 'phone': null,
+          'credit_limit': '5000.00', 'outstanding_balance': '1000.00',
+          'available_credit': '4000.00', 'risk_status': 'NORMAL',
+        });
+      }
+      if (request.url.path == '/api/v1/customers/cust-5/ledger') {
+        return _jsonOk({'entries': []});
+      }
+      return http.Response('not found', 404);
+    });
+
+    await tester.pumpWidget(_wrapWithProviders(
+      httpClient: client,
+      child: const KhataDetailScreen(customerId: 'cust-5'),
+      permissions: const [],
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('edit_credit_limit_button')), findsNothing);
+  });
+
+  testWidgets('Edit Credit Limit updates the limit and refreshes the summary', (tester) async {
+    var getDetailCalls = 0;
+    Map<String, dynamic>? putBody;
+
+    final client = MockClient((request) async {
+      if (request.method == 'PUT' && request.url.path == '/api/v1/customers/cust-6/credit-limit') {
+        putBody = jsonDecode(request.body) as Map<String, dynamic>;
+        return http.Response('', 204);
+      }
+      if (request.url.path == '/api/v1/customers/cust-6') {
+        getDetailCalls++;
+        final limit = getDetailCalls == 1 ? '5000.00' : '8000.00';
+        final available = getDetailCalls == 1 ? '4000.00' : '7000.00';
+        return _jsonOk({
+          'id': 'cust-6', 'customer_code': 'FARM006', 'name': 'Limit Change Farmer',
+          'customer_type': 'FARMER', 'phone': null,
+          'credit_limit': limit, 'outstanding_balance': '1000.00',
+          'available_credit': available, 'risk_status': 'NORMAL',
+        });
+      }
+      if (request.url.path == '/api/v1/customers/cust-6/ledger') {
+        return _jsonOk({'entries': []});
+      }
+      return http.Response('not found', 404);
+    });
+
+    await tester.pumpWidget(_wrapWithProviders(
+      httpClient: client,
+      child: const KhataDetailScreen(customerId: 'cust-6'),
+      permissions: const ['credit.configure'],
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('₹5000.00'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('edit_credit_limit_button')));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byKey(const Key('credit_limit_field')), '8000.00');
+    await tester.tap(find.byKey(const Key('credit_limit_submit_button')));
+    await tester.pumpAndSettle();
+
+    expect(putBody, isNotNull);
+    expect(Decimal.parse(putBody!['credit_limit'] as String), Decimal.parse('8000.00'));
+    expect(find.textContaining('Credit limit updated to ₹8000.00'), findsOneWidget);
+    expect(find.text('₹8000.00'), findsOneWidget);
+  });
+
+  testWidgets('Edit Credit Limit rejects a negative amount client-side', (tester) async {
+    var putCallCount = 0;
+    final client = MockClient((request) async {
+      if (request.method == 'PUT' && request.url.path == '/api/v1/customers/cust-7/credit-limit') {
+        putCallCount++;
+        return http.Response('', 204);
+      }
+      if (request.url.path == '/api/v1/customers/cust-7') {
+        return _jsonOk({
+          'id': 'cust-7', 'customer_code': 'FARM007', 'name': 'Negative Test Farmer',
+          'customer_type': 'FARMER', 'phone': null,
+          'credit_limit': '5000.00', 'outstanding_balance': '1000.00',
+          'available_credit': '4000.00', 'risk_status': 'NORMAL',
+        });
+      }
+      if (request.url.path == '/api/v1/customers/cust-7/ledger') {
+        return _jsonOk({'entries': []});
+      }
+      return http.Response('not found', 404);
+    });
+
+    await tester.pumpWidget(_wrapWithProviders(
+      httpClient: client,
+      child: const KhataDetailScreen(customerId: 'cust-7'),
+      permissions: const ['credit.configure'],
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('edit_credit_limit_button')));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byKey(const Key('credit_limit_field')), '-100');
+    await tester.tap(find.byKey(const Key('credit_limit_submit_button')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Enter a valid, non-negative amount'), findsOneWidget);
+    expect(putCallCount, 0);
   });
 }

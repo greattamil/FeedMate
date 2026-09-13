@@ -645,6 +645,40 @@ weight, reorder level/target — no fixed currency scale, plain
 `.toString()` is correct). Caught entirely by the test suite; never
 observed live.
 
+## Phase 28 — Customer Create + Edit Credit Limit (Flutter)
+
+Prompted by an external gap-analysis report claiming Product Master
+frontend was still "Read Only" (already false as of Phase 27, corrected
+before proceeding) and correctly identifying that Khata customers could
+be searched and paid against but never *registered* or have their credit
+limit revised from the app — both backend endpoints (`POST
+/api/v1/customers`, `PUT /api/v1/customers/{id}/credit-limit`) already
+existed and were fully gated on `credit.configure`, but no Flutter UI
+called either one.
+
+| Area | Status | Evidence |
+|---|---|---|
+| `CustomerApi.create()` / `CustomerApi.setCreditLimit()` | **VERIFIED** | `create()` re-fetches via `getDetail()` after POST, matching the existing product/supplier pattern, because the Create response (`customerToJSON()`) omits credit fields; `setCreditLimit()` PUTs `{"credit_limit": "X.XX"}` and expects `204` |
+| "Add Customer" FAB on `KhataCustomerListScreen`, gated on `credit.configure` (mirrors the backend's own gate on `POST /customers`) | **VERIFIED** | `_CustomerFormDialog` collects code/name/phone/type/optional initial credit limit; on success shows a confirmation snackbar and re-runs the current search |
+| "Edit Credit Limit" AppBar icon on `KhataDetailScreen`, gated on `credit.configure` | **VERIFIED** | `_EditCreditLimitDialog` pre-fills the current limit, rejects negative input client-side, refreshes the summary card (and outstanding/available figures) from a fresh `GetDetail` after the `PUT` succeeds — never computed locally |
+| 6 new widget tests (`test/khata_test.dart`, 10 total in the file, all passing) | **VERIFIED** | FAB/button hidden without permission (2 tests), create posts the exact body and refreshes the list, required-field validation, credit-limit update posts the exact body and refreshes the summary, negative-limit rejected client-side |
+
+No backend changes were needed or made — both endpoints and their exact
+request/response shapes were confirmed unchanged by reading
+`customer_handlers.go` before writing the Flutter code. **Live emulator
+verification was not performed for this phase** (unlike Phases 24/25/27) —
+correctness rests on the confirmed-exact backend contract plus the full
+widget-test suite (57 tests, all passing) and `flutter analyze` (clean,
+only pre-existing info-level lints). This should be live-verified on the
+emulator before being called fully done to the same standard as prior
+phases.
+
+Still open from the same gap-analysis report: **Supplier create + edit**
+(no backend `Update` method exists at all for suppliers — this needs new
+Go domain work first, unlike customer), and **split/multi-tender POS
+billing** (backend already supports an array of tenders; `cart_screen.dart`
+only allows a single `CASH`/`CREDIT` selection).
+
 ## Not Yet Started
 
 Customer/supplier aging (30/60/90-day buckets) and margin reports,

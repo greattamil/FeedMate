@@ -130,4 +130,35 @@ class CustomerApi {
         .map((e) => LedgerEntry.fromJson(e as Map<String, dynamic>))
         .toList();
   }
+
+  /// Registers a new Khata customer (gated server-side on credit.configure —
+  /// same permission required to later change their credit limit, since
+  /// setting the initial limit is the same trust decision).
+  Future<CustomerDetail> create({
+    required String customerCode,
+    required String name,
+    String? localName,
+    String? phone,
+    String? whatsAppPhone,
+    String customerType = 'RETAIL',
+    Decimal? creditLimit,
+  }) async {
+    final body = {
+      'customer_code': customerCode,
+      'name': name,
+      if (localName != null && localName.isNotEmpty) 'local_name': localName,
+      if (phone != null && phone.isNotEmpty) 'phone': phone,
+      if (whatsAppPhone != null && whatsAppPhone.isNotEmpty) 'whatsapp_phone': whatsAppPhone,
+      'customer_type': customerType,
+      if (creditLimit != null) 'credit_limit': creditLimit.toStringAsFixed(2),
+    };
+    final response = await client.postAuthed('/api/v1/customers', body);
+    return getDetail(response['id'] as String);
+  }
+
+  Future<void> setCreditLimit(String customerId, Decimal creditLimit) async {
+    await client.putAuthed('/api/v1/customers/$customerId/credit-limit', {
+      'credit_limit': creditLimit.toStringAsFixed(2),
+    });
+  }
 }

@@ -29,6 +29,7 @@ import (
 	"github.com/andipatti/feedmate/services/api/internal/domain/product"
 	"github.com/andipatti/feedmate/services/api/internal/domain/reports"
 	"github.com/andipatti/feedmate/services/api/internal/domain/returns"
+	"github.com/andipatti/feedmate/services/api/internal/domain/settings"
 	"github.com/andipatti/feedmate/services/api/internal/domain/stockcount"
 	"github.com/andipatti/feedmate/services/api/internal/domain/supplier"
 	"github.com/andipatti/feedmate/services/api/internal/httpapi"
@@ -71,6 +72,7 @@ func main() {
 	customerSvc := customer.NewService(db)
 	supplierSvc := supplier.NewService(db)
 	masterDataSvc := masterdata.NewService(db)
+	settingsSvc := settings.NewService(db)
 
 	var provider paymentprovider.Provider
 	switch cfg.PaymentProvider {
@@ -101,6 +103,7 @@ func main() {
 	customerHandlers := &httpapi.CustomerHandlers{Customer: customerSvc}
 	supplierHandlers := &httpapi.SupplierHandlers{Supplier: supplierSvc}
 	masterDataHandlers := &httpapi.MasterDataHandlers{MasterData: masterDataSvc}
+	settingsHandlers := &httpapi.SettingsHandlers{Settings: settingsSvc}
 
 	r := chi.NewRouter()
 	r.Use(appmw.RequestID)
@@ -206,6 +209,9 @@ func main() {
 			r.With(appmw.RequirePermission("tenant.admin")).Post("/financial-years/{id}/document-series", docSeriesHandlers.CreateDocumentSeries)
 			r.With(appmw.RequirePermission("tenant.admin")).Post("/financial-years/{id}/document-series/seed-defaults", docSeriesHandlers.SeedDefaultSeries)
 			r.With(appmw.RequirePermission("tenant.admin")).Post("/document-series/{id}/status", docSeriesHandlers.SetDocumentSeriesActive)
+
+			r.With(appmw.RequirePermission("tenant.admin")).Get("/settings/store-profile", settingsHandlers.GetStoreProfile)
+			r.With(appmw.RequirePermission("tenant.admin")).Put("/settings/store-profile", settingsHandlers.UpdateStoreProfile)
 
 			r.Get("/customers", customerHandlers.List)
 			r.Get("/customers/{id}", customerHandlers.Get)

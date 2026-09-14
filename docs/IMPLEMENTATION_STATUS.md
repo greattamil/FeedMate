@@ -956,6 +956,27 @@ backend unchanged this phase (no new endpoints — every destination
 screen and its permission gate already existed). No live emulator
 verification performed for this phase.
 
+## Phase 43 — Store Settings Screen (Backend + Flutter)
+
+No shop profile field (legal/trade name, GSTIN, FSSAI license, contact,
+address, invoice number prefix) or receipt header/footer text was
+editable from the app — onboarding a real tenant, or fixing a typo in
+its GSTIN, required a raw SQL UPDATE against the `tenants` table. This
+phase closes that gap end to end.
+
+| Area | Status | Evidence |
+|---|---|---|
+| New `internal/domain/settings` package: `GetStoreProfile`/`UpdateStoreProfile`, validating required fields (legal_name, address_line1, city, state_code, invoice_prefix) and writing a before/after `TENANT_SETTINGS_UPDATED` audit entry on every update | **VERIFIED** | 3 new Go integration tests against live PostgreSQL, all passing: seeded defaults are returned correctly, a full update persists both the `tenants` row and the receipt header/footer text, and missing `legal_name` is rejected with `ErrValidation` |
+| Receipt header/footer text has no dedicated column, so it's merged into `tenant_settings.extra_settings` (jsonb) — confirmed by direct `psql \d` inspection before writing any code that no such column already existed | **VERIFIED** | `UpdateReceiptText` preserves any other keys already in that jsonb blob rather than overwriting the whole object |
+| New `GET`/`PUT /api/v1/settings/store-profile` endpoints, gated `tenant.admin` like every other tenant-setup admin route (financial years, document series) | **VERIFIED** | Wired into `main.go` following the exact `docSeriesHandlers` pattern; `go build ./...` and `gofmt -l` clean |
+| New Flutter `StoreSettingsScreen`: a single scrollable form (Shop Identity, Contact, Address, Billing, Receipt Text sections) that loads the current profile, validates required fields client-side, and saves via the new endpoint | **VERIFIED** | 3 new widget tests: loads and displays the seeded profile, editing a field and saving sends the complete updated profile (not just the changed field), and clearing the required Legal Name blocks the save with a validation error instead of calling the API |
+| Reachable from both the Counter tab's overflow menu (`Store Settings`, next to `Financial Years`/`Audit Log`) and the Home Dashboard's MANAGE grid (Phase 42), both gated `tenant.admin` | **VERIFIED** | `flutter analyze` clean on all touched files |
+
+Full Flutter suite: 104 tests, all passing. Full Go suite (all domain
+packages, `-tags=integration` against live PostgreSQL): all passing,
+including the 3 new `settings` tests. No live emulator verification
+performed for this phase.
+
 ## Not Yet Started
 
 Customer/supplier aging (30/60/90-day buckets) and margin reports,

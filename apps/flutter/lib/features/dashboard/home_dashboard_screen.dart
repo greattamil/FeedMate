@@ -27,6 +27,7 @@ import '../products/master_data_screen.dart';
 import '../products/product_list_screen.dart';
 import '../reports/reports_api.dart';
 import '../reports/reports_screen.dart';
+import '../settings/store_settings_screen.dart';
 import '../returns/return_screen.dart';
 import '../staff/staff_list_screen.dart';
 import '../stockcount/stock_count_history_screen.dart';
@@ -665,6 +666,16 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
           gradient: const LinearGradient(colors: [Color(0xFF475569), Color(0xFF94A3B8)]),
           onTap: () => Navigator.of(context).push(
             MaterialPageRoute(builder: (_) => const AuditLogScreen()),
+          ),
+        ),
+      if (session.hasPermission('tenant.admin'))
+        _ActionItem(
+          title: 'Store Settings',
+          subtitle: 'Profile & receipt text',
+          icon: Icons.storefront_rounded,
+          gradient: const LinearGradient(colors: [Color(0xFF7C2D12), Color(0xFFEA580C)]),
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const StoreSettingsScreen()),
           ),
         ),
     ];

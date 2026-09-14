@@ -23,6 +23,7 @@ import '../products/master_data_screen.dart';
 import '../products/product_list_screen.dart';
 import '../reports/reports_screen.dart';
 import '../returns/return_screen.dart';
+import '../settings/store_settings_screen.dart';
 import '../staff/staff_list_screen.dart';
 import '../stockcount/stock_count_history_screen.dart';
 import '../supplier/supplier_list_screen.dart';
@@ -33,7 +34,7 @@ import 'invoice_history_screen.dart';
 import 'product.dart';
 import 'product_repository.dart';
 
-enum _MenuAction { khata, suppliers, grn, grnHistory, returnSale, contra, products, masterData, invoiceHistory, reports, eod, pairDevice, manageDevices, auditLog, staff, stockCounts, docSeries }
+enum _MenuAction { khata, suppliers, grn, grnHistory, returnSale, contra, products, masterData, invoiceHistory, reports, eod, pairDevice, manageDevices, auditLog, staff, stockCounts, docSeries, storeSettings }
 
 /// Modernized POS Counter & Product Catalog for FeedMate.
 /// Backed by ranked search (barcode > SKU > exact name > alias > fuzzy).
@@ -245,6 +246,11 @@ class _ProductSearchScreenState extends State<ProductSearchScreen> {
                     MaterialPageRoute(builder: (_) => const StockCountHistoryScreen()),
                   );
                   break;
+                case _MenuAction.storeSettings:
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const StoreSettingsScreen()),
+                  );
+                  break;
               }
             },
             itemBuilder: (context) => [
@@ -398,6 +404,15 @@ class _ProductSearchScreenState extends State<ProductSearchScreen> {
                   child: ListTile(
                     leading: Icon(Icons.fact_check_outlined),
                     title: Text('Audit Log'),
+                  ),
+                ),
+              if (session.hasPermission('tenant.admin'))
+                const PopupMenuItem(
+                  key: Key('menu_item_store_settings'),
+                  value: _MenuAction.storeSettings,
+                  child: ListTile(
+                    leading: Icon(Icons.storefront_outlined),
+                    title: Text('Store Settings'),
                   ),
                 ),
             ],

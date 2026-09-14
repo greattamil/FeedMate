@@ -459,14 +459,21 @@ class _CartPanelState extends State<CartPanel> {
           ),
         Expanded(
           child: cart.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: const [
-                      Icon(Icons.shopping_cart_outlined, size: 56, color: Color(0xFF94A3B8)),
-                      SizedBox(height: 12),
-                      Text('Cart is empty', style: TextStyle(color: Color(0xFF64748B), fontSize: 16, fontWeight: FontWeight.w500)),
-                    ],
+              ? const Center(
+                  child: SingleChildScrollView(
+                    // A single-screen POS can dock this panel into a
+                    // fairly short strip on a narrow phone (catalog on
+                    // top, cart stacked below) — this empty-state
+                    // placeholder must never overflow there, even when
+                    // the strip is too short to fit it without scrolling.
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.shopping_cart_outlined, size: 40, color: Color(0xFF94A3B8)),
+                        SizedBox(height: 8),
+                        Text('Cart is empty', style: TextStyle(color: Color(0xFF64748B), fontSize: 14, fontWeight: FontWeight.w500)),
+                      ],
+                    ),
                   ),
                 )
               : ListView.builder(

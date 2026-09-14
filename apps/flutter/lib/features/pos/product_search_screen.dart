@@ -125,8 +125,8 @@ class _ProductSearchScreenState extends State<ProductSearchScreen> {
           }
           return Column(
             children: [
-              Expanded(flex: 3, child: catalog),
-              Expanded(flex: 2, child: cartSide),
+              Expanded(flex: 4, child: catalog),
+              Expanded(flex: 5, child: cartSide),
             ],
           );
         },

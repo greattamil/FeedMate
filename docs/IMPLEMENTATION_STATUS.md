@@ -1030,6 +1030,29 @@ against live PostgreSQL): all passing. `flutter analyze` and `go build`/
 `gofmt` clean. Live-verified end to end on the Android emulator against the
 real Go backend and PostgreSQL.
 
+## Phase 46 — POS Catalog Browses All Products by Default (Backend + Flutter)
+
+User-reported bug: opening the Counter screen showed nothing at all until
+the cashier typed something or picked a category — the catalog looked
+like it was "missing products" (their words: "cart page not show all
+products... i think filter issue"). Root cause: Phase 45 made an empty
+query with no category an explicit, rejected case ("never match every
+product with no filter"), and `CatalogPanel` mirrored that by short-
+circuiting to an empty result set client-side. A real POS terminal shows
+its catalog up front; requiring the cashier to type first before seeing
+anything was itself the bug, not a missing feature.
+
+| Area | Status | Evidence |
+|---|---|---|
+| `GET /api/v1/products/search` no longer rejects an empty `q` with no `category_id` — it browses the whole active catalog instead, bounded by `limit` (unchanged: default 20, capped at 50) exactly the same way an empty query plus a `category_id` already browsed one category | **VERIFIED** | New Go integration test `an empty query with no category browses the whole active catalog, not nothing`; full backend suite re-run clean |
+| Flutter `CatalogPanel.initState` now calls `_search('')` immediately (alongside loading categories), and `_search`'s early-return-to-empty guard for the no-query/no-category case is removed; `ProductRepository.search` requests `limit=50` by default instead of the server's implicit 20, and forwards the same `limit` to the offline cache fallback | **VERIFIED** | `flutter analyze` clean. One pre-existing test (`widget_test.dart`'s "product search shows ranked results from the API") had a mock that asserted every `/products/search` call carried `q=cattle`, not accounting for the new eager browse-all call fired on screen load before any typing — fixed by having the mock return an empty list for that call and keep the strict assertion only for the actual "cattle" search |
+| Empty-catalog wording: the placeholder shown when there are genuinely zero active products (not just zero search matches) now reads "No active products in the catalog yet" instead of a "type something" prompt that no longer applies | **VERIFIED** | `flutter analyze` clean; no test asserted the old string so nothing needed updating there |
+
+Full Flutter suite: 107 tests, all passing (same count — one test's mock
+fixed, none added/removed). Full Go suite (`-tags=integration` against
+live PostgreSQL): all passing. `flutter analyze` and `go build`/`gofmt`
+clean.
+
 ## Not Yet Started
 
 Customer/supplier aging (30/60/90-day buckets) and margin reports,

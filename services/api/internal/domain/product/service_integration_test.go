@@ -216,6 +216,27 @@ func TestProductCreateAndSearch(t *testing.T) {
 			t.Fatalf("expected no results for an unrelated category, got %+v", results)
 		}
 	})
+
+	t.Run("an empty query with no category browses the whole active catalog, not nothing", func(t *testing.T) {
+		// Regression guard: the POS counter must show its catalog by
+		// default (real terminals don't start on a blank screen requiring
+		// the cashier to type first) — an empty query with no category
+		// filter must return active products, bounded only by limit, not
+		// be rejected or return zero rows.
+		results, err := svc.Search(context.Background(), tenantID, "", nil, 10)
+		if err != nil {
+			t.Fatalf("browse whole catalog: %v", err)
+		}
+		found := false
+		for _, r := range results {
+			if r.Product.ID == created.ID {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("expected the seeded product in an unfiltered catalog browse, got %+v", results)
+		}
+	})
 }
 
 func TestProductUpdateSetActiveList(t *testing.T) {

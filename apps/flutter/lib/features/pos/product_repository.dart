@@ -25,18 +25,19 @@ class ProductRepository {
   ProductRepository({required this.client, required this.localDb});
 
   /// [categoryId] narrows results to one real category — the same rows
-  /// `/api/v1/categories` returns, never a client-side list — and, combined
-  /// with an empty [query], browses that whole category (see
-  /// product.Search's server-side doc comment on why an empty query plus a
-  /// category is meaningful while an empty query with no category is not).
-  Future<ProductSearchResult> search(String query, {String? categoryId}) async {
-    if (query.trim().isEmpty && categoryId == null) {
-      return ProductSearchResult(products: [], fromCache: false);
-    }
+  /// `/api/v1/categories` returns, never a client-side list. An empty
+  /// [query] combined with a [categoryId] browses that whole category; an
+  /// empty [query] with no [categoryId] browses the whole active catalog —
+  /// the default state of the POS screen before the cashier types or
+  /// filters anything, matching how a real POS terminal shows its catalog
+  /// up front rather than starting on a blank screen (see product.Search's
+  /// server-side doc comment). Both are bounded by [limit].
+  Future<ProductSearchResult> search(String query, {String? categoryId, int limit = 50}) async {
     try {
       final params = <String, String>{
         if (query.isNotEmpty) 'q': query,
         if (categoryId != null) 'category_id': categoryId,
+        'limit': limit.toString(),
       };
       final qs = params.entries.map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}').join('&');
       final response = await client.getAuthed('/api/v1/products/search?$qs');
@@ -51,7 +52,7 @@ class ProductRepository {
       // cached from whatever was last searched, not the full catalog), so a
       // category filter can't be honored offline — fall back to a plain
       // text search of the cache, which still lets the cashier keep selling.
-      final rows = await localDb.searchProductsLocal(query);
+      final rows = await localDb.searchProductsLocal(query, limit: limit);
       return ProductSearchResult(products: rows.map(_productFromRow).toList(), fromCache: true);
     }
   }

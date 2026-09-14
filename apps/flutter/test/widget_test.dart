@@ -110,7 +110,12 @@ void main() {
   testWidgets('product search shows ranked results from the API', (tester) async {
     final client = MockClient((request) async {
       if (request.url.path == '/api/v1/products/search') {
-        expect(request.url.queryParameters['q'], 'cattle');
+        // CatalogPanel also browses the whole catalog on load (an empty
+        // q), before any query is typed — only assert the ranking-relevant
+        // shape of the request once the cashier actually searches "cattle".
+        if (request.url.queryParameters['q'] != 'cattle') {
+          return http.Response(jsonEncode({'results': []}), 200);
+        }
         return http.Response(
           jsonEncode({
             'results': [

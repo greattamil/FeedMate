@@ -51,6 +51,10 @@ class _CatalogPanelState extends State<CatalogPanel> {
   void initState() {
     super.initState();
     _loadCategories();
+    // Show the catalog immediately — a real POS terminal displays its
+    // products up front, it doesn't start on a blank screen waiting for
+    // the cashier to type something first.
+    _search('');
   }
 
   Future<void> _loadCategories() async {
@@ -82,13 +86,6 @@ class _CatalogPanelState extends State<CatalogPanel> {
   }
 
   Future<void> _search(String query) async {
-    if (query.trim().isEmpty && _selectedCategoryId == null) {
-      setState(() {
-        _results = [];
-        _error = null;
-      });
-      return;
-    }
     setState(() {
       _loading = true;
       _error = null;
@@ -254,7 +251,7 @@ class _CatalogPanelState extends State<CatalogPanel> {
                       const SizedBox(height: 12),
                       Text(
                         _searchController.text.isEmpty && _selectedCategoryId == null
-                            ? 'Scan barcode or enter product name/SKU'
+                            ? 'No active products in the catalog yet'
                             : 'No products matched your search',
                         style: AppTypography.bodySecondary,
                       ),

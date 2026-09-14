@@ -441,14 +441,13 @@ func (h *ProductHandlers) Search(w http.ResponseWriter, r *http.Request) {
 		}
 		categoryID = &parsed
 	}
-	// A query is only optional when narrowing to a category — browsing a
-	// whole category is a legitimate use (the POS catalog's category filter
-	// chips), but "match every product in the tenant" with no filter at all
-	// is not something any caller should be able to trigger accidentally.
-	if query == "" && categoryID == nil {
-		WriteError(w, reqID, CodeValidation, "query parameter 'q' is required (or pass category_id to browse a category)")
-		return
-	}
+	// Both q and category_id are optional: a POS catalog needs to browse the
+	// whole active catalog by default (real terminals show every product
+	// until the cashier narrows it down, they don't start on a blank
+	// screen) exactly the same way browsing one category with no query
+	// text does. This is bounded by limit (capped at 50 below), so it can
+	// never return more than a page's worth of rows regardless of catalog
+	// size.
 	limit := 20
 	if l := r.URL.Query().Get("limit"); l != "" {
 		if parsed, err := strconv.Atoi(l); err == nil {

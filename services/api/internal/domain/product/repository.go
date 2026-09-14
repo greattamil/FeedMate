@@ -272,10 +272,10 @@ type SearchResult struct {
 // than any client-side hard-coded list). A nil categoryID applies no
 // filter. When normalizedQuery is empty, the ILIKE '%%' comparisons match
 // every active product, so an empty query plus a categoryID browses that
-// whole category; an empty query with no categoryID is expected to be
-// rejected by the caller (see ProductHandlers.Search) rather than ever
-// reaching this function, since that would mean "match every product in
-// the tenant" with no filter at all.
+// whole category, and an empty query with a nil categoryID browses the
+// whole active catalog — both are legitimate ("show me the catalog", the
+// default state of a POS screen before the cashier types or filters
+// anything) and both stay bounded by limit regardless of catalog size.
 func Search(ctx context.Context, tx pgx.Tx, rawQuery, normalizedQuery string, categoryID *uuid.UUID, limit int) ([]SearchResult, error) {
 	if limit <= 0 || limit > 50 {
 		limit = 20

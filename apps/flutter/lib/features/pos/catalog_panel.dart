@@ -3,12 +3,14 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/api_client.dart';
 import '../../core/api_error.dart';
 import '../../core/auth_session.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_decorations.dart';
 import '../../core/theme/app_typography.dart';
 import '../auth/login_screen.dart';
+import '../products/product_admin_api.dart';
 import 'cart_model.dart';
 import 'product.dart';
 import 'product_repository.dart';
@@ -35,24 +37,52 @@ class _CatalogPanelState extends State<CatalogPanel> {
   bool _loading = false;
   bool _fromCache = false;
   String? _error;
-  String _selectedCategory = 'All';
 
-  static const _categories = [
-    'All',
-    'Cattle Feed',
-    'Poultry Feed',
-    'Mineral Mix',
-    'Concentrate',
-    'Grains & Raw',
-  ];
+  // The category filter chips must reflect the real categories a shop
+  // owner has actually set up (Categories & Brands admin, Phase 38) — not
+  // a static guess — so a product filed under a category that doesn't
+  // exist here can never be invisible in the POS, and a chip can never
+  // claim to filter by a category that doesn't actually exist.
+  List<MasterDataOption> _categories = [];
+  String? _selectedCategoryId;
+  bool _loadingCategories = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCategories();
+  }
+
+  Future<void> _loadCategories() async {
+    try {
+      final api = ProductAdminApi(context.read<ApiClient>());
+      final categories = await api.listCategories();
+      if (!mounted) return;
+      setState(() {
+        _categories = categories;
+        _loadingCategories = false;
+      });
+    } on ApiError catch (_) {
+      // Categories are a nice-to-have filter, not required to search/sell —
+      // fail quietly and leave only the "All" chip rather than blocking the
+      // counter on a category-list fetch.
+      if (!mounted) return;
+      setState(() => _loadingCategories = false);
+    }
+  }
 
   void _onQueryChanged(String query) {
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 300), () => _search(query));
   }
 
+  void _onCategorySelected(String? categoryId) {
+    setState(() => _selectedCategoryId = categoryId);
+    _search(_searchController.text);
+  }
+
   Future<void> _search(String query) async {
-    if (query.trim().isEmpty) {
+    if (query.trim().isEmpty && _selectedCategoryId == null) {
       setState(() {
         _results = [];
         _error = null;
@@ -65,7 +95,7 @@ class _CatalogPanelState extends State<CatalogPanel> {
     });
     try {
       final repository = context.read<ProductRepository>();
-      final result = await repository.search(query);
+      final result = await repository.search(query, categoryId: _selectedCategoryId);
       if (!mounted) return;
       setState(() {
         _results = result.products;
@@ -132,48 +162,50 @@ class _CatalogPanelState extends State<CatalogPanel> {
                 ),
                 onChanged: _onQueryChanged,
               ),
-              const SizedBox(height: 10),
-              // Horizontal category pill selector
-              SizedBox(
-                height: 32,
-                child: ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: _categories.length,
-                  itemBuilder: (context, index) {
-                    final cat = _categories[index];
-                    final isSelected = cat == _selectedCategory;
-                    return Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: FilterChip(
-                        selected: isSelected,
-                        showCheckmark: false,
-                        label: Text(cat),
-                        labelStyle: TextStyle(
-                          fontSize: 12,
-                          fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                          color: isSelected ? Colors.white : AppColors.textSecondary,
-                        ),
-                        backgroundColor: AppColors.surfaceSecondary,
-                        selectedColor: AppColors.primary,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(AppDecorations.radiusFull),
-                          side: BorderSide(
-                            color: isSelected ? AppColors.primary : AppColors.border,
+              if (!_loadingCategories && _categories.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                // Horizontal category pill selector — populated from the
+                // real categories a shop owner has configured (Categories &
+                // Brands admin), never a fixed guess unrelated to the
+                // actual catalog.
+                SizedBox(
+                  height: 32,
+                  child: ListView.builder(
+                    key: const Key('category_chip_list'),
+                    scrollDirection: Axis.horizontal,
+                    itemCount: _categories.length + 1,
+                    itemBuilder: (context, index) {
+                      final categoryId = index == 0 ? null : _categories[index - 1].id;
+                      final label = index == 0 ? 'All' : _categories[index - 1].label;
+                      final isSelected = categoryId == _selectedCategoryId;
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: FilterChip(
+                          key: index == 0 ? const Key('category_chip_all') : Key('category_chip_$categoryId'),
+                          selected: isSelected,
+                          showCheckmark: false,
+                          label: Text(label),
+                          labelStyle: TextStyle(
+                            fontSize: 12,
+                            fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                            color: isSelected ? Colors.white : AppColors.textSecondary,
                           ),
+                          backgroundColor: AppColors.surfaceSecondary,
+                          selectedColor: AppColors.primary,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(AppDecorations.radiusFull),
+                            side: BorderSide(
+                              color: isSelected ? AppColors.primary : AppColors.border,
+                            ),
+                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                          onSelected: (selected) => _onCategorySelected(categoryId),
                         ),
-                        padding: const EdgeInsets.symmetric(horizontal: 10),
-                        onSelected: (selected) {
-                          setState(() => _selectedCategory = cat);
-                          if (cat != 'All') {
-                            _searchController.text = cat;
-                            _search(cat);
-                          }
-                        },
-                      ),
-                    );
-                  },
+                      );
+                    },
+                  ),
                 ),
-              ),
+              ],
             ],
           ),
         ),
@@ -221,7 +253,7 @@ class _CatalogPanelState extends State<CatalogPanel> {
                       Icon(Icons.inventory_2_outlined, size: 48, color: AppColors.textTertiary),
                       const SizedBox(height: 12),
                       Text(
-                        _searchController.text.isEmpty
+                        _searchController.text.isEmpty && _selectedCategoryId == null
                             ? 'Scan barcode or enter product name/SKU'
                             : 'No products matched your search',
                         style: AppTypography.bodySecondary,

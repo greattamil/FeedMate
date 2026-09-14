@@ -24,10 +24,22 @@ class ProductRepository {
 
   ProductRepository({required this.client, required this.localDb});
 
-  Future<ProductSearchResult> search(String query) async {
+  /// [categoryId] narrows results to one real category — the same rows
+  /// `/api/v1/categories` returns, never a client-side list — and, combined
+  /// with an empty [query], browses that whole category (see
+  /// product.Search's server-side doc comment on why an empty query plus a
+  /// category is meaningful while an empty query with no category is not).
+  Future<ProductSearchResult> search(String query, {String? categoryId}) async {
+    if (query.trim().isEmpty && categoryId == null) {
+      return ProductSearchResult(products: [], fromCache: false);
+    }
     try {
-      final encoded = Uri.encodeQueryComponent(query);
-      final response = await client.getAuthed('/api/v1/products/search?q=$encoded');
+      final params = <String, String>{
+        if (query.isNotEmpty) 'q': query,
+        if (categoryId != null) 'category_id': categoryId,
+      };
+      final qs = params.entries.map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}').join('&');
+      final response = await client.getAuthed('/api/v1/products/search?$qs');
       final results = (response['results'] as List<dynamic>? ?? [])
           .map((e) => Product.fromSearchResult(e as Map<String, dynamic>))
           .toList();
@@ -35,6 +47,10 @@ class ProductRepository {
       return ProductSearchResult(products: results, fromCache: false);
     } on ApiError catch (e) {
       if (e.code != 'NETWORK_ERROR') rethrow;
+      // The on-device cache has no category data (offline products are
+      // cached from whatever was last searched, not the full catalog), so a
+      // category filter can't be honored offline — fall back to a plain
+      // text search of the cache, which still lets the cashier keep selling.
       final rows = await localDb.searchProductsLocal(query);
       return ProductSearchResult(products: rows.map(_productFromRow).toList(), fromCache: true);
     }

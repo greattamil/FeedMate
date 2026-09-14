@@ -1,7 +1,9 @@
 //go:build integration
 
 // Integration tests against a real, migrated PostgreSQL database. Run with:
-//   go test -tags=integration ./internal/domain/product/...
+//
+//	go test -tags=integration ./internal/domain/product/...
+//
 // Requires DATABASE_URL (app_user) and DATABASE_ADMIN_URL (app_admin).
 package product_test
 
@@ -112,7 +114,7 @@ func TestProductCreateAndSearch(t *testing.T) {
 	}
 
 	t.Run("exact barcode match ranks first", func(t *testing.T) {
-		results, err := svc.Search(context.Background(), tenantID, barcode, 10)
+		results, err := svc.Search(context.Background(), tenantID, barcode, nil, 10)
 		if err != nil {
 			t.Fatalf("search: %v", err)
 		}
@@ -127,7 +129,7 @@ func TestProductCreateAndSearch(t *testing.T) {
 		// every exact SKU lookup. Found via manual testing before this test
 		// existed; fixed by matching SKU/barcode against the raw query and
 		// only using the normalized form for name/alias/fuzzy matching.
-		results, err := svc.Search(context.Background(), tenantID, sku, 10)
+		results, err := svc.Search(context.Background(), tenantID, sku, nil, 10)
 		if err != nil {
 			t.Fatalf("search: %v", err)
 		}
@@ -137,7 +139,7 @@ func TestProductCreateAndSearch(t *testing.T) {
 	})
 
 	t.Run("transliterated alias resolves to the product, canonical name unchanged", func(t *testing.T) {
-		results, err := svc.Search(context.Background(), tenantID, "MATTU THEEVANAM", 10)
+		results, err := svc.Search(context.Background(), tenantID, "MATTU THEEVANAM", nil, 10)
 		if err != nil {
 			t.Fatalf("search: %v", err)
 		}
@@ -156,12 +158,62 @@ func TestProductCreateAndSearch(t *testing.T) {
 	})
 
 	t.Run("no match returns empty results, not an error", func(t *testing.T) {
-		results, err := svc.Search(context.Background(), tenantID, "zzz_definitely_not_present_9999", 10)
+		results, err := svc.Search(context.Background(), tenantID, "zzz_definitely_not_present_9999", nil, 10)
 		if err != nil {
 			t.Fatalf("search: %v", err)
 		}
 		if len(results) != 0 {
 			t.Fatalf("expected no results, got %+v", results)
+		}
+	})
+
+	t.Run("category_id narrows results to real categories, and browses a whole category with an empty query", func(t *testing.T) {
+		// Regression guard for the POS catalog's category filter chips: they
+		// must filter against real category rows (the same ones
+		// masterdata.ListCategories returns), not a client-side hard-coded
+		// list unrelated to actual product data.
+		var categoryID uuid.UUID
+		if err := db.WithAdminTx(context.Background(), func(tx pgx.Tx) error {
+			return tx.QueryRow(context.Background(),
+				`INSERT INTO categories (tenant_id, name) VALUES ($1, 'Cattle Feed Category') RETURNING id`,
+				tenantID).Scan(&categoryID)
+		}); err != nil {
+			t.Fatalf("seed category: %v", err)
+		}
+		if _, err := svc.Update(context.Background(), tenantID, created.ID, product.UpdateInput{
+			Product: product.Product{
+				SKU: sku, Name: fetched.Name, CategoryID: &categoryID,
+				DefaultSaleUOMID: uomBag, DefaultPurchaseUOMID: uomBag, BaseInventoryUOMID: uomKG,
+				BatchRequired: true, ExpiryRequired: true,
+			},
+		}); err != nil {
+			t.Fatalf("assign category: %v", err)
+		}
+
+		results, err := svc.Search(context.Background(), tenantID, "", &categoryID, 10)
+		if err != nil {
+			t.Fatalf("browse category with empty query: %v", err)
+		}
+		found := false
+		for _, r := range results {
+			if r.Product.ID == created.ID {
+				found = true
+			}
+			if r.Product.CategoryID == nil || *r.Product.CategoryID != categoryID {
+				t.Fatalf("expected every result to belong to the filtered category, got %+v", r.Product)
+			}
+		}
+		if !found {
+			t.Fatalf("expected the categorized product in an empty-query browse of its category, got %+v", results)
+		}
+
+		otherCategoryID := uuid.New()
+		results, err = svc.Search(context.Background(), tenantID, "", &otherCategoryID, 10)
+		if err != nil {
+			t.Fatalf("browse unrelated category: %v", err)
+		}
+		if len(results) != 0 {
+			t.Fatalf("expected no results for an unrelated category, got %+v", results)
 		}
 	})
 }
@@ -200,7 +252,7 @@ func TestProductUpdateSetActiveList(t *testing.T) {
 		newBarcode := "222" + uuid.NewString()[:10]
 		updated, err := svc.Update(context.Background(), tenantID, created.ID, product.UpdateInput{
 			Product: product.Product{
-				SKU: "attempted-sku-change-should-be-ignored", // Update must never touch SKU
+				SKU:  "attempted-sku-change-should-be-ignored", // Update must never touch SKU
 				Name: "Renamed Product", SellingPrice: &newPrice,
 				DefaultSaleUOMID: uomBag, DefaultPurchaseUOMID: uomBag, BaseInventoryUOMID: uomKG,
 				BatchRequired: true, ExpiryRequired: true,

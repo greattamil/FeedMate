@@ -1004,6 +1004,30 @@ the Android emulator against the real Go backend and PostgreSQL, including
 one real bug (the layout overflow above) found and fixed during that
 verification rather than only in the test suite.
 
+## Phase 45 — POS Category Filter: Real Categories, Not a Hard-Coded List (Backend + Flutter)
+
+The user reported (correctly) that the Counter screen's product catalog was
+not a single source of truth: `CatalogPanel`'s category filter chips were a
+`static const` list — `['All', 'Cattle Feed', 'Poultry Feed', 'Mineral Mix',
+'Concentrate', 'Grains & Raw']` — with no connection whatsoever to the real
+categories a shop owner configures in the Categories & Brands admin screen
+(Phase 38, backed by `/api/v1/categories`). Selecting a chip didn't even
+filter by category server-side; it just typed the chip's hard-coded label
+into the search box as a text query, so a real category named anything
+else was invisible to this filter and a chip could silently return zero
+results even when the category had products.
+
+| Area | Status | Evidence |
+|---|---|---|
+| `product.Search` (backend) now accepts an optional `categoryID *uuid.UUID`, filtered via `AND (p.category_id = $4 OR $4::uuid IS NULL)`; an empty query text is now valid when paired with a category (browses the whole category), whereas an empty query with no category is still rejected (never "match everything with no filter") | **VERIFIED** | New Go integration test `category_id narrows results to real categories, and browses a whole category with an empty query`: seeds a real `categories` row, assigns a product to it, confirms an empty-query browse returns exactly that product, and confirms an unrelated category returns zero results. Full backend suite re-run clean, zero regressions |
+| `GET /api/v1/products/search` now accepts `category_id`, validated as a real UUID; `q` is only required when no `category_id` is given | **VERIFIED** | `go build ./...` and `gofmt -l` clean |
+| Flutter `CatalogPanel` now loads real categories via `ProductAdminApi.listCategories()` (the exact same call the Categories & Brands admin screen makes) instead of a static list, and passes the selected category's real ID to `ProductRepository.search()`, which now forwards `category_id` to the server | **VERIFIED** | 3 new widget tests in `catalog_panel_test.dart`: chips render from a mocked `/categories` response containing a category no hard-coded list would ever contain (and confirms none of the old hard-coded names appear); selecting a category with no search text sends `category_id` with no `q`; typing a query while a category is selected sends both filters together |
+| Categories fetch fails quietly (only the implicit "All" state remains, no chip row) rather than blocking the counter, since browsing/searching by name still works without a category filter | **VERIFIED** | Covered implicitly by `product_search_menu_test.dart`'s tests, which don't mock `/categories` at all and still pass |
+
+Full Flutter suite: 107 tests, all passing. Full Go suite (`-tags=integration`
+against live PostgreSQL): all passing. `flutter analyze` and `go build`/
+`gofmt` clean. No live emulator verification performed for this phase.
+
 ## Not Yet Started
 
 Customer/supplier aging (30/60/90-day buckets) and margin reports,

@@ -226,13 +226,13 @@ func (s *Service) GetByBarcode(ctx context.Context, tenantID uuid.UUID, barcode 
 // normalized form (see NormalizeAliasText) against name/alias/fuzzy, so exact
 // SKU/barcode lookups are not broken by punctuation stripping while
 // colloquial/transliterated name matching still ignores spacing/case.
-func (s *Service) Search(ctx context.Context, tenantID uuid.UUID, query string, limit int) ([]SearchResult, error) {
+func (s *Service) Search(ctx context.Context, tenantID uuid.UUID, query string, categoryID *uuid.UUID, limit int) ([]SearchResult, error) {
 	raw := strings.TrimSpace(query)
 	normalized := NormalizeAliasText(query)
 	var results []SearchResult
 	err := s.db.WithTenantReadTx(ctx, tenantID, func(tx pgx.Tx) error {
 		var err error
-		results, err = Search(ctx, tx, raw, normalized, limit)
+		results, err = Search(ctx, tx, raw, normalized, categoryID, limit)
 		return err
 	})
 	return results, err

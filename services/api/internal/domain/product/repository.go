@@ -265,7 +265,18 @@ type SearchResult struct {
 // matching, since colloquial and transliterated names must match regardless
 // of spacing or punctuation differences. Conflating the two would either
 // break exact SKU lookups (hyphens stripped) or weaken alias matching.
-func Search(ctx context.Context, tx pgx.Tx, rawQuery, normalizedQuery string, limit int) ([]SearchResult, error) {
+//
+// categoryID narrows results to one category (e.g. the POS catalog's
+// category filter chips, which are populated from the same categories
+// table this filters against — see masterdata.ListCategories — rather
+// than any client-side hard-coded list). A nil categoryID applies no
+// filter. When normalizedQuery is empty, the ILIKE '%%' comparisons match
+// every active product, so an empty query plus a categoryID browses that
+// whole category; an empty query with no categoryID is expected to be
+// rejected by the caller (see ProductHandlers.Search) rather than ever
+// reaching this function, since that would mean "match every product in
+// the tenant" with no filter at all.
+func Search(ctx context.Context, tx pgx.Tx, rawQuery, normalizedQuery string, categoryID *uuid.UUID, limit int) ([]SearchResult, error) {
 	if limit <= 0 || limit > 50 {
 		limit = 20
 	}
@@ -289,6 +300,7 @@ func Search(ctx context.Context, tx pgx.Tx, rawQuery, normalizedQuery string, li
 			       ) AS sim
 			FROM products p
 			WHERE p.active
+			  AND (p.category_id = $4 OR $4::uuid IS NULL)
 			  AND (
 			      p.name ILIKE '%' || $2 || '%'
 			      OR p.sku ILIKE '%' || $1 || '%'
@@ -305,7 +317,7 @@ func Search(ctx context.Context, tx pgx.Tx, rawQuery, normalizedQuery string, li
 		FROM ranked
 		ORDER BY rank ASC, sim DESC, name ASC
 		LIMIT $3
-	`, rawQuery, normalizedQuery, limit)
+	`, rawQuery, normalizedQuery, limit, categoryID)
 	if err != nil {
 		return nil, err
 	}

@@ -432,8 +432,21 @@ func (h *ProductHandlers) Search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	query := r.URL.Query().Get("q")
-	if query == "" {
-		WriteError(w, reqID, CodeValidation, "query parameter 'q' is required")
+	var categoryID *uuid.UUID
+	if c := r.URL.Query().Get("category_id"); c != "" {
+		parsed, err := uuid.Parse(c)
+		if err != nil {
+			WriteError(w, reqID, CodeValidation, "invalid category_id")
+			return
+		}
+		categoryID = &parsed
+	}
+	// A query is only optional when narrowing to a category — browsing a
+	// whole category is a legitimate use (the POS catalog's category filter
+	// chips), but "match every product in the tenant" with no filter at all
+	// is not something any caller should be able to trigger accidentally.
+	if query == "" && categoryID == nil {
+		WriteError(w, reqID, CodeValidation, "query parameter 'q' is required (or pass category_id to browse a category)")
 		return
 	}
 	limit := 20
@@ -443,7 +456,7 @@ func (h *ProductHandlers) Search(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	results, err := h.Product.Search(r.Context(), claims.TenantID, query, limit)
+	results, err := h.Product.Search(r.Context(), claims.TenantID, query, categoryID, limit)
 	if err != nil {
 		WriteError(w, reqID, CodeInternal, "search failed: "+err.Error())
 		return

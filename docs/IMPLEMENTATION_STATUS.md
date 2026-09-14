@@ -934,6 +934,28 @@ backend unchanged this phase (no new endpoints — the export button
 reshapes data the client already had). No live emulator verification
 performed for this phase.
 
+## Phase 42 — Home Dashboard Expansion (MANAGE grid), Flutter-only
+
+Eleven modules built across Phases 27–41 (product master data, stock
+counts, invoice history, GRN history, sales returns, contra/buy-back,
+staff, device management, financial years/document series, and the
+audit log) were reachable only from the Counter tab's overflow ⋮ menu,
+never from the Home Dashboard itself — a shop owner landing on Home had
+no visible path to most of the app. Pure frontend addition: every
+screen and its permission gate already existed, so this only needed a
+second bento grid on the dashboard.
+
+| Area | Status | Evidence |
+|---|---|---|
+| New "MANAGE" grid section on `HomeDashboardScreen`, below the existing "QUICK OPERATIONS" grid, listing Products, Categories & Brands, Stock Counts, Invoice History, GRN History, Sales Return, Contra/Buy-Back, Staff, Manage Devices, Financial Years, and Audit Log | **VERIFIED** | `_buildManageGrid()` gates each card on the same permission its own screen/menu-item already required (`product.manage`, `stock.count`, `pos.sell`, `grn.post`, `return.create`, `contra.approve`, `user.manage`, `device.manage`, `tenant.admin`) |
+| Shared `_buildActionGrid()` extracted from the old `_buildQuickActionGrid()` so both grids render through one `LayoutBuilder`/`GridView.builder` implementation, not two copies | **VERIFIED** | `flutter analyze` clean on the file (only pre-existing `withOpacity` deprecation infos) |
+| New `test/home_dashboard_manage_test.dart`: all cards show when every permission is granted, all hide when none are, and each card navigates to its real destination screen | **VERIFIED** | 3 new widget tests, all passing. Required `tester.dragUntilVisible()` since the section sits below the fold in the dashboard's `ListView` (same lazy-inflation behavior documented elsewhere in this suite). The navigation test also uncovered and fixed a real test-harness bug: `pumpWidget()` updates the existing element tree in place rather than tearing down the `Navigator`, so re-pumping per destination left every previously-pushed route stacked underneath the next — fixed by pumping once and popping back between destinations instead |
+
+Full Flutter suite: 101 tests, all passing. `flutter analyze` clean. Go
+backend unchanged this phase (no new endpoints — every destination
+screen and its permission gate already existed). No live emulator
+verification performed for this phase.
+
 ## Not Yet Started
 
 Customer/supplier aging (30/60/90-day buckets) and margin reports,

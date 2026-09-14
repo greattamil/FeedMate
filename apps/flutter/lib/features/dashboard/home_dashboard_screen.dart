@@ -11,14 +11,25 @@ import '../../core/local_db.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_decorations.dart';
 import '../../core/theme/app_typography.dart';
+import '../auditlog/audit_log_screen.dart';
 import '../auth/generate_pairing_code_screen.dart';
 import '../auth/login_screen.dart';
+import '../auth/device_management_screen.dart';
+import '../contra/contra_screen.dart';
+import '../docseries/doc_series_screen.dart';
 import '../eod/eod_api.dart';
 import '../eod/eod_screen.dart';
 import '../khata/khata_customer_list_screen.dart';
+import '../pos/invoice_history_screen.dart';
+import '../procurement/grn_history_screen.dart';
 import '../procurement/grn_screen.dart';
+import '../products/master_data_screen.dart';
+import '../products/product_list_screen.dart';
 import '../reports/reports_api.dart';
 import '../reports/reports_screen.dart';
+import '../returns/return_screen.dart';
+import '../staff/staff_list_screen.dart';
+import '../stockcount/stock_count_history_screen.dart';
 import '../supplier/supplier_list_screen.dart';
 import '../sync/outbox_screen.dart';
 
@@ -209,6 +220,13 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
             Text('QUICK OPERATIONS', style: AppTypography.caption.copyWith(fontWeight: FontWeight.bold, letterSpacing: 0.8)),
             const SizedBox(height: 12),
             _buildQuickActionGrid(session),
+            const SizedBox(height: 24),
+
+            // 5. Manage — everything else, so it's reachable from Home and
+            // not only from the Counter tab's overflow menu.
+            Text('MANAGE', style: AppTypography.caption.copyWith(fontWeight: FontWeight.bold, letterSpacing: 0.8)),
+            const SizedBox(height: 12),
+            _buildManageGrid(session),
             const SizedBox(height: 32),
           ],
         ),
@@ -531,6 +549,130 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
         ),
     ];
 
+    return _buildActionGrid(actions);
+  }
+
+  /// Everything else this app can do, grouped so it's reachable from Home
+  /// and not only from the Counter tab's overflow menu — each item gated
+  /// on the same permission the menu item itself requires.
+  Widget _buildManageGrid(AuthSession session) {
+    final actions = [
+      if (session.hasPermission('product.manage'))
+        _ActionItem(
+          title: 'Products',
+          subtitle: 'Catalog & pricing',
+          icon: Icons.inventory_2_rounded,
+          gradient: const LinearGradient(colors: [Color(0xFF0F766E), Color(0xFF14B8A6)]),
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const ProductListScreen()),
+          ),
+        ),
+      if (session.hasPermission('product.manage'))
+        _ActionItem(
+          title: 'Categories & Brands',
+          subtitle: 'Product lookups',
+          icon: Icons.category_rounded,
+          gradient: const LinearGradient(colors: [Color(0xFF7C3AED), Color(0xFFA78BFA)]),
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const MasterDataScreen()),
+          ),
+        ),
+      if (session.hasPermission('stock.count'))
+        _ActionItem(
+          title: 'Stock Counts',
+          subtitle: 'Physical audit',
+          icon: Icons.playlist_add_check_rounded,
+          gradient: const LinearGradient(colors: [Color(0xFF0369A1), Color(0xFF0EA5E9)]),
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const StockCountHistoryScreen()),
+          ),
+        ),
+      if (session.hasPermission('pos.sell'))
+        _ActionItem(
+          title: 'Invoice History',
+          subtitle: 'Past sales & reprint',
+          icon: Icons.receipt_long_rounded,
+          gradient: const LinearGradient(colors: [Color(0xFF059669), Color(0xFF34D399)]),
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const InvoiceHistoryScreen()),
+          ),
+        ),
+      if (session.hasPermission('grn.post'))
+        _ActionItem(
+          title: 'GRN History',
+          subtitle: 'Past goods receipts',
+          icon: Icons.history_rounded,
+          gradient: const LinearGradient(colors: [Color(0xFF0284C7), Color(0xFF38BDF8)]),
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const GrnHistoryScreen()),
+          ),
+        ),
+      if (session.hasPermission('return.create'))
+        _ActionItem(
+          title: 'Sales Return',
+          subtitle: 'Look up & refund',
+          icon: Icons.assignment_return_rounded,
+          gradient: const LinearGradient(colors: [Color(0xFFB45309), Color(0xFFF59E0B)]),
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const ReturnScreen()),
+          ),
+        ),
+      if (session.hasPermission('contra.approve'))
+        _ActionItem(
+          title: 'Contra / Buy-Back',
+          subtitle: 'Farmer barter credit',
+          icon: Icons.undo_rounded,
+          gradient: const LinearGradient(colors: [Color(0xFF7C3AED), Color(0xFFC084FC)]),
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const ContraScreen()),
+          ),
+        ),
+      if (session.hasPermission('user.manage'))
+        _ActionItem(
+          title: 'Staff',
+          subtitle: 'Accounts & roles',
+          icon: Icons.badge_rounded,
+          gradient: const LinearGradient(colors: [Color(0xFF4338CA), Color(0xFF818CF8)]),
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const StaffListScreen()),
+          ),
+        ),
+      if (session.hasPermission('device.manage'))
+        _ActionItem(
+          title: 'Manage Devices',
+          subtitle: 'Terminals & revoke',
+          icon: Icons.devices_other_rounded,
+          gradient: const LinearGradient(colors: [Color(0xFF334155), Color(0xFF64748B)]),
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const DeviceManagementScreen()),
+          ),
+        ),
+      if (session.hasPermission('tenant.admin'))
+        _ActionItem(
+          title: 'Financial Years',
+          subtitle: 'Document numbering',
+          icon: Icons.calendar_month_rounded,
+          gradient: const LinearGradient(colors: [Color(0xFF9A3412), Color(0xFFF97316)]),
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const DocSeriesScreen()),
+          ),
+        ),
+      if (session.hasPermission('tenant.admin'))
+        _ActionItem(
+          title: 'Audit Log',
+          subtitle: 'Overrides & history',
+          icon: Icons.fact_check_rounded,
+          gradient: const LinearGradient(colors: [Color(0xFF475569), Color(0xFF94A3B8)]),
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const AuditLogScreen()),
+          ),
+        ),
+    ];
+
+    return _buildActionGrid(actions);
+  }
+
+  Widget _buildActionGrid(List<_ActionItem> actions) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final crossAxisCount = constraints.maxWidth >= 720 ? 4 : 2;

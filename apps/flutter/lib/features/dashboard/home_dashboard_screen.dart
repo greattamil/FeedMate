@@ -261,7 +261,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.2),
+                  color: Colors.white.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(999),
                 ),
                 child: Row(
@@ -288,7 +288,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
           const SizedBox(height: 6),
           Text(
             todayStr,
-            style: TextStyle(color: Colors.white.withOpacity(0.85), fontSize: 13),
+            style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 13),
           ),
         ],
       ),
@@ -305,7 +305,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
             decoration: BoxDecoration(
               color: AppColors.warningContainer,
               borderRadius: AppDecorations.borderRadiusSm,
-              border: Border.all(color: AppColors.warning.withOpacity(0.4)),
+              border: Border.all(color: AppColors.warning.withValues(alpha: 0.4)),
             ),
             child: Row(
               children: [
@@ -332,7 +332,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
             decoration: BoxDecoration(
               color: AppColors.dangerContainer,
               borderRadius: AppDecorations.borderRadiusSm,
-              border: Border.all(color: AppColors.danger.withOpacity(0.3)),
+              border: Border.all(color: AppColors.danger.withValues(alpha: 0.3)),
             ),
             child: Row(
               children: [
@@ -425,7 +425,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: AppDecorations.borderRadiusMd,
-        border: Border.all(color: isAlert ? AppColors.danger.withOpacity(0.4) : AppColors.border),
+        border: Border.all(color: isAlert ? AppColors.danger.withValues(alpha: 0.4) : AppColors.border),
         boxShadow: AppDecorations.cardShadow,
       ),
       child: Column(

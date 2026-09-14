@@ -970,11 +970,35 @@ phase closes that gap end to end.
 | Receipt header/footer text has no dedicated column, so it's merged into `tenant_settings.extra_settings` (jsonb) — confirmed by direct `psql \d` inspection before writing any code that no such column already existed | **VERIFIED** | `UpdateReceiptText` preserves any other keys already in that jsonb blob rather than overwriting the whole object |
 | New `GET`/`PUT /api/v1/settings/store-profile` endpoints, gated `tenant.admin` like every other tenant-setup admin route (financial years, document series) | **VERIFIED** | Wired into `main.go` following the exact `docSeriesHandlers` pattern; `go build ./...` and `gofmt -l` clean |
 | New Flutter `StoreSettingsScreen`: a single scrollable form (Shop Identity, Contact, Address, Billing, Receipt Text sections) that loads the current profile, validates required fields client-side, and saves via the new endpoint | **VERIFIED** | 3 new widget tests: loads and displays the seeded profile, editing a field and saving sends the complete updated profile (not just the changed field), and clearing the required Legal Name blocks the save with a validation error instead of calling the API |
-| Reachable from both the Counter tab's overflow menu (`Store Settings`, next to `Financial Years`/`Audit Log`) and the Home Dashboard's MANAGE grid (Phase 42), both gated `tenant.admin` | **VERIFIED** | `flutter analyze` clean on all touched files |
+| Reachable from the Home Dashboard's MANAGE grid (Phase 42), gated `tenant.admin` | **VERIFIED** | `flutter analyze` clean on all touched files. (Originally also reachable from the Counter tab's overflow menu; Phase 44 removed that menu entirely once the MANAGE grid covered every item it held — see below, this line is updated to keep this document accurate rather than stale.) |
 
 Full Flutter suite: 104 tests, all passing. Full Go suite (all domain
 packages, `-tags=integration` against live PostgreSQL): all passing,
 including the 3 new `settings` tests. No live emulator verification
+performed for this phase.
+
+## Phase 44 — Single-Screen POS Counter (Flutter-only)
+
+The Counter tab required navigating to a second page (`CartScreen`) just
+to see what was already in the cart, adjust a quantity, or check out —
+two pages for one continuous action a real POS terminal (Square, Shopify
+POS) does on one screen. This phase merges the catalog and the cart into
+one screen: tap a product, watch it land in a cart panel that is already
+on screen, right next to the search results, with no navigation at all.
+
+| Area | Status | Evidence |
+|---|---|---|
+| Extracted the product catalog (search bar, category chips, tap-to-add results list) out of `ProductSearchScreen` into a standalone `CatalogPanel` widget, with no behavior change | **VERIFIED** | `flutter analyze` clean; every existing catalog-facing test still passes unmodified against the new widget |
+| Extracted the cart/checkout body out of `CartScreen` into a standalone `CartPanel` widget (quote, tenders incl. split payment, customer picker, offline queueing, checkout) with a `standalone` flag controlling only whether finishing a sale pops its own route | **VERIFIED** | `CartScreen` is now a 20-line wrapper (`Scaffold` + `CartPanel()`); all 4 pre-existing `cart_credit_test.dart` tests pass unchanged against the refactored code, proving no behavioral drift from the extraction |
+| `CartPanel` now listens directly to `CartModel` (`cart.addListener(...)`) instead of requiring every mutation site to separately notify it — so a product added from a *different* panel (the catalog, sitting next to it) refreshes the live quote exactly like an in-panel quantity edit does | **VERIFIED** | This is the one behavioral change the merge needed; covered by the new `product_search_menu_test.dart` test asserting the cart panel updates immediately after a catalog tap |
+| `ProductSearchScreen` (the Counter tab) now renders `CatalogPanel` and `CartPanel(standalone: false)` side by side (`Row`, cart pinned at a fixed 380px on the right) at width ≥700, or stacked (`Column`, catalog 60%/cart 40%) below that — both panels are always simultaneously visible and interactive, never one-or-the-other | **VERIFIED** | `flutter analyze` clean; existing `widget_test.dart` login/search/add-to-cart tests pass unchanged (default 800×600 test surface exercises the wide/Row branch) |
+| Removed the `cart_button` AppBar icon and its `Navigator.push(CartScreen)` — there is nothing left to navigate to, the cart is always on screen | **VERIFIED** | `product_search_menu_test.dart` asserts `cart_button` no longer exists and the cart panel (`cart_panel_container`) is present from first render |
+| The Counter tab's overflow "more" menu (Khata/Suppliers/GRN/Reports/EOD/Pair Device/Products/Categories/Contra/Invoice History/GRN History/Sales Return/Staff/Manage Devices/Financial Years/Audit Log/Store Settings) was removed outright, not just decluttered — every one of those items already had a working entry point on the Home Dashboard (Quick Operations or the Phase 42 MANAGE grid) before this menu was deleted, so nothing became unreachable | **VERIFIED** | Manually cross-checked every historical "wired into the overflow menu" item (Phases 26/30/32/33/35/36/37/38/39/40 above) against the current Home Dashboard's action list — each has a live `_ActionItem` there. Earlier phase entries above that say "wired into the overflow menu" describe that phase's state at the time and are left as written (this is a historical log); this note exists so a reader doesn't mistake them for the current state |
+
+Full Flutter suite: 104 tests, all passing (test count unchanged overall —
+`product_search_menu_test.dart` gained a second test, `cart_credit_test.dart`
+lost none). `flutter analyze` clean (35 pre-existing info-level lints,
+same as before this phase, zero new issues). No live emulator verification
 performed for this phase.
 
 ## Not Yet Started

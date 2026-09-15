@@ -8,6 +8,7 @@ class CustomerSummary {
   final String name;
   final String? phone;
   final String customerType;
+  final Decimal balance;
 
   CustomerSummary({
     required this.id,
@@ -15,6 +16,7 @@ class CustomerSummary {
     required this.name,
     required this.phone,
     required this.customerType,
+    required this.balance,
   });
 
   factory CustomerSummary.fromJson(Map<String, dynamic> json) {
@@ -24,6 +26,7 @@ class CustomerSummary {
       name: json['name'] as String,
       phone: json['phone'] as String?,
       customerType: json['customer_type'] as String,
+      balance: json['balance'] != null ? Decimal.parse(json['balance'] as String) : Decimal.zero,
     );
   }
 }

@@ -1093,6 +1093,53 @@ Full Go suite (`-tags=integration` against live PostgreSQL): all passing.
 Full Flutter suite: 109 tests, all passing (no Flutter files touched this
 phase). `go build`/`gofmt` clean.
 
+## Phase 49 — UI/UX Audit Fixes: Balances, Empty Cart, Navigation, Truncation (Backend + Flutter)
+
+The user pasted a third-party "Comprehensive Real-App UI/UX & End-to-End
+Functional Audit Report" listing 6 "critical" bugs, 5 design flaws, and
+several feature suggestions. Per this project's standing "never share a
+false report" instruction, every claim was verified against the actual
+source (via a read-only research pass) before anything was implemented —
+one claimed bug turned out to be wrong, five were real. Only the
+confirmed items, plus the report's own explicitly-offered "Next Steps"
+list, were implemented.
+
+| Claim | Verification | Status |
+|---|---|---|
+| FAB overlapping "Post Count" in `StockCountScreen` | **NOT CONFIRMED** — both live inside the body `Column`, not a `bottomNavigationBar`; Flutter's default FAB positioning floats above content with its own margin and does not reserve/overlap normal in-flow widgets. No fix applied — changing working code on an unconfirmed claim would itself have been a false report | Skipped, honestly |
+| FAB occluding the last row in `SupplierDetailScreen` / `StaffListScreen` | **CONFIRMED** — neither list reserved bottom padding for the extended FAB | **FIXED**: added `padding: EdgeInsets.only(bottom: 96)` (Supplier) / `EdgeInsets.fromLTRB(12,12,12,96)` (Staff) |
+| Bento grid titles ellipsis-truncated ("Cash Drawer E...", "Analytics & Re...", "Categories & B...", "Contra / Buy-B...") | **CONFIRMED** — `maxLines: 1` on the title `Text`, `childAspectRatio: 1.4` leaves little width after the icon | **FIXED**: `maxLines: 2`, `childAspectRatio` reduced to `1.15` so the second line has room without overflowing the fixed-height grid cell |
+| Empty cart still shows the full tender bar (payment toggle, customer picker, disabled Charge button) | **CONFIRMED** — the bottom `Container` in `CartPanel` had no `cart.isEmpty` guard at all | **FIXED**: wrapped in `if (!cart.isEmpty)` — hidden entirely, not just disabled |
+| Customer/Supplier list cards show no balance, so a shopkeeper can't see who owes money at a glance | **CONFIRMED** — `CustomerSummary`/`SupplierSummary` and the `List` SQL never touched the ledger tables at all | **FIXED** (bigger than the other items — a real backend feature, not just a UI tweak): `customer.List`/`supplier.List` now `LEFT JOIN`-style subquery the ledger tables for a per-row balance/payable; list cards show a red "₹X Due" / amber "₹X Payable" pill, or a neutral "Clear"/"Settled" pill at zero |
+| "Analytics & Reports" on Home pushes a new full-screen route (hides bottom nav) while the bottom "Reports" tab switches in place | **CONFIRMED** — `Navigator.push(MaterialPageRoute(... ReportsScreen()))` vs. the `onOpenPos`-style tab-switch callback "New Bill / POS" already used | **FIXED**: added `onOpenReports` callback, computed by `AppShell` from the same permission-gated tab positions (`Home=0, Counter=1, Khata=2, [Suppliers], [Reports]`), wired the same way as `onOpenPos` |
+| InkWell ripple barely visible on dashboard tiles (`Material(color: transparent)` wrapping an opaque `Container`) | **CONFIRMED** on closer reading — `Material`'s ink features paint as part of the *ancestor* Material's own render pass, which happens before (i.e. visually below) an opaque child `Container`'s background, so the splash is largely hidden regardless of the "correct-looking" `Material→InkWell→Container` nesting | **FIXED**: moved the solid `color` onto `Material` itself (border/shadow stay on an outer `Container` with no fill), so the ripple paints on top of visible content instead of underneath it |
+| No "+ Pair New Device" shortcut inside `DeviceManagementScreen` | **CONFIRMED** — only reachable via Home | **FIXED**: added an AppBar action icon that pushes `GeneratePairingCodeScreen` directly |
+
+| Area | Status | Evidence |
+|---|---|---|
+| `customer.List` / `supplier.List` balance queries | **VERIFIED** | New `TestCustomerList_IncludesOutstandingBalance` and `TestSupplierList_IncludesOutstandingPayable`: seed one party with a real ledger entry and one with none, confirm List's computed balance matches `OutstandingBalance`/`OutstandingPayable`'s own arithmetic exactly (not just non-zero) |
+| Empty-cart tender bar hidden | **VERIFIED** | New widget test `an empty cart hides the tender bar entirely, not just disables it`: asserts `tender_method_toggle`/`checkout_button`/`customer_picker_tile` are all absent (`findsNothing`) on an empty cart, then present after adding a product |
+| Balance/payable badges render correctly | **VERIFIED** | 2 new widget tests per list screen (Khata, Supplier): a positive balance shows the "Due"/"Payable" pill with the exact amount, a zero balance shows "Clear"/"Settled" and never the word "Due"/"Payable" |
+| Reports tab-switch navigation | **VERIFIED** | `flutter analyze` clean on `app_shell.dart`/`home_dashboard_screen.dart`; existing dashboard/shell tests re-run unchanged (no test previously asserted the old push-route behavior, so nothing needed updating, but nothing broke either) |
+| Dashboard tile truncation/ripple fix | **VERIFIED** | `flutter analyze` clean; the shared `_buildActionGrid` used by both the Quick Operations and MANAGE grids was fixed once, applying to all 19+ tiles across both grids |
+| End-to-end live verification on the Android emulator against the rebuilt backend | **VERIFIED, live** | Dashboard tiles: "Cash Drawer EOD" and "Analytics & Reports" now wrap onto a clean second line, confirmed on screen. Tapping "Analytics & Reports" switches to the Reports tab with the bottom nav bar still visible and "Reports" highlighted — confirmed it's a real tab switch, not a route push. Counter screen: adding nothing to the cart shows "Cart is empty" with no tender bar beneath it. Khata Directory: real balance pills render from the live backend ("Smoke Test Customer ₹260.00 Due", "Test Farmer ₹103000.00 Due") |
+| **Real bug caught live, not by any test — fixed before considering this phase done**: the Supplier list's new payable badge, combined with a real supplier's phone number, produced an actual `RIGHT OVERFLOWED BY 7.3 PIXELS` render error on the emulator ("Live Test Feed Mill", phone `9998887770`, payable `₹171825.00`) — the wide badge squeezed the subtitle row below the phone number's natural width | **FIXED** | Wrapped the phone `Text` in both list screens (Supplier and, defensively, Khata, since the same layout pattern exists there) in `Flexible(..., overflow: TextOverflow.ellipsis)`. New regression test `a long phone number and a large payable amount never overflow the list tile` reproduces the exact live data and asserts `tester.takeException()` is null; confirmed this test actually catches the bug by temporarily reverting the fix and re-running it (real failure reproduced), then restored the fix and reverified clean. Rebuilt and reinstalled on the emulator: overflow banner gone, phone truncates to "9998887..." |
+
+Full Flutter suite: 113 tests, all passing (5 new: 2 balance-badge tests,
+1 empty-cart test, 1 overflow-regression test, plus the pre-existing
+suite's balance-mock updates where those two list screens were already
+covered). Full Go suite (`-tags=integration` against live PostgreSQL):
+all passing, including 2 new balance/payable tests. `flutter analyze`
+and `go build`/`gofmt` clean. Live-verified end to end on the Android
+emulator against the real Go backend and PostgreSQL, including one real
+bug found and fixed during that verification rather than only in the
+test suite. Explicitly *not* implemented from the same report: one-tap
+thermal receipt reprint/WhatsApp share (hardware/external API dependency,
+already tracked below), denomination-count EOD calculator, WhatsApp Khata
+reminders, and bag-vs-bulk loose-weight billing — all reasonable feature
+ideas, but out of scope for a UI/UX bug-fix pass and not part of the
+report's own "Next Steps" shortlist that was actually acted on.
+
 ## Not Yet Started
 
 Customer/supplier aging (30/60/90-day buckets) and margin reports,

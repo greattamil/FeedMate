@@ -206,11 +206,26 @@ class _KhataCustomerListScreenState extends State<KhataCustomerListScreen> {
                                 const SizedBox(width: 8),
                                 const Icon(Icons.phone_outlined, size: 12, color: AppColors.textSecondary),
                                 const SizedBox(width: 4),
-                                Text(c.phone!, style: AppTypography.caption),
+                                // Flexible + ellipsis: the trailing balance
+                                // badge (e.g. "₹103000.00 Due") can be wide
+                                // enough to squeeze this row below the
+                                // phone number's natural width, which would
+                                // otherwise overflow the tile on the right
+                                // (caught live on the emulator).
+                                Flexible(
+                                  child: Text(c.phone!, style: AppTypography.caption, overflow: TextOverflow.ellipsis),
+                                ),
                               ],
                             ],
                           ),
-                          trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppColors.textSecondary),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              _balanceBadge(c.balance),
+                              const SizedBox(width: 4),
+                              const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppColors.textSecondary),
+                            ],
+                          ),
                           onTap: () {
                             Navigator.of(context).push(
                               MaterialPageRoute(builder: (_) => KhataDetailScreen(customerId: c.id)),
@@ -222,6 +237,29 @@ class _KhataCustomerListScreenState extends State<KhataCustomerListScreen> {
                   ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// A shopkeeper browsing this directory wants to see who owes money
+  /// without opening each customer individually — a red "Due" pill for an
+  /// outstanding balance, a neutral "Clear" pill otherwise. Never a
+  /// client-side computation: c.balance already came straight from the
+  /// server's ledger aggregate (see customer.List's SQL).
+  Widget _balanceBadge(Decimal balance) {
+    final isDue = balance > Decimal.zero;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: isDue ? AppColors.dangerContainer : AppColors.successContainer,
+        borderRadius: BorderRadius.circular(AppDecorations.radiusFull),
+      ),
+      child: Text(
+        isDue ? '₹${balance.toStringAsFixed(2)} Due' : 'Clear',
+        style: AppTypography.caption.copyWith(
+          fontWeight: FontWeight.bold,
+          color: isDue ? AppColors.onDangerContainer : AppColors.onSuccessContainer,
+        ),
       ),
     );
   }

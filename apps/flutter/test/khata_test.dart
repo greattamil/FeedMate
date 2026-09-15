@@ -46,7 +46,10 @@ void main() {
       if (request.url.path == '/api/v1/customers') {
         return _jsonOk({
           'customers': [
-            {'id': 'cust-1', 'customer_code': 'FARM001', 'name': 'Test Farmer', 'customer_type': 'FARMER', 'phone': '9876543210'}
+            {
+              'id': 'cust-1', 'customer_code': 'FARM001', 'name': 'Test Farmer', 'customer_type': 'FARMER',
+              'phone': '9876543210', 'balance': '6200.00',
+            }
           ]
         });
       }
@@ -80,6 +83,7 @@ void main() {
 
     expect(find.text('Test Farmer'), findsOneWidget);
     expect(find.textContaining('FARM001'), findsOneWidget);
+    expect(find.text('₹6200.00 Due'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('khata_customer_cust-1')));
     await tester.pumpAndSettle();
@@ -94,6 +98,29 @@ void main() {
     expect(find.text('Cash received'), findsOneWidget);
     expect(find.text('+₹1200.00'), findsOneWidget);
     expect(find.text('-₹500.00'), findsOneWidget);
+  });
+
+  testWidgets('Khata customer list shows a Clear badge for a zero balance, not a Due amount', (tester) async {
+    final client = MockClient((request) async {
+      if (request.url.path == '/api/v1/customers') {
+        return _jsonOk({
+          'customers': [
+            {
+              'id': 'cust-3', 'customer_code': 'FARM003', 'name': 'Zero Balance Farmer', 'customer_type': 'FARMER',
+              'balance': '0.00',
+            }
+          ]
+        });
+      }
+      return http.Response('not found', 404);
+    });
+
+    await tester.pumpWidget(_wrapWithProviders(httpClient: client, child: const KhataCustomerListScreen()));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Zero Balance Farmer'), findsOneWidget);
+    expect(find.text('Clear'), findsOneWidget);
+    expect(find.textContaining('Due'), findsNothing);
   });
 
   testWidgets('Khata detail shows no over-limit warning when within limit', (tester) async {

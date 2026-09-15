@@ -580,7 +580,11 @@ class _CartPanelState extends State<CartPanel> {
                   },
                 ),
         ),
-        // Location & Tender Controls Container
+        // Location & Tender Controls Container — hidden entirely on an
+        // empty cart rather than shown disabled: an empty-cart tender bar
+        // (payment toggle, customer picker, a "Charge Cash" that can never
+        // be tapped) is pure visual clutter with nothing to configure yet.
+        if (!cart.isEmpty)
         Container(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
           decoration: const BoxDecoration(

@@ -396,4 +396,32 @@ void main() {
     expect(postedBody, isNotNull);
     expect(postedBody!['customer_id'], 'cust-1');
   });
+
+  testWidgets('an empty cart hides the tender bar entirely, not just disables it', (tester) async {
+    final cart = CartModel();
+    final client = MockClient((request) async {
+      if (request.url.path == '/api/v1/locations') {
+        return _jsonOk({
+          'locations': [
+            {'id': 'loc-1', 'name': 'Main Store'}
+          ]
+        });
+      }
+      return http.Response('not found', 404);
+    });
+
+    await tester.pumpWidget(_wrapCartScreen(httpClient: client, cart: cart));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Cart is empty'), findsOneWidget);
+    expect(find.byKey(const Key('tender_method_toggle')), findsNothing);
+    expect(find.byKey(const Key('checkout_button')), findsNothing);
+    expect(find.byKey(const Key('customer_picker_tile')), findsNothing);
+
+    cart.addProduct(_testProduct(), quantity: Decimal.one);
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('tender_method_toggle')), findsOneWidget);
+    expect(find.byKey(const Key('checkout_button')), findsOneWidget);
+  });
 }

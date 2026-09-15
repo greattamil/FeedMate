@@ -47,7 +47,10 @@ void main() {
       if (request.url.path == '/api/v1/suppliers') {
         return _jsonOk({
           'suppliers': [
-            {'id': 'sup-1', 'supplier_code': 'SUP001', 'name': 'Test Feed Mill', 'phone': '9876543210', 'gstin': '29ABCDE1234F1Z5'}
+            {
+              'id': 'sup-1', 'supplier_code': 'SUP001', 'name': 'Test Feed Mill', 'phone': '9876543210',
+              'gstin': '29ABCDE1234F1Z5', 'payable': '12000.00',
+            }
           ]
         });
       }
@@ -80,6 +83,7 @@ void main() {
 
     expect(find.text('Test Feed Mill'), findsOneWidget);
     expect(find.textContaining('SUP001'), findsOneWidget);
+    expect(find.text('₹12000.00 Payable'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('supplier_sup-1')));
     await tester.pumpAndSettle();
@@ -92,6 +96,51 @@ void main() {
     expect(find.text('Cash payment'), findsOneWidget);
     expect(find.text('+₹12000.00'), findsOneWidget);
     expect(find.text('-₹5000.00'), findsOneWidget);
+  });
+
+  testWidgets('a long phone number and a large payable amount never overflow the list tile', (tester) async {
+    // Regression guard: caught live on the emulator — a wide payable badge
+    // (e.g. "₹171825.00 Payable") squeezed the subtitle row below the
+    // phone number's natural width, overflowing the tile on the right.
+    final client = MockClient((request) async {
+      if (request.url.path == '/api/v1/suppliers') {
+        return _jsonOk({
+          'suppliers': [
+            {
+              'id': 'sup-3', 'supplier_code': 'SUP-LIVE-01', 'name': 'Live Test Feed Mill',
+              'phone': '9998887770', 'payable': '171825.00',
+            }
+          ]
+        });
+      }
+      return http.Response('not found', 404);
+    });
+
+    await tester.pumpWidget(_wrapWithProviders(httpClient: client, child: const SupplierListScreen()));
+    await tester.pumpAndSettle();
+
+    expect(find.text('₹171825.00 Payable'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Supplier list shows a Settled badge for a zero payable, not a Payable amount', (tester) async {
+    final client = MockClient((request) async {
+      if (request.url.path == '/api/v1/suppliers') {
+        return _jsonOk({
+          'suppliers': [
+            {'id': 'sup-2', 'supplier_code': 'SUP002', 'name': 'Settled Mill', 'payable': '0.00'}
+          ]
+        });
+      }
+      return http.Response('not found', 404);
+    });
+
+    await tester.pumpWidget(_wrapWithProviders(httpClient: client, child: const SupplierListScreen()));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Settled Mill'), findsOneWidget);
+    expect(find.text('Settled'), findsOneWidget);
+    expect(find.textContaining('Payable'), findsNothing);
   });
 
   testWidgets('Record Payment posts a manual payment and refreshes the balance', (tester) async {

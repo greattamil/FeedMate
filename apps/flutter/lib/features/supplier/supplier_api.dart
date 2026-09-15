@@ -9,6 +9,7 @@ class SupplierSummary {
   final String name;
   final String? phone;
   final String? gstin;
+  final Decimal payable;
 
   SupplierSummary({
     required this.id,
@@ -16,6 +17,7 @@ class SupplierSummary {
     required this.name,
     required this.phone,
     required this.gstin,
+    required this.payable,
   });
 
   factory SupplierSummary.fromJson(Map<String, dynamic> json) {
@@ -25,6 +27,7 @@ class SupplierSummary {
       name: json['name'] as String,
       phone: json['phone'] as String?,
       gstin: json['gstin'] as String?,
+      payable: json['payable'] != null ? Decimal.parse(json['payable'] as String) : Decimal.zero,
     );
   }
 }

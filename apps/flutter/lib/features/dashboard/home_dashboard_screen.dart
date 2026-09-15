@@ -39,7 +39,15 @@ import '../sync/outbox_screen.dart';
 class HomeDashboardScreen extends StatefulWidget {
   final VoidCallback onOpenPos;
 
-  const HomeDashboardScreen({super.key, required this.onOpenPos});
+  /// Switches AppShell to the persistent Reports tab in place, the same
+  /// way [onOpenPos] switches to Counter — never a [Navigator.push] to a
+  /// second, non-persistent instance of the screen that would hide the
+  /// bottom nav and diverge from the "Reports" tab a user could tap
+  /// instead. Null only when the session lacks report.view, in which case
+  /// the "Analytics & Reports" tile below is not shown at all.
+  final VoidCallback? onOpenReports;
+
+  const HomeDashboardScreen({super.key, required this.onOpenPos, this.onOpenReports});
 
   @override
   State<HomeDashboardScreen> createState() => _HomeDashboardScreenState();
@@ -525,9 +533,9 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
           subtitle: 'Sales, stock & balances',
           icon: Icons.analytics_rounded,
           gradient: const LinearGradient(colors: [Color(0xFF9333EA), Color(0xFFA855F7)]),
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const ReportsScreen()),
-          ),
+          onTap: widget.onOpenReports ?? () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const ReportsScreen()),
+              ),
         ),
       _ActionItem(
         title: 'Offline Outbox',
@@ -695,56 +703,69 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
             crossAxisCount: crossAxisCount,
             crossAxisSpacing: 12,
             mainAxisSpacing: 12,
-            childAspectRatio: 1.4,
+            // 1.15 rather than 1.4: gives a 2-line title (see maxLines
+            // below) enough vertical room without overflowing the cell —
+            // titles like "Categories & Brands" or "Contra / Buy-Back"
+            // were being ellipsis-truncated to one line at the old ratio.
+            childAspectRatio: 1.15,
           ),
           itemBuilder: (context, index) {
             final a = actions[index];
-            return Material(
-              color: Colors.transparent,
-              child: InkWell(
-                onTap: a.onTap,
+            // The tile's solid background lives on Material itself, not on
+            // an opaque child Container: InkWell paints its splash as one
+            // of the ancestor Material's own ink features, which render
+            // before (i.e. below) the widget subtree — so an opaque
+            // Container child painted on top of that layer would hide the
+            // ripple almost entirely. Border/shadow stay on the Container
+            // since Material doesn't offer an easy equivalent for those.
+            return Container(
+              decoration: BoxDecoration(
                 borderRadius: AppDecorations.borderRadiusMd,
-                child: Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: AppColors.surface,
-                    borderRadius: AppDecorations.borderRadiusMd,
-                    border: Border.all(color: AppColors.border),
-                    boxShadow: AppDecorations.cardShadow,
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          gradient: a.gradient,
-                          borderRadius: AppDecorations.borderRadiusSm,
+                border: Border.all(color: AppColors.border),
+                boxShadow: AppDecorations.cardShadow,
+              ),
+              child: Material(
+                color: AppColors.surface,
+                borderRadius: AppDecorations.borderRadiusMd,
+                child: InkWell(
+                  onTap: a.onTap,
+                  borderRadius: AppDecorations.borderRadiusMd,
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            gradient: a.gradient,
+                            borderRadius: AppDecorations.borderRadiusSm,
+                          ),
+                          child: Icon(a.icon, color: Colors.white, size: 22),
                         ),
-                        child: Icon(a.icon, color: Colors.white, size: 22),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Text(
-                              a.title,
-                              style: AppTypography.title.copyWith(fontSize: 13.5),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              a.subtitle,
-                              style: AppTypography.caption,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                a.title,
+                                style: AppTypography.title.copyWith(fontSize: 13.5),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                a.subtitle,
+                                style: AppTypography.caption,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),

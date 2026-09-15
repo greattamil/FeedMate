@@ -41,9 +41,20 @@ class _AppShellState extends State<AppShell> {
     // permission — mirroring the overflow menu's convention elsewhere in the
     // app (hide what a user can't use, rather than showing a tab that leads
     // nowhere useful).
+    final hasSuppliersTab = session.hasPermission('supplier.manage');
+    final hasReportsTab = session.hasPermission('report.view');
+    // Fixed positions: Home=0, Counter=1, Khata=2, then Suppliers (if
+    // present), then Reports — computed directly rather than searching the
+    // list built below, since Home's callback needs this before that list
+    // exists.
+    final reportsIndex = hasReportsTab ? (3 + (hasSuppliersTab ? 1 : 0)) : null;
+
     final tabs = <_ShellTab>[
       _ShellTab(
-        screen: HomeDashboardScreen(onOpenPos: () => _onTabSelected(1)),
+        screen: HomeDashboardScreen(
+          onOpenPos: () => _onTabSelected(1),
+          onOpenReports: reportsIndex != null ? () => _onTabSelected(reportsIndex) : null,
+        ),
         icon: Icons.dashboard_outlined,
         selectedIcon: Icons.dashboard_rounded,
         label: 'Home',
@@ -60,14 +71,14 @@ class _AppShellState extends State<AppShell> {
         selectedIcon: Icons.account_balance_wallet_rounded,
         label: 'Khata',
       ),
-      if (session.hasPermission('supplier.manage'))
+      if (hasSuppliersTab)
         const _ShellTab(
           screen: SupplierListScreen(),
           icon: Icons.local_shipping_outlined,
           selectedIcon: Icons.local_shipping_rounded,
           label: 'Suppliers',
         ),
-      if (session.hasPermission('report.view'))
+      if (hasReportsTab)
         const _ShellTab(
           screen: ReportsScreen(),
           icon: Icons.analytics_outlined,

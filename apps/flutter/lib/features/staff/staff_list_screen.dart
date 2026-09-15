@@ -162,7 +162,10 @@ class _StaffListScreenState extends State<StaffListScreen> {
                   )
                 : ListView.builder(
                     key: const Key('staff_results_list'),
-                    padding: const EdgeInsets.all(12),
+                    // Extra bottom padding reserves room for the extended
+                    // "Add Staff" FAB, which otherwise floats over the
+                    // last row in the list.
+                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 96),
                     itemCount: _results.length,
                     itemBuilder: (context, index) {
                       final u = _results[index];

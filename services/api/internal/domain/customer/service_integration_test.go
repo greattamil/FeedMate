@@ -200,6 +200,52 @@ func TestCustomerList_ExcludesWalkingCustomer(t *testing.T) {
 	}
 }
 
+// TestCustomerList_IncludesOutstandingBalance guards the Khata directory
+// list card feature: a shopkeeper must be able to see who owes money
+// without opening each customer individually, so List's balance must match
+// OutstandingBalance's own arithmetic (debit-credit), not just default to
+// zero for every row.
+func TestCustomerList_IncludesOutstandingBalance(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	tenantID := seedTenant(t, db)
+	svc := customer.NewService(db)
+
+	withBalance, err := svc.Create(context.Background(), tenantID, customer.CreateInput{CustomerCode: "OWES01", Name: "Owes Money"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := svc.Create(context.Background(), tenantID, customer.CreateInput{CustomerCode: "CLEAN01", Name: "Clean Account"}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	err = db.WithAdminTx(context.Background(), func(tx pgx.Tx) error {
+		_, err := customer.PostLedgerEntry(context.Background(), tx, tenantID, customer.LedgerEntry{
+			CustomerID: withBalance.ID, DocumentType: "INVOICE", DocumentID: uuid.New(),
+			Debit: decimal.RequireFromString("1500.00"), Credit: decimal.Zero, Description: "test sale",
+		})
+		return err
+	})
+	if err != nil {
+		t.Fatalf("post ledger entry: %v", err)
+	}
+
+	all, err := svc.List(context.Background(), tenantID, "", 10)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	balances := map[string]decimal.Decimal{}
+	for _, c := range all {
+		balances[c.CustomerCode] = c.Balance
+	}
+	if !balances["OWES01"].Equal(decimal.RequireFromString("1500.00")) {
+		t.Fatalf("expected OWES01 balance 1500.00, got %s (all: %+v)", balances["OWES01"], all)
+	}
+	if !balances["CLEAN01"].Equal(decimal.Zero) {
+		t.Fatalf("expected CLEAN01 balance 0, got %s", balances["CLEAN01"])
+	}
+}
+
 func TestCustomerSetCreditLimit_RequiresExistingCustomerAndNonNegative(t *testing.T) {
 	db := connectTest(t)
 	defer db.Close()

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:decimal/decimal.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -207,11 +208,27 @@ class _SupplierListScreenState extends State<SupplierListScreen> {
                                 const SizedBox(width: 8),
                                 const Icon(Icons.phone_outlined, size: 12, color: AppColors.textSecondary),
                                 const SizedBox(width: 3),
-                                Text(s.phone!, style: AppTypography.caption),
+                                // Flexible + ellipsis rather than a bare Text:
+                                // the trailing payable badge (e.g.
+                                // "₹171825.00 Payable") can be wide enough
+                                // to squeeze this row's available width
+                                // below the phone number's natural size,
+                                // which would otherwise overflow the tile
+                                // on the right.
+                                Flexible(
+                                  child: Text(s.phone!, style: AppTypography.caption, overflow: TextOverflow.ellipsis),
+                                ),
                               ],
                             ],
                           ),
-                          trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppColors.textSecondary),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              _payableBadge(s.payable),
+                              const SizedBox(width: 4),
+                              const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppColors.textSecondary),
+                            ],
+                          ),
                           onTap: () {
                             Navigator.of(context).push(
                               MaterialPageRoute(builder: (_) => SupplierDetailScreen(supplierId: s.id)),
@@ -223,6 +240,28 @@ class _SupplierListScreenState extends State<SupplierListScreen> {
                   ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// A shopkeeper browsing this directory wants to see who they owe money
+  /// to without opening each supplier individually — an amber "Payable"
+  /// pill when we owe them, a neutral "Settled" pill otherwise. Mirrors
+  /// khata_customer_list_screen.dart's _balanceBadge on the payable side.
+  Widget _payableBadge(Decimal payable) {
+    final isOwed = payable > Decimal.zero;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: isOwed ? AppColors.warningContainer : AppColors.successContainer,
+        borderRadius: BorderRadius.circular(AppDecorations.radiusFull),
+      ),
+      child: Text(
+        isOwed ? '₹${payable.toStringAsFixed(2)} Payable' : 'Settled',
+        style: AppTypography.caption.copyWith(
+          fontWeight: FontWeight.bold,
+          color: isOwed ? AppColors.onWarningContainer : AppColors.onSuccessContainer,
+        ),
       ),
     );
   }

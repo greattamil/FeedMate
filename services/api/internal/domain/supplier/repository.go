@@ -22,6 +22,12 @@ type Supplier struct {
 	Email            *string
 	PaymentTermsDays int
 	Status           string
+	// Payable is only ever populated by List — see customer.Customer.Balance's
+	// doc comment for why: a shopkeeper browsing the supplier directory
+	// wants to see who they owe money to at a glance. GetByID returns the
+	// authoritative payable separately (OutstandingPayable), so nothing
+	// else should read this field.
+	Payable decimal.Decimal
 }
 
 func GetByID(ctx context.Context, tx pgx.Tx, id uuid.UUID) (*Supplier, error) {
@@ -98,12 +104,13 @@ func List(ctx context.Context, tx pgx.Tx, query string, limit int) ([]Supplier, 
 		limit = 50
 	}
 	rows, err := tx.Query(ctx, `
-		SELECT id, supplier_code, legal_name, trade_name, gstin, phone, email, payment_terms_days, status
-		FROM suppliers
-		WHERE status = 'ACTIVE'
-		  AND ($1 = '' OR legal_name ILIKE '%' || $1 || '%' OR supplier_code ILIKE '%' || $1 || '%'
-		       OR phone ILIKE '%' || $1 || '%' OR gstin ILIKE '%' || $1 || '%')
-		ORDER BY legal_name
+		SELECT s.id, s.supplier_code, s.legal_name, s.trade_name, s.gstin, s.phone, s.email, s.payment_terms_days, s.status,
+		       COALESCE((SELECT SUM(sle.credit) - SUM(sle.debit) FROM supplier_ledger_entries sle WHERE sle.supplier_id = s.id), 0) AS payable
+		FROM suppliers s
+		WHERE s.status = 'ACTIVE'
+		  AND ($1 = '' OR s.legal_name ILIKE '%' || $1 || '%' OR s.supplier_code ILIKE '%' || $1 || '%'
+		       OR s.phone ILIKE '%' || $1 || '%' OR s.gstin ILIKE '%' || $1 || '%')
+		ORDER BY s.legal_name
 		LIMIT $2
 	`, query, limit)
 	if err != nil {
@@ -114,7 +121,7 @@ func List(ctx context.Context, tx pgx.Tx, query string, limit int) ([]Supplier, 
 	var out []Supplier
 	for rows.Next() {
 		var s Supplier
-		if err := rows.Scan(&s.ID, &s.SupplierCode, &s.Name, &s.TradeName, &s.GSTIN, &s.Phone, &s.Email, &s.PaymentTermsDays, &s.Status); err != nil {
+		if err := rows.Scan(&s.ID, &s.SupplierCode, &s.Name, &s.TradeName, &s.GSTIN, &s.Phone, &s.Email, &s.PaymentTermsDays, &s.Status, &s.Payable); err != nil {
 			return nil, err
 		}
 		out = append(out, s)

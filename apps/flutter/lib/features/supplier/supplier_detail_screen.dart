@@ -201,6 +201,10 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
                     ),
                   ])
                 : ListView(
+                    // Bottom padding reserves room for the extended
+                    // "Record Payment" FAB, which otherwise floats over
+                    // the last ledger row and makes it hard to read.
+                    padding: const EdgeInsets.only(bottom: 96),
                     children: [
                       if (detail != null) _buildSummaryCard(detail),
                       const Divider(height: 1),

@@ -102,7 +102,9 @@ func (h *CustomerHandlers) List(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]map[string]interface{}, 0, len(customers))
 	for _, c := range customers {
-		out = append(out, customerToJSON(&c))
+		m := customerToJSON(&c)
+		m["balance"] = c.Balance.StringFixed(2)
+		out = append(out, m)
 	}
 	WriteJSON(w, http.StatusOK, map[string]interface{}{"customers": out})
 }

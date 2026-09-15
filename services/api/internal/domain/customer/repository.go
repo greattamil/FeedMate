@@ -22,6 +22,14 @@ type Customer struct {
 	CustomerType  string
 	TierID        *uuid.UUID
 	Status        string
+	// Balance is only ever populated by List — a shopkeeper's whole point
+	// in browsing the Khata directory is seeing who owes money at a
+	// glance, not opening each customer individually first. Every other
+	// path that scans a Customer (GetByID, Create, Update) leaves this at
+	// its zero value; GetByID returns the authoritative balance
+	// separately anyway (see Service.GetByID), so nothing else should
+	// ever read this field.
+	Balance decimal.Decimal
 }
 
 func GetByID(ctx context.Context, tx pgx.Tx, id uuid.UUID) (*Customer, error) {
@@ -136,12 +144,13 @@ func List(ctx context.Context, tx pgx.Tx, query string, limit int) ([]Customer, 
 		limit = 50
 	}
 	rows, err := tx.Query(ctx, `
-		SELECT id, customer_code, name, local_name, phone, whatsapp_phone, customer_type, tier_id, status
-		FROM customers
-		WHERE status = 'ACTIVE'
-		  AND customer_code != $3
-		  AND ($1 = '' OR name ILIKE '%' || $1 || '%' OR customer_code ILIKE '%' || $1 || '%' OR phone ILIKE '%' || $1 || '%')
-		ORDER BY name
+		SELECT c.id, c.customer_code, c.name, c.local_name, c.phone, c.whatsapp_phone, c.customer_type, c.tier_id, c.status,
+		       COALESCE((SELECT SUM(cle.debit) - SUM(cle.credit) FROM customer_ledger_entries cle WHERE cle.customer_id = c.id), 0) AS balance
+		FROM customers c
+		WHERE c.status = 'ACTIVE'
+		  AND c.customer_code != $3
+		  AND ($1 = '' OR c.name ILIKE '%' || $1 || '%' OR c.customer_code ILIKE '%' || $1 || '%' OR c.phone ILIKE '%' || $1 || '%')
+		ORDER BY c.name
 		LIMIT $2
 	`, query, limit, WalkInCustomerCode)
 	if err != nil {
@@ -152,7 +161,7 @@ func List(ctx context.Context, tx pgx.Tx, query string, limit int) ([]Customer, 
 	var out []Customer
 	for rows.Next() {
 		var c Customer
-		if err := rows.Scan(&c.ID, &c.CustomerCode, &c.Name, &c.LocalName, &c.Phone, &c.WhatsAppPhone, &c.CustomerType, &c.TierID, &c.Status); err != nil {
+		if err := rows.Scan(&c.ID, &c.CustomerCode, &c.Name, &c.LocalName, &c.Phone, &c.WhatsAppPhone, &c.CustomerType, &c.TierID, &c.Status, &c.Balance); err != nil {
 			return nil, err
 		}
 		out = append(out, c)

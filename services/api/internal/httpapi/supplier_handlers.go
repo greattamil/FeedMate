@@ -177,7 +177,9 @@ func (h *SupplierHandlers) List(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]map[string]interface{}, 0, len(suppliers))
 	for _, s := range suppliers {
-		out = append(out, supplierToJSON(&s))
+		m := supplierToJSON(&s)
+		m["payable"] = s.Payable.StringFixed(2)
+		out = append(out, m)
 	}
 	WriteJSON(w, http.StatusOK, map[string]interface{}{"suppliers": out})
 }

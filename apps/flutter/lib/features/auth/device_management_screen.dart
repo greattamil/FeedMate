@@ -10,6 +10,7 @@ import '../../core/device_api.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_decorations.dart';
 import '../../core/theme/app_typography.dart';
+import 'generate_pairing_code_screen.dart';
 
 /// Browse registered devices and revoke a lost/stolen one (PRD device
 /// security). Revoking is immediate and permanent from the device's point
@@ -137,6 +138,16 @@ class _DeviceManagementScreenState extends State<DeviceManagementScreen> {
       backgroundColor: AppColors.background,
       appBar: AppBar(
         title: const Text('Device Management', style: AppTypography.headline),
+        actions: [
+          IconButton(
+            key: const Key('pair_new_device_button'),
+            tooltip: 'Pair a new device',
+            icon: const Icon(Icons.add_link_rounded),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const GeneratePairingCodeScreen()),
+            ),
+          ),
+        ],
       ),
       body: Column(
         children: [

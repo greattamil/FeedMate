@@ -151,6 +151,51 @@ func TestSupplierList_SearchesByNameCodeAndGstin(t *testing.T) {
 	}
 }
 
+// TestSupplierList_IncludesOutstandingPayable guards the supplier
+// directory's list card feature: a shopkeeper must see who they owe money
+// to without opening each supplier individually, so List's payable must
+// match OutstandingPayable's own arithmetic (credit-debit).
+func TestSupplierList_IncludesOutstandingPayable(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	tenantID := seedTenant(t, db)
+	svc := supplier.NewService(db)
+
+	owed, err := svc.Create(context.Background(), tenantID, supplier.CreateInput{SupplierCode: "OWED01", Name: "Owed Mill"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := svc.Create(context.Background(), tenantID, supplier.CreateInput{SupplierCode: "SETTLED01", Name: "Settled Mill"}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	err = db.WithTenantTx(context.Background(), tenantID, func(tx pgx.Tx) error {
+		_, err := supplier.PostLedgerEntry(context.Background(), tx, tenantID, supplier.LedgerEntry{
+			SupplierID: owed.ID, DocumentType: "GRN", DocumentID: uuid.New(),
+			Credit: decimal.RequireFromString("8000.00"), Description: "test GRN",
+		})
+		return err
+	})
+	if err != nil {
+		t.Fatalf("post ledger entry: %v", err)
+	}
+
+	all, err := svc.List(context.Background(), tenantID, "", 10)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	payables := map[string]decimal.Decimal{}
+	for _, s := range all {
+		payables[s.SupplierCode] = s.Payable
+	}
+	if !payables["OWED01"].Equal(decimal.RequireFromString("8000.00")) {
+		t.Fatalf("expected OWED01 payable 8000.00, got %s (all: %+v)", payables["OWED01"], all)
+	}
+	if !payables["SETTLED01"].Equal(decimal.Zero) {
+		t.Fatalf("expected SETTLED01 payable 0, got %s", payables["SETTLED01"])
+	}
+}
+
 func TestSupplierListLedger_ReturnsEntriesNewestFirstAndRejectsUnknownSupplier(t *testing.T) {
 	db := connectTest(t)
 	defer db.Close()

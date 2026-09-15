@@ -118,6 +118,68 @@ func GetStockOnHand(ctx context.Context, tx pgx.Tx, locationID *uuid.UUID) ([]St
 	return out, rows.Err()
 }
 
+// StockSummaryLine is one product's live stock status for the Stock
+// Management screen: its real-time on-hand quantity next to its own
+// reorder threshold, so "running low" is derived on read, not cached or
+// hand-maintained anywhere.
+type StockSummaryLine struct {
+	ProductID     uuid.UUID
+	SKU           string
+	ProductName   string
+	UOMCode       string
+	OnHandQty     decimal.Decimal
+	ReorderLevel  *decimal.Decimal
+	ReorderTarget *decimal.Decimal
+	Status        string // OUT_OF_STOCK | LOW_STOCK | OK
+}
+
+// GetStockSummary lists every active product with its on-hand quantity
+// aggregated from batches.available_qty — the same column POS allocation,
+// GRN receiving, sales returns, and stock-count adjustments all read and
+// write via inventory.PostStockMovement (see that function's doc comment;
+// there is no separate stock cache anywhere in this schema). Unlike
+// GetStockOnHand above, this LEFT JOINs batches and has no HAVING filter,
+// so a product with zero stock — or one that has never been received via
+// GRN and so has no batch rows at all — still appears with on_hand_qty of
+// zero, rather than silently disappearing from the list a shopkeeper needs
+// to see everything on.
+func GetStockSummary(ctx context.Context, tx pgx.Tx, locationID *uuid.UUID) ([]StockSummaryLine, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT p.id, p.sku, p.name, u.code,
+		       COALESCE(SUM(b.available_qty), 0) AS on_hand,
+		       p.reorder_level, p.reorder_target
+		FROM products p
+		JOIN uoms u ON u.id = p.default_sale_uom_id
+		LEFT JOIN batches b ON b.product_id = p.id AND b.status = 'ACTIVE'
+		         AND ($1::uuid IS NULL OR b.location_id = $1)
+		WHERE p.active
+		GROUP BY p.id, p.sku, p.name, u.code, p.reorder_level, p.reorder_target
+		ORDER BY p.name
+	`, locationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []StockSummaryLine
+	for rows.Next() {
+		var l StockSummaryLine
+		if err := rows.Scan(&l.ProductID, &l.SKU, &l.ProductName, &l.UOMCode, &l.OnHandQty, &l.ReorderLevel, &l.ReorderTarget); err != nil {
+			return nil, err
+		}
+		switch {
+		case l.OnHandQty.LessThanOrEqual(decimal.Zero):
+			l.Status = "OUT_OF_STOCK"
+		case l.ReorderLevel != nil && l.OnHandQty.LessThanOrEqual(*l.ReorderLevel):
+			l.Status = "LOW_STOCK"
+		default:
+			l.Status = "OK"
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
 type CustomerBalance struct {
 	CustomerID uuid.UUID
 	Name       string

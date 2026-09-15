@@ -7,6 +7,7 @@ import '../../core/auth_session.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_decorations.dart';
 import '../../core/theme/app_typography.dart';
+import '../reports/reports_api.dart';
 import 'product_admin_api.dart';
 import 'product_form_screen.dart';
 
@@ -24,6 +25,7 @@ class ProductDetailScreen extends StatefulWidget {
 
 class _ProductDetailScreenState extends State<ProductDetailScreen> {
   ProductDetail? _product;
+  StockSummaryLine? _stock;
   bool _loading = true;
   bool _updatingStatus = false;
   bool _changed = false;
@@ -41,13 +43,28 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
       _error = null;
     });
     try {
-      final api = ProductAdminApi(context.read<ApiClient>());
+      final client = context.read<ApiClient>();
+      final api = ProductAdminApi(client);
       final detail = await api.getDetail(widget.productId);
       if (!mounted) return;
       setState(() {
         _product = detail;
         _loading = false;
       });
+      // Real, live on-hand quantity — never a hardcoded/placeholder number.
+      // Best-effort: a failure here shouldn't block the rest of the detail
+      // screen from rendering.
+      try {
+        final stock = await ReportsApi(client).stockSummary();
+        StockSummaryLine? match;
+        for (final l in stock.lines) {
+          if (l.productId == widget.productId) {
+            match = l;
+            break;
+          }
+        }
+        if (mounted) setState(() => _stock = match);
+      } catch (_) {}
     } on ApiError catch (e) {
       if (!mounted) return;
       setState(() {
@@ -175,6 +192,10 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                               ),
                             ),
                             const SizedBox(height: 16),
+                            if (_stock != null) ...[
+                              _stockCard(_stock!),
+                              const SizedBox(height: 12),
+                            ],
                             _sectionCard('Pricing', [
                               _row('MRP', p.mrp != null ? '₹${p.mrp!.toStringAsFixed(2)}' : '—'),
                               _row('Selling price', p.sellingPrice != null ? '₹${p.sellingPrice!.toStringAsFixed(2)}' : '—'),
@@ -233,6 +254,53 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                           ],
                         ),
                       ),
+      ),
+    );
+  }
+
+  /// Real-time on-hand quantity from GET /api/v1/reports/stock-summary —
+  /// the same number the Stock Management screen and POS allocation use.
+  Widget _stockCard(StockSummaryLine stock) {
+    final Color bg;
+    final Color fg;
+    final String label;
+    switch (stock.status) {
+      case 'OUT_OF_STOCK':
+        bg = AppColors.dangerContainer;
+        fg = AppColors.onDangerContainer;
+        label = 'Out of Stock';
+        break;
+      case 'LOW_STOCK':
+        bg = AppColors.warningContainer;
+        fg = AppColors.onWarningContainer;
+        label = 'Low Stock';
+        break;
+      default:
+        bg = AppColors.successContainer;
+        fg = AppColors.onSuccessContainer;
+        label = 'In Stock';
+    }
+    return Container(
+      key: const Key('product_detail_stock_card'),
+      padding: const EdgeInsets.all(16),
+      decoration: AppDecorations.card(),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Current Stock', style: AppTypography.title),
+              const SizedBox(height: 4),
+              Text('${stock.onHandQty.toString()} ${stock.uomCode} on hand', style: AppTypography.body),
+            ],
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: AppDecorations.pill(color: bg),
+            child: Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: fg)),
+          ),
+        ],
       ),
     );
   }

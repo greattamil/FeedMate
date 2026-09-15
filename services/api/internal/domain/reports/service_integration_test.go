@@ -218,6 +218,83 @@ func TestStockOnHand_MatchesBatchAvailableQty(t *testing.T) {
 	}
 }
 
+func TestStockSummary_ReflectsOnHandAndReorderStatus(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	f := seedFixture(t, db)
+	posSvc := pos.NewService(db)
+	reportsSvc := reports.NewService(db)
+
+	// Give the fixture product (50 available) a reorder level of 10, then
+	// sell 45 of them so only 5 remain — below the threshold, so this
+	// product should come back LOW_STOCK, not OK.
+	if err := db.WithAdminTx(context.Background(), func(tx pgx.Tx) error {
+		_, err := tx.Exec(context.Background(), `UPDATE products SET reorder_level = '10' WHERE id = $1`, f.productID)
+		return err
+	}); err != nil {
+		t.Fatalf("set reorder level: %v", err)
+	}
+	_, err := posSvc.FinalizeInvoice(context.Background(), f.tenantID, f.deviceID, f.userID, pos.FinalizeRequest{
+		ClientTransactionID: uuid.New(), LocationID: f.locationID,
+		Lines:   []pos.SaleLine{{ProductID: f.productID, Quantity: decimal.RequireFromString("45")}},
+		Tenders: []pos.Tender{{Method: "CASH", Amount: decimal.RequireFromString("56700.00")}},
+	})
+	if err != nil {
+		t.Fatalf("finalize sale: %v", err)
+	}
+
+	// A second product that has NEVER been received via GRN — no batch
+	// rows at all. It must still appear in the summary with on_hand_qty
+	// zero and OUT_OF_STOCK, not silently disappear (the exact gap
+	// GetStockOnHand's INNER JOIN + HAVING>0 has, and GetStockSummary is
+	// built specifically to not have).
+	neverStockedProductID := uuid.New()
+	if err := db.WithAdminTx(context.Background(), func(tx pgx.Tx) error {
+		_, err := tx.Exec(context.Background(), `
+			INSERT INTO products (id, tenant_id, sku, name, default_sale_uom_id, default_purchase_uom_id, base_inventory_uom_id, selling_price, batch_required, expiry_required)
+			VALUES ($1,$2,$3,'Never Stocked Product',$4,$4,$5,'500.00',false,false)
+		`, neverStockedProductID, f.tenantID, "SKU-"+uuid.NewString()[:8], uomBag, uomKG)
+		return err
+	}); err != nil {
+		t.Fatalf("seed never-stocked product: %v", err)
+	}
+
+	lines, err := reportsSvc.StockSummary(context.Background(), f.tenantID, nil)
+	if err != nil {
+		t.Fatalf("stock summary: %v", err)
+	}
+	if len(lines) != 2 {
+		t.Fatalf("expected both products in the summary (including the one with zero batches), got %d: %+v", len(lines), lines)
+	}
+
+	byID := map[uuid.UUID]reports.StockSummaryLine{}
+	for _, l := range lines {
+		byID[l.ProductID] = l
+	}
+
+	stocked, ok := byID[f.productID]
+	if !ok {
+		t.Fatal("fixture product missing from stock summary")
+	}
+	if !stocked.OnHandQty.Equal(decimal.RequireFromString("5")) {
+		t.Fatalf("expected 5 remaining (50-45), got %s", stocked.OnHandQty)
+	}
+	if stocked.Status != "LOW_STOCK" {
+		t.Fatalf("expected LOW_STOCK (5 <= reorder level 10), got %s", stocked.Status)
+	}
+
+	neverStocked, ok := byID[neverStockedProductID]
+	if !ok {
+		t.Fatal("never-stocked product missing from stock summary — GetStockSummary must include products with zero batches")
+	}
+	if !neverStocked.OnHandQty.IsZero() {
+		t.Fatalf("expected 0 on hand for a product never received via GRN, got %s", neverStocked.OnHandQty)
+	}
+	if neverStocked.Status != "OUT_OF_STOCK" {
+		t.Fatalf("expected OUT_OF_STOCK, got %s", neverStocked.Status)
+	}
+}
+
 func TestCustomerBalances_ZeroBalanceExcluded(t *testing.T) {
 	db := connectTest(t)
 	defer db.Close()

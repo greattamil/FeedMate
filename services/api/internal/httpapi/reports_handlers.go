@@ -102,6 +102,64 @@ func (h *ReportsHandlers) StockOnHand(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, map[string]interface{}{"products": out})
 }
 
+// StockSummary lists every active product with its live on-hand quantity
+// and reorder status, for the Stock Management screen and any other
+// screen (product list, POS catalog) that wants to show real stock rather
+// than nothing.
+func (h *ReportsHandlers) StockSummary(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	claims, ok := reqctx.Claims(r.Context())
+	if !ok {
+		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		return
+	}
+	var locationID *uuid.UUID
+	if v := r.URL.Query().Get("location_id"); v != "" {
+		id, err := uuid.Parse(v)
+		if err != nil {
+			WriteError(w, reqID, CodeValidation, "location_id must be a valid UUID")
+			return
+		}
+		locationID = &id
+	}
+
+	lines, err := h.Reports.StockSummary(r.Context(), claims.TenantID, locationID)
+	if err != nil {
+		WriteError(w, reqID, CodeInternal, "failed to compute stock summary: "+err.Error())
+		return
+	}
+
+	out := make([]map[string]interface{}, 0, len(lines))
+	lowStockCount, outOfStockCount := 0, 0
+	for _, l := range lines {
+		item := map[string]interface{}{
+			"product_id":  l.ProductID.String(),
+			"sku":         l.SKU,
+			"name":        l.ProductName,
+			"uom_code":    l.UOMCode,
+			"on_hand_qty": l.OnHandQty.StringFixed(3),
+			"status":      l.Status,
+		}
+		if l.ReorderLevel != nil {
+			item["reorder_level"] = l.ReorderLevel.StringFixed(3)
+		}
+		if l.ReorderTarget != nil {
+			item["reorder_target"] = l.ReorderTarget.StringFixed(3)
+		}
+		if l.Status == "LOW_STOCK" {
+			lowStockCount++
+		} else if l.Status == "OUT_OF_STOCK" {
+			outOfStockCount++
+		}
+		out = append(out, item)
+	}
+	WriteJSON(w, http.StatusOK, map[string]interface{}{
+		"products":          out,
+		"low_stock_count":   lowStockCount,
+		"out_of_stock_count": outOfStockCount,
+	})
+}
+
 func (h *ReportsHandlers) CustomerBalances(w http.ResponseWriter, r *http.Request) {
 	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())

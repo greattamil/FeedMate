@@ -11,6 +11,7 @@ import '../../core/theme/app_decorations.dart';
 import '../../core/theme/app_typography.dart';
 import '../auth/login_screen.dart';
 import '../products/product_admin_api.dart';
+import '../reports/reports_api.dart';
 import 'cart_model.dart';
 import 'product.dart';
 import 'product_repository.dart';
@@ -47,14 +48,35 @@ class _CatalogPanelState extends State<CatalogPanel> {
   String? _selectedCategoryId;
   bool _loadingCategories = true;
 
+  // Real, live stock — the cashier must never guess whether something is
+  // actually in stock. Fetched once (cheap: one call covers every
+  // product), keyed by product id, and re-fetched on pull actions
+  // elsewhere in the app; a stale badge here is a display lag, never a
+  // sale-blocking one, since FinalizeInvoice still enforces real
+  // availability server-side regardless of what this badge shows.
+  Map<String, StockSummaryLine> _stockByProduct = {};
+
   @override
   void initState() {
     super.initState();
     _loadCategories();
+    _loadStock();
     // Show the catalog immediately — a real POS terminal displays its
     // products up front, it doesn't start on a blank screen waiting for
     // the cashier to type something first.
     _search('');
+  }
+
+  Future<void> _loadStock() async {
+    try {
+      final api = ReportsApi(context.read<ApiClient>());
+      final stock = await api.stockSummary();
+      if (!mounted) return;
+      setState(() => _stockByProduct = {for (final l in stock.lines) l.productId: l});
+    } on ApiError catch (_) {
+      // Stock badges are a helpful indicator, not required to search/sell —
+      // fail quietly, matching _loadCategories' precedent.
+    }
   }
 
   Future<void> _loadCategories() async {
@@ -264,6 +286,7 @@ class _CatalogPanelState extends State<CatalogPanel> {
                   itemCount: _results.length,
                   itemBuilder: (context, index) {
                     final p = _results[index];
+                    final stock = _stockByProduct[p.id];
                     return Container(
                       margin: const EdgeInsets.only(bottom: 10),
                       decoration: BoxDecoration(
@@ -355,6 +378,29 @@ class _CatalogPanelState extends State<CatalogPanel> {
                                               style: AppTypography.caption.copyWith(color: AppColors.secondary),
                                             ),
                                           ),
+                                          if (stock != null)
+                                            Container(
+                                              key: Key('catalog_stock_badge_${p.id}'),
+                                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                              decoration: BoxDecoration(
+                                                color: stock.isOutOfStock
+                                                    ? AppColors.dangerContainer
+                                                    : stock.isLowStock
+                                                        ? AppColors.warningContainer
+                                                        : AppColors.successContainer,
+                                                borderRadius: BorderRadius.circular(4),
+                                              ),
+                                              child: Text(
+                                                stock.isOutOfStock ? 'Out of stock' : '${stock.onHandQty.toString()} ${stock.uomCode} left',
+                                                style: AppTypography.caption.copyWith(
+                                                  color: stock.isOutOfStock
+                                                      ? AppColors.onDangerContainer
+                                                      : stock.isLowStock
+                                                          ? AppColors.onWarningContainer
+                                                          : AppColors.onSuccessContainer,
+                                                ),
+                                              ),
+                                            ),
                                         ],
                                       ),
                                     ],

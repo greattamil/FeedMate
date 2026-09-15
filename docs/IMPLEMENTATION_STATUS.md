@@ -1175,6 +1175,52 @@ scope — no printer hardware adapter exists in this app yet, tracked
 separately below) and no point-in-time snapshot of store details on the
 invoice (deliberate — see the design note above).
 
+## Phase 51 — Stock Management: Single Source of Truth, Made Visible (Backend + Flutter)
+
+The user suspected stock management "isn't real" and asked for a proper
+portal, single source of truth, real detection, and no hardcoded values.
+Per this project's standing "never false report" instruction, a full
+read-only audit ran first (a dedicated research pass across the inventory
+domain, POS/GRN/returns/stock-count write paths, and every Flutter screen
+touching stock/quantity) before any code changed. The audit's honest
+finding: the backend ledger was already correct — one append-only
+`stock_movements` table, written only by `inventory.PostStockMovement`,
+used by POS sales, GRN receiving, sales returns, and stock-count
+adjustments alike, with no hardcoded stock values found anywhere in the
+Go or Dart source. The real gap was visibility and detection: Product
+List, Product Detail, and the POS Catalog panel showed zero stock
+information, and despite products already having `ReorderLevel`/
+`ReorderTarget` fields, nothing anywhere compared them against real
+on-hand quantity to flag "running low." This phase builds that missing
+half without touching the (already sound) ledger itself.
+
+| Area | Change |
+|---|---|
+| Backend: new query | `reports.GetStockSummary` — every active product's on-hand quantity (LEFT JOIN `batches`, no `HAVING` filter, unlike the pre-existing `GetStockOnHand`) so a product with zero stock, or one never received via GRN at all, still appears rather than silently disappearing. Status (`OK`/`LOW_STOCK`/`OUT_OF_STOCK`) is computed by comparing that live quantity against the product's own `reorder_level` — server-side, on every read, never cached |
+| Backend: endpoint | `GET /api/v1/reports/stock-summary` — deliberately *not* gated on `report.view` like the other `/reports/*` routes: any authenticated staff role that can browse the product catalog (cashiers included) can see real stock/reorder status, matching `/products`' own permission-free visibility |
+| Flutter: new screen | `StockManagementScreen` — the "portal": search by name/SKU, filter chips (All / Low Stock / Out of Stock) with live counts, every product with its real on-hand qty and a status badge |
+| Flutter: dashboard | A low-stock/out-of-stock alert banner (mirroring the existing expiring-batch alert pattern) with a "Manage Stock" shortcut, plus a "Stock Management" quick-action tile showing how many products need attention |
+| Flutter: Product List | Each row now shows a real stock badge (qty + status color) next to its SKU |
+| Flutter: Product Detail | A new "Current Stock" card (on-hand qty + status) sits above the existing Pricing/Inventory sections |
+| Flutter: POS Catalog panel | Each product tile now shows a live stock chip ("N BAG left" / "Out of stock"), so a cashier is never guessing — though `FinalizeInvoice` still enforces real availability server-side regardless of what this chip shows, matching the project's precedent of client indicators never substituting for server-side enforcement |
+
+| Area | Status | Evidence |
+|---|---|---|
+| Audit methodology | **VERIFIED** | A dedicated read-only research pass (not assumption) traced every stock-mutating code path (POS, GRN, returns, stock-count) to confirm they all call `inventory.PostStockMovement` and nothing else, and grepped both codebases for hardcoded/mock/placeholder stock values (none found) before any implementation began |
+| `GetStockSummary` reorder-threshold math and zero-batch inclusion | **VERIFIED** | New `TestStockSummary_ReflectsOnHandAndReorderStatus`: seeds a product with reorder level 10, sells down to 5 remaining (asserts `LOW_STOCK`), and a second product that has *never* been received via GRN (asserts it still appears with `on_hand_qty` 0 and `OUT_OF_STOCK` — the exact gap `GetStockOnHand`'s `HAVING > 0` filter has). Full `reports` and `pos` integration suites pass against live PostgreSQL |
+| Backend build/vet | **VERIFIED** | `go build ./...` clean |
+| Flutter stock badges/screen | **VERIFIED** | New `stock_management_test.dart` (2 tests: rendering + filtering, search) and a new `products_test.dart` case asserting real badge values from a mocked stock-summary response, not a hardcoded number |
+| Full Flutter suite | **VERIFIED** | 118 tests, all passing; `flutter analyze` clean on every touched file |
+| End-to-end live verification on the Android emulator against the rebuilt backend | **VERIFIED, live** | Dashboard: "1 product(s) out of stock" alert banner and "Stock Management — 1 need attention" tile rendered immediately from real data. Stock Management screen: all 3 real products listed with correct on-hand quantities (0/71/155 BAG) and status badges; tapping "Out of Stock (1)" correctly filtered to just that product. Product List: same real badges next to each SKU. Product Detail: "Current Stock — 0 BAG on hand / Out of Stock" card rendered above Pricing. POS Catalog panel (found live while navigating, not planned as a separate check): each tile showed its real stock chip ("71 BAG left", "Out of stock") |
+
+Not implemented from this request: no reorder/purchase-suggestion workflow
+(the reorder *level* is now actually used for detection, but there is no
+"generate a GRN suggestion from low-stock items" feature — out of scope
+for a visibility/detection pass) and no per-location stock breakdown in
+the new screen (the API accepts an optional `location_id` filter already;
+the UI shows the tenant-wide total, matching how the rest of the app
+currently treats single-location shops as the common case).
+
 ## Not Yet Started
 
 Customer/supplier aging (30/60/90-day buckets) and margin reports,

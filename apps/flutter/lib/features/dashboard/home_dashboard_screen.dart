@@ -27,6 +27,7 @@ import '../products/master_data_screen.dart';
 import '../products/product_list_screen.dart';
 import '../reports/reports_api.dart';
 import '../reports/reports_screen.dart';
+import '../reports/stock_management_screen.dart';
 import '../settings/store_settings_screen.dart';
 import '../returns/return_screen.dart';
 import '../staff/staff_list_screen.dart';
@@ -61,6 +62,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   Decimal? _totalKhataOutstanding;
   int _overdueKhataCount = 0;
   int _expiringBatchCount = 0;
+  int _lowStockCount = 0;
+  int _outOfStockCount = 0;
   EodSession? _eodSession;
   bool _eodNotOpened = false;
 
@@ -122,6 +125,20 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
         if (mounted) setState(() => _expiringBatchCount = expiring);
       } catch (_) {}
     }
+
+    // 4b. Live stock/reorder status — not gated on report.view: any staff
+    // role that can browse the catalog should see what's running low, the
+    // same way /products has no extra permission gate server-side.
+    try {
+      final reportsApi = ReportsApi(client);
+      final stockSummary = await reportsApi.stockSummary();
+      if (mounted) {
+        setState(() {
+          _lowStockCount = stockSummary.lowStockCount;
+          _outOfStockCount = stockSummary.outOfStockCount;
+        });
+      }
+    } catch (_) {}
 
     // 5. Fetch EOD Session
     if (session.hasPermission('cash.eod_close')) {
@@ -214,7 +231,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
             const SizedBox(height: 16),
 
             // 2. Urgent Alerts (if any)
-            if (_pendingSyncCount > 0 || _expiringBatchCount > 0 || _eodNotOpened) ...[
+            if (_pendingSyncCount > 0 || _expiringBatchCount > 0 || _lowStockCount > 0 || _outOfStockCount > 0 || _eodNotOpened) ...[
               _buildUrgentAlertsCard(),
               const SizedBox(height: 16),
             ],
@@ -336,6 +353,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
           ),
         if (_expiringBatchCount > 0)
           Container(
+            margin: const EdgeInsets.only(bottom: 8),
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             decoration: BoxDecoration(
               color: AppColors.dangerContainer,
@@ -357,6 +375,45 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                     MaterialPageRoute(builder: (_) => const ReportsScreen()),
                   ),
                   child: const Text('View Batches', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                ),
+              ],
+            ),
+          ),
+        if (_outOfStockCount > 0 || _lowStockCount > 0)
+          Container(
+            key: const Key('low_stock_alert_banner'),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: _outOfStockCount > 0 ? AppColors.dangerContainer : AppColors.warningContainer,
+              borderRadius: AppDecorations.borderRadiusSm,
+              border: Border.all(color: (_outOfStockCount > 0 ? AppColors.danger : AppColors.warning).withValues(alpha: 0.35)),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.inventory_2_rounded,
+                  color: _outOfStockCount > 0 ? AppColors.danger : AppColors.warning,
+                  size: 20,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    [
+                      if (_outOfStockCount > 0) '$_outOfStockCount product(s) out of stock',
+                      if (_lowStockCount > 0) '$_lowStockCount running low',
+                    ].join(' · '),
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: _outOfStockCount > 0 ? AppColors.onDangerContainer : AppColors.onWarningContainer,
+                    ),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const StockManagementScreen()),
+                  ),
+                  child: const Text('Manage Stock', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                 ),
               ],
             ),
@@ -495,6 +552,17 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
         gradient: AppColors.gradientIndigo,
         onTap: () => Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => const KhataCustomerListScreen()),
+        ),
+      ),
+      _ActionItem(
+        title: 'Stock Management',
+        subtitle: _outOfStockCount + _lowStockCount > 0
+            ? '${_outOfStockCount + _lowStockCount} need attention'
+            : 'Real-time stock & reorder',
+        icon: Icons.inventory_2_rounded,
+        gradient: const LinearGradient(colors: [Color(0xFF0D9488), Color(0xFF0F766E)]),
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const StockManagementScreen()),
         ),
       ),
       if (session.hasPermission('grn.post'))
@@ -694,7 +762,10 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   Widget _buildActionGrid(List<_ActionItem> actions) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final crossAxisCount = constraints.maxWidth >= 720 ? 4 : 2;
+        final width = constraints.maxWidth;
+        final crossAxisCount = width >= 720 ? 4 : 2;
+        final double childAspectRatio = width >= 720 ? 1.35 : 1.15;
+
         return GridView.builder(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
@@ -703,11 +774,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
             crossAxisCount: crossAxisCount,
             crossAxisSpacing: 12,
             mainAxisSpacing: 12,
-            // 1.15 rather than 1.4: gives a 2-line title (see maxLines
-            // below) enough vertical room without overflowing the cell —
-            // titles like "Categories & Brands" or "Contra / Buy-Back"
-            // were being ellipsis-truncated to one line at the old ratio.
-            childAspectRatio: 1.15,
+            childAspectRatio: childAspectRatio,
           ),
           itemBuilder: (context, index) {
             final a = actions[index];

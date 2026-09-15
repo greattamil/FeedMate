@@ -38,6 +38,16 @@ func (s *Service) StockOnHand(ctx context.Context, tenantID uuid.UUID, locationI
 	return result, err
 }
 
+func (s *Service) StockSummary(ctx context.Context, tenantID uuid.UUID, locationID *uuid.UUID) ([]StockSummaryLine, error) {
+	var result []StockSummaryLine
+	err := s.db.WithTenantReadTx(ctx, tenantID, func(tx pgx.Tx) error {
+		var err error
+		result, err = GetStockSummary(ctx, tx, locationID)
+		return err
+	})
+	return result, err
+}
+
 func (s *Service) CustomerBalances(ctx context.Context, tenantID uuid.UUID) ([]CustomerBalance, error) {
 	var result []CustomerBalance
 	err := s.db.WithTenantReadTx(ctx, tenantID, func(tx pgx.Tx) error {

@@ -149,6 +149,38 @@ void main() {
     expect(lastActiveParam, 'false');
   });
 
+  testWidgets('shows real stock badges from the stock-summary endpoint, not a hardcoded value', (tester) async {
+    final fixtures = _masterDataFixtures();
+
+    final client = MockClient((request) async {
+      final masterData = _handleMasterData(request, fixtures);
+      if (masterData != null) return masterData;
+      if (request.url.path == '/api/v1/products') {
+        return _jsonOk({
+          'products': [_productJson(id: 'prod-1', sku: 'CF-ECO-01'), _productJson(id: 'prod-2', sku: 'CF-LOW-01', name: 'Low Stock Feed')],
+          'total': 2,
+        });
+      }
+      if (request.url.path == '/api/v1/reports/stock-summary') {
+        return _jsonOk({
+          'products': [
+            {'product_id': 'prod-1', 'sku': 'CF-ECO-01', 'name': 'Cattle Feed Economy 50kg', 'uom_code': 'BAG', 'on_hand_qty': '42.000', 'status': 'OK'},
+            {'product_id': 'prod-2', 'sku': 'CF-LOW-01', 'name': 'Low Stock Feed', 'uom_code': 'BAG', 'on_hand_qty': '0.000', 'status': 'OUT_OF_STOCK'},
+          ],
+          'low_stock_count': 0,
+          'out_of_stock_count': 1,
+        });
+      }
+      return http.Response('not found', 404);
+    });
+
+    await tester.pumpWidget(_wrap(httpClient: client, child: const ProductListScreen()));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('42 BAG'), findsOneWidget);
+    expect(find.text('0 BAG'), findsOneWidget);
+  });
+
   testWidgets('creating a product posts the form fields and returns to a refreshed list', (tester) async {
     Map<String, dynamic>? postedBody;
     final fixtures = _masterDataFixtures();

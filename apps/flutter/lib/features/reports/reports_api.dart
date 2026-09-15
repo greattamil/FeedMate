@@ -79,6 +79,64 @@ class StockOnHandLine {
   }
 }
 
+/// One product's live stock status — mirrors the server's StockSummaryLine
+/// (services/api/internal/domain/reports/repository.go). `status` is
+/// computed server-side from the real on-hand quantity against the
+/// product's own reorder level, never derived or guessed client-side.
+class StockSummaryLine {
+  final String productId;
+  final String sku;
+  final String name;
+  final String uomCode;
+  final Decimal onHandQty;
+  final Decimal? reorderLevel;
+  final Decimal? reorderTarget;
+  final String status;
+
+  StockSummaryLine({
+    required this.productId,
+    required this.sku,
+    required this.name,
+    required this.uomCode,
+    required this.onHandQty,
+    required this.reorderLevel,
+    required this.reorderTarget,
+    required this.status,
+  });
+
+  bool get isOutOfStock => status == 'OUT_OF_STOCK';
+  bool get isLowStock => status == 'LOW_STOCK';
+
+  factory StockSummaryLine.fromJson(Map<String, dynamic> json) {
+    return StockSummaryLine(
+      productId: json['product_id'] as String,
+      sku: json['sku'] as String,
+      name: json['name'] as String,
+      uomCode: json['uom_code'] as String,
+      onHandQty: Decimal.parse(json['on_hand_qty'] as String),
+      reorderLevel: json['reorder_level'] != null ? Decimal.parse(json['reorder_level'] as String) : null,
+      reorderTarget: json['reorder_target'] != null ? Decimal.parse(json['reorder_target'] as String) : null,
+      status: json['status'] as String,
+    );
+  }
+}
+
+class StockSummary {
+  final List<StockSummaryLine> lines;
+  final int lowStockCount;
+  final int outOfStockCount;
+
+  StockSummary({required this.lines, required this.lowStockCount, required this.outOfStockCount});
+
+  factory StockSummary.fromJson(Map<String, dynamic> json) {
+    return StockSummary(
+      lines: (json['products'] as List<dynamic>).map((p) => StockSummaryLine.fromJson(p as Map<String, dynamic>)).toList(),
+      lowStockCount: json['low_stock_count'] as int,
+      outOfStockCount: json['out_of_stock_count'] as int,
+    );
+  }
+}
+
 class CustomerBalance {
   final String customerId;
   final String name;
@@ -153,6 +211,11 @@ class ReportsApi {
     return (response['products'] as List<dynamic>)
         .map((p) => StockOnHandLine.fromJson(p as Map<String, dynamic>))
         .toList();
+  }
+
+  Future<StockSummary> stockSummary() async {
+    final response = await client.getAuthed('/api/v1/reports/stock-summary');
+    return StockSummary.fromJson(response);
   }
 
   Future<List<CustomerBalance>> customerBalances() async {

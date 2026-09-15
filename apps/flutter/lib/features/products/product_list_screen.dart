@@ -8,6 +8,7 @@ import '../../core/api_error.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_decorations.dart';
 import '../../core/theme/app_typography.dart';
+import '../reports/reports_api.dart';
 import 'product_admin_api.dart';
 import 'product_detail_screen.dart';
 import 'product_form_screen.dart';
@@ -31,6 +32,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
   bool _loading = true;
   bool _showInactive = false;
   String? _error;
+  Map<String, StockSummaryLine> _stockByProduct = {};
 
   @override
   void initState() {
@@ -51,7 +53,8 @@ class _ProductListScreenState extends State<ProductListScreen> {
       _error = null;
     });
     try {
-      final api = ProductAdminApi(context.read<ApiClient>());
+      final client = context.read<ApiClient>();
+      final api = ProductAdminApi(client);
       final page = await api.list(query: _searchController.text.trim(), activeOnly: !_showInactive);
       if (!mounted) return;
       setState(() {
@@ -59,6 +62,15 @@ class _ProductListScreenState extends State<ProductListScreen> {
         _total = page.total;
         _loading = false;
       });
+      // Real, live stock — never a hardcoded/placeholder number. Best-effort:
+      // if this fails, the list still renders (just without stock badges)
+      // rather than blocking the whole product list on a secondary call.
+      try {
+        final stock = await ReportsApi(client).stockSummary();
+        if (mounted) {
+          setState(() => _stockByProduct = {for (final l in stock.lines) l.productId: l});
+        }
+      } catch (_) {}
     } on ApiError catch (e) {
       if (!mounted) return;
       setState(() {
@@ -153,13 +165,22 @@ class _ProductListScreenState extends State<ProductListScreen> {
                       itemCount: _products.length,
                       itemBuilder: (context, index) {
                         final p = _products[index];
+                        final stock = _stockByProduct[p.id];
                         return Container(
                           key: Key('product_row_${p.id}'),
                           margin: const EdgeInsets.only(bottom: 8),
                           decoration: AppDecorations.card(),
                           child: ListTile(
                             title: Text(p.name, style: AppTypography.title),
-                            subtitle: Text(p.sku, style: AppTypography.bodySecondary),
+                            subtitle: Row(
+                              children: [
+                                Flexible(child: Text(p.sku, style: AppTypography.bodySecondary, overflow: TextOverflow.ellipsis)),
+                                if (stock != null) ...[
+                                  const SizedBox(width: 8),
+                                  _stockBadge(stock),
+                                ],
+                              ],
+                            ),
                             trailing: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
                               crossAxisAlignment: CrossAxisAlignment.end,
@@ -183,6 +204,34 @@ class _ProductListScreenState extends State<ProductListScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// Real on-hand quantity + reorder status, straight from
+  /// GET /api/v1/reports/stock-summary — never a hardcoded value.
+  Widget _stockBadge(StockSummaryLine stock) {
+    final Color bg;
+    final Color fg;
+    switch (stock.status) {
+      case 'OUT_OF_STOCK':
+        bg = AppColors.dangerContainer;
+        fg = AppColors.onDangerContainer;
+        break;
+      case 'LOW_STOCK':
+        bg = AppColors.warningContainer;
+        fg = AppColors.onWarningContainer;
+        break;
+      default:
+        bg = AppColors.successContainer;
+        fg = AppColors.onSuccessContainer;
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(AppDecorations.radiusFull)),
+      child: Text(
+        '${stock.onHandQty.toString()} ${stock.uomCode}',
+        style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: fg),
       ),
     );
   }

@@ -189,6 +189,12 @@ func main() {
 
 			r.With(appmw.RequirePermission("report.view")).Get("/reports/sales-summary", reportsHandlers.SalesSummary)
 			r.With(appmw.RequirePermission("report.view")).Get("/reports/stock-on-hand", reportsHandlers.StockOnHand)
+			// Unlike the other /reports/* routes, stock-summary is not
+			// gated on report.view: every staff role that can see the
+			// product catalog (POS cashiers included) needs to see real
+			// stock/reorder status, the same way /products has no extra
+			// permission gate.
+			r.Get("/reports/stock-summary", reportsHandlers.StockSummary)
 			r.With(appmw.RequirePermission("report.view")).Get("/reports/customer-balances", reportsHandlers.CustomerBalances)
 			r.With(appmw.RequirePermission("report.view")).Get("/reports/eod-history", reportsHandlers.EODHistory)
 

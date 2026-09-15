@@ -1,7 +1,9 @@
 //go:build integration
 
 // Integration tests against a real, migrated PostgreSQL database. Run with:
-//   go test -tags=integration ./internal/domain/pos/...
+//
+//	go test -tags=integration ./internal/domain/pos/...
+//
 // Requires DATABASE_URL (app_user) and DATABASE_ADMIN_URL (app_admin).
 package pos_test
 
@@ -201,6 +203,130 @@ func TestFinalizeInvoice_CashSale(t *testing.T) {
 		}
 		if got := availableQty(t, db, f); !got.Equal(decimal.RequireFromString("97")) {
 			t.Fatalf("stock must not be double-deducted on replay, got %s", got)
+		}
+	})
+}
+
+func invoiceCustomer(t *testing.T, db *dbctx.DB, invoiceID uuid.UUID) (customerID *uuid.UUID, customerCode, name string) {
+	t.Helper()
+	err := db.WithAdminTx(context.Background(), func(tx pgx.Tx) error {
+		var custID *uuid.UUID
+		var custName *string
+		if err := tx.QueryRow(context.Background(),
+			`SELECT customer_id, customer_name_snapshot FROM sales_invoices WHERE id = $1`, invoiceID).
+			Scan(&custID, &custName); err != nil {
+			return err
+		}
+		if custID != nil {
+			if err := tx.QueryRow(context.Background(),
+				`SELECT customer_code FROM customers WHERE id = $1`, *custID).Scan(&customerCode); err != nil {
+				return err
+			}
+		}
+		customerID = custID
+		if custName != nil {
+			name = *custName
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("read invoice customer: %v", err)
+	}
+	return customerID, customerCode, name
+}
+
+// TestFinalizeInvoice_NoCustomerFallsBackToWalkIn covers the requirement
+// that a sale can never be billed with no customer attached at all: a cash
+// sale with no customer picked must be billed against the tenant's
+// "Walking Customer" (auto-created on first use, reused thereafter), while
+// a customer explicitly picked is always honored as-is, and a CREDIT
+// tender still requires — and never silently substitutes — a real customer.
+func TestFinalizeInvoice_NoCustomerFallsBackToWalkIn(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	f := seedFixture(t, db)
+	svc := pos.NewService(db)
+
+	t.Run("a cash sale with no customer is billed to the Walking Customer", func(t *testing.T) {
+		req := pos.FinalizeRequest{
+			ClientTransactionID: uuid.New(),
+			LocationID:          f.locationID,
+			Lines:               []pos.SaleLine{{ProductID: f.productID, Quantity: decimal.RequireFromString("1")}},
+			Tenders:             []pos.Tender{{Method: "CASH", Amount: decimal.RequireFromString("1260.00")}},
+		}
+		result, err := svc.FinalizeInvoice(context.Background(), f.tenantID, f.deviceID, f.userID, req)
+		if err != nil {
+			t.Fatalf("finalize: %v", err)
+		}
+		custID, custCode, name := invoiceCustomer(t, db, result.InvoiceID)
+		if custID == nil {
+			t.Fatal("expected a customer to be attached to the invoice, got none")
+		}
+		if custCode != customer.WalkInCustomerCode {
+			t.Fatalf("expected walk-in customer code %q, got %q", customer.WalkInCustomerCode, custCode)
+		}
+		if name != "Walking Customer" {
+			t.Fatalf("expected customer name snapshot %q, got %q", "Walking Customer", name)
+		}
+	})
+
+	t.Run("a second customerless cash sale reuses the same Walking Customer, not a duplicate", func(t *testing.T) {
+		req := pos.FinalizeRequest{
+			ClientTransactionID: uuid.New(),
+			LocationID:          f.locationID,
+			Lines:               []pos.SaleLine{{ProductID: f.productID, Quantity: decimal.RequireFromString("1")}},
+			Tenders:             []pos.Tender{{Method: "CASH", Amount: decimal.RequireFromString("1260.00")}},
+		}
+		result, err := svc.FinalizeInvoice(context.Background(), f.tenantID, f.deviceID, f.userID, req)
+		if err != nil {
+			t.Fatalf("finalize: %v", err)
+		}
+		custID, _, _ := invoiceCustomer(t, db, result.InvoiceID)
+		if custID == nil {
+			t.Fatal("expected a customer to be attached to the invoice, got none")
+		}
+
+		var walkInCount int
+		if err := db.WithAdminTx(context.Background(), func(tx pgx.Tx) error {
+			return tx.QueryRow(context.Background(),
+				`SELECT COUNT(*) FROM customers WHERE tenant_id = $1 AND customer_code = $2`,
+				f.tenantID, customer.WalkInCustomerCode).Scan(&walkInCount)
+		}); err != nil {
+			t.Fatalf("count walk-in customers: %v", err)
+		}
+		if walkInCount != 1 {
+			t.Fatalf("expected exactly one Walking Customer row for the tenant, got %d", walkInCount)
+		}
+	})
+
+	t.Run("a customer picked explicitly is always honored, never overridden by the walk-in fallback", func(t *testing.T) {
+		req := pos.FinalizeRequest{
+			ClientTransactionID: uuid.New(),
+			LocationID:          f.locationID,
+			CustomerID:          &f.customerID,
+			Lines:               []pos.SaleLine{{ProductID: f.productID, Quantity: decimal.RequireFromString("1")}},
+			Tenders:             []pos.Tender{{Method: "CASH", Amount: decimal.RequireFromString("1260.00")}},
+		}
+		result, err := svc.FinalizeInvoice(context.Background(), f.tenantID, f.deviceID, f.userID, req)
+		if err != nil {
+			t.Fatalf("finalize: %v", err)
+		}
+		custID, _, _ := invoiceCustomer(t, db, result.InvoiceID)
+		if custID == nil || *custID != f.customerID {
+			t.Fatalf("expected the explicitly picked customer %s, got %v", f.customerID, custID)
+		}
+	})
+
+	t.Run("a CREDIT tender with no customer is still rejected, never silently billed to the walk-in customer", func(t *testing.T) {
+		req := pos.FinalizeRequest{
+			ClientTransactionID: uuid.New(),
+			LocationID:          f.locationID,
+			Lines:               []pos.SaleLine{{ProductID: f.productID, Quantity: decimal.RequireFromString("1")}},
+			Tenders:             []pos.Tender{{Method: "CREDIT", Amount: decimal.RequireFromString("1260.00")}},
+		}
+		_, err := svc.FinalizeInvoice(context.Background(), f.tenantID, f.deviceID, f.userID, req)
+		if !errors.Is(err, pos.ErrValidation) {
+			t.Fatalf("expected ErrValidation for a credit tender with no customer, got %v", err)
 		}
 	})
 }

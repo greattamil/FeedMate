@@ -1053,6 +1053,26 @@ fixed, none added/removed). Full Go suite (`-tags=integration` against
 live PostgreSQL): all passing. `flutter analyze` and `go build`/`gofmt`
 clean.
 
+## Phase 47 — Every Sale Bills a Customer: Walking Customer Fallback (Backend + Flutter)
+
+User-requested feature: a sale must never be finalized with no customer
+attached at all. Historically a CASH sale with nobody picked simply had
+`customer_id = NULL` on the invoice — cheap to build, but it meant cash
+walk-in sales had no customer record to report against, and the app had
+no concept of "unknown customer" as a first-class, always-present entity.
+
+| Area | Status | Evidence |
+|---|---|---|
+| New `customer.GetOrCreateWalkIn`: looks up a tenant's reserved "Walking Customer" row (fixed `customer_code = "WALK-IN"`, `customer_type = WALK_IN`, zero credit limit) and lazily creates it on first use, `ON CONFLICT DO NOTHING` + re-select so two concurrent first-sales in the same tenant resolve to the same row rather than racing a duplicate-key error | **VERIFIED** | Covered by the new pos integration test below (a second customerless sale reuses the same row — `COUNT(*) = 1`) |
+| `pos.Service.FinalizeInvoice`: if no `CustomerID` was supplied and no tender is CREDIT, resolves and bills the Walking Customer instead of leaving `customer_id` null. A CREDIT tender's existing requirement for a real, explicitly-selected customer is completely unchanged — the walk-in fallback is skipped whenever any tender is CREDIT, so credit can never be silently extended to the shared anonymous bucket | **VERIFIED** | New `TestFinalizeInvoice_NoCustomerFallsBackToWalkIn` (4 subtests): a customerless cash sale is billed to `WALK-IN`; a second one reuses the same row; a customer picked explicitly is always honored over the fallback; a CREDIT tender with no customer is still rejected with `ErrValidation`, never silently billed to the walk-in bucket. Full backend suite re-run clean, zero regressions — including the pre-existing `TestFinalizeInvoice_CashSale`, whose journal-balance assertions are unaffected since the walk-in customer is never attached to a journal line (only CREDIT tender lines carry a `customer_id` in `postSaleJournal`) |
+| Flutter `CartPanel`: the customer picker is now shown for every tender (previously credit-only), labeled "Optional — billed to Walking Customer if left blank" for non-credit and "Required for Khata credit billing" for credit; a cash sale with a customer selected bills that customer, and an explicit clear (✕) button lets the cashier remove an optionally-picked customer without switching tenders | **VERIFIED** | 2 new widget tests in `cart_credit_test.dart`: a cash checkout with nobody picked posts no `customer_id` at all (server resolves the fallback); a cash checkout with a customer picked posts that customer's real id, proving a known customer paying cash is never anonymized. Full existing credit-tender test suite re-run unchanged and passing |
+| End-to-end live verification on the Android emulator against the real rebuilt backend | **VERIFIED, live** | Added a product to the Counter cart with no customer selected, confirmed the tile read "Optional — billed to Walking Customer if left blank", checked out with Cash, then queried Postgres directly: the resulting invoice (`INV-2627-00018`) shows `customer_code = WALK-IN`, `name = Walking Customer` — not null. A second customerless sale from the same session (`TST-0002`, from the automated test run just before) also resolved to the same `WALK-IN` row, confirming the reuse-not-duplicate behavior live, not just in the integration test |
+
+Full Flutter suite: 109 tests, all passing. Full Go suite
+(`-tags=integration` against live PostgreSQL): all passing. `flutter
+analyze` and `go build`/`gofmt` clean. Live-verified end to end on the
+Android emulator against the real Go backend and PostgreSQL.
+
 ## Not Yet Started
 
 Customer/supplier aging (30/60/90-day buckets) and margin reports,

@@ -247,7 +247,13 @@ class _CartPanelState extends State<CartPanel> {
         lines: cart.lines,
         locationId: _selectedLocationId!,
         tenders: tenders,
-        customerId: _anyCreditTender ? _selectedCustomer!.id : null,
+        // Any tender may carry a selected customer (a known cashier-picked
+        // customer is always billed to that customer, even paying cash);
+        // if none is selected, the server bills the sale to the tenant's
+        // Walking Customer for a non-credit sale — see
+        // pos.Service.FinalizeInvoice's walk-in fallback. Only CREDIT
+        // requires the client to have actually enforced a selection above.
+        customerId: _selectedCustomer?.id,
         overrideCreditLimit: overrideCreditLimit,
         overrideReason: overrideReason,
       );
@@ -716,7 +722,7 @@ class _CartPanelState extends State<CartPanel> {
                   );
                 }),
               ],
-              if (_anyCreditTender && !_offline) ...[
+              if (!_offline) ...[
                 const SizedBox(height: 10),
                 Container(
                   decoration: BoxDecoration(
@@ -738,8 +744,19 @@ class _CartPanelState extends State<CartPanel> {
                     title: Text(_selectedCustomer?.name ?? 'Select customer', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                     subtitle: _selectedCustomer != null
                         ? Text('${_selectedCustomer!.customerCode} · ${_selectedCustomer!.phone ?? ""}')
-                        : const Text('Required for Khata credit billing', style: TextStyle(fontSize: 12)),
-                    trailing: const Icon(Icons.chevron_right_rounded, color: Color(0xFF64748B)),
+                        : Text(
+                            _anyCreditTender
+                                ? 'Required for Khata credit billing'
+                                : 'Optional — billed to Walking Customer if left blank',
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                    trailing: _selectedCustomer != null && !_anyCreditTender
+                        ? IconButton(
+                            key: const Key('customer_picker_clear'),
+                            icon: const Icon(Icons.close_rounded, size: 20, color: Color(0xFF64748B)),
+                            onPressed: () => setState(() => _selectedCustomer = null),
+                          )
+                        : const Icon(Icons.chevron_right_rounded, color: Color(0xFF64748B)),
                     onTap: _pickCustomer,
                   ),
                 ),

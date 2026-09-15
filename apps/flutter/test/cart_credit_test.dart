@@ -300,4 +300,100 @@ void main() {
     expect(button.onPressed, isNull);
     expect(invoiceCallCount, 0);
   });
+
+  testWidgets('a cash sale with no customer picked omits customer_id — the server bills the Walking Customer', (tester) async {
+    final cart = CartModel()..addProduct(_testProduct(), quantity: Decimal.one);
+    Map<String, dynamic>? postedBody;
+
+    final client = MockClient((request) async {
+      if (request.url.path == '/api/v1/locations') {
+        return _jsonOk({
+          'locations': [
+            {'id': 'loc-1', 'name': 'Main Store'}
+          ]
+        });
+      }
+      if (request.url.path == '/api/v1/pos/quote') {
+        return _jsonOk({
+          'lines': [
+            {'product_id': 'p1', 'product_name': 'Cattle Feed 50kg', 'line_total': '1200.00'}
+          ],
+          'taxable_total': '1200.00',
+          'tax_total': '0.00',
+          'grand_total': '1200.00',
+        });
+      }
+      if (request.url.path == '/api/v1/pos/invoices') {
+        postedBody = jsonDecode(request.body) as Map<String, dynamic>;
+        return _jsonOk({'invoice_id': 'inv-1', 'invoice_number': 'INV-0001', 'grand_total': '1200.00', 'duplicate': false});
+      }
+      return http.Response('not found', 404);
+    });
+
+    await tester.pumpWidget(_wrapCartScreen(httpClient: client, cart: cart));
+    await tester.pumpAndSettle();
+
+    // Cash is the default tender — the customer picker is present but
+    // clearly optional, unlike the required prompt shown for credit.
+    expect(find.byKey(const Key('customer_picker_tile')), findsOneWidget);
+    expect(find.text('Optional — billed to Walking Customer if left blank'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('checkout_button')));
+    await tester.pumpAndSettle();
+
+    expect(postedBody, isNotNull);
+    expect(postedBody!.containsKey('customer_id'), isFalse);
+  });
+
+  testWidgets('picking a customer for a cash sale bills it to that customer, not anonymously', (tester) async {
+    final cart = CartModel()..addProduct(_testProduct(), quantity: Decimal.one);
+    Map<String, dynamic>? postedBody;
+
+    final client = MockClient((request) async {
+      if (request.url.path == '/api/v1/locations') {
+        return _jsonOk({
+          'locations': [
+            {'id': 'loc-1', 'name': 'Main Store'}
+          ]
+        });
+      }
+      if (request.url.path == '/api/v1/pos/quote') {
+        return _jsonOk({
+          'lines': [
+            {'product_id': 'p1', 'product_name': 'Cattle Feed 50kg', 'line_total': '1200.00'}
+          ],
+          'taxable_total': '1200.00',
+          'tax_total': '0.00',
+          'grand_total': '1200.00',
+        });
+      }
+      if (request.url.path == '/api/v1/customers') {
+        return _jsonOk({
+          'customers': [
+            {'id': 'cust-1', 'customer_code': 'FARM001', 'name': 'Test Farmer', 'customer_type': 'FARMER'}
+          ]
+        });
+      }
+      if (request.url.path == '/api/v1/pos/invoices') {
+        postedBody = jsonDecode(request.body) as Map<String, dynamic>;
+        return _jsonOk({'invoice_id': 'inv-1', 'invoice_number': 'INV-0001', 'grand_total': '1200.00', 'duplicate': false});
+      }
+      return http.Response('not found', 404);
+    });
+
+    await tester.pumpWidget(_wrapCartScreen(httpClient: client, cart: cart));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('customer_picker_tile')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Test Farmer'));
+    await tester.pumpAndSettle();
+    expect(find.text('Test Farmer'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('checkout_button')));
+    await tester.pumpAndSettle();
+
+    expect(postedBody, isNotNull);
+    expect(postedBody!['customer_id'], 'cust-1');
+  });
 }

@@ -198,6 +198,29 @@ func (s *Service) FinalizeInvoice(ctx context.Context, tenantID, deviceID, userI
 			return fmt.Errorf("load tenant policy: %w", err)
 		}
 
+		// Every sale must be billed against a customer — never nothing.
+		// A CREDIT tender already requires the caller to have picked a real,
+		// accountable customer (checked below); for a sale with no credit
+		// tender and no customer captured, fall back to the tenant's
+		// "Walking Customer" rather than leaving customer_id null, so every
+		// invoice/journal/ledger entry has a home. See customer.GetOrCreateWalkIn.
+		if req.CustomerID == nil {
+			hasCreditTender := false
+			for _, t := range req.Tenders {
+				if t.Method == "CREDIT" {
+					hasCreditTender = true
+					break
+				}
+			}
+			if !hasCreditTender {
+				walkIn, err := customer.GetOrCreateWalkIn(ctx, tx, tenantID)
+				if err != nil {
+					return fmt.Errorf("resolve walk-in customer: %w", err)
+				}
+				req.CustomerID = &walkIn.ID
+			}
+		}
+
 		var customerName *string
 		if req.CustomerID != nil {
 			c, err := customer.GetByID(ctx, tx, *req.CustomerID)

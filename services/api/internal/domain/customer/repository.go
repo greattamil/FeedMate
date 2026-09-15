@@ -70,6 +70,52 @@ func Create(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, c *Customer, cre
 	return nil
 }
 
+// WalkInCustomerCode identifies the one reserved, auto-created customer row
+// per tenant that every sale with no captured customer is billed against —
+// see GetOrCreateWalkIn's doc comment for why this exists.
+const WalkInCustomerCode = "WALK-IN"
+
+// GetOrCreateWalkIn returns the tenant's "Walking Customer" — a real,
+// permanent customer row (customer_type WALK_IN, zero credit limit) that
+// exists so a sale can never be billed with no customer attached at all,
+// without forcing the cashier to pick or create a real customer record for
+// every anonymous cash sale. It is looked up by a fixed, well-known
+// customer_code and lazily created on first use per tenant (there is no
+// tenant-provisioning step that seeds it up front). Never used for a
+// CREDIT tender — pos.Service.FinalizeInvoice only calls this for
+// non-credit sales; extending shared credit to an anonymous bucket with no
+// single accountable customer would defeat the entire point of a credit
+// limit.
+func GetOrCreateWalkIn(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) (*Customer, error) {
+	c, err := getByCode(ctx, tx, tenantID, WalkInCustomerCode)
+	if err == nil {
+		return c, nil
+	}
+	if !errors.Is(err, ErrNotFound) {
+		return nil, err
+	}
+	// Insert then re-select rather than RETURNING, so a race between two
+	// concurrent first-sales (both missing the row) resolves to the same
+	// row instead of a duplicate-key error on the second insert.
+	_, err = tx.Exec(ctx, `
+		INSERT INTO customers (tenant_id, customer_code, name, customer_type, status)
+		VALUES ($1, $2, 'Walking Customer', 'WALK_IN', 'ACTIVE')
+		ON CONFLICT (tenant_id, customer_code) DO NOTHING
+	`, tenantID, WalkInCustomerCode)
+	if err != nil {
+		return nil, err
+	}
+	return getByCode(ctx, tx, tenantID, WalkInCustomerCode)
+}
+
+func getByCode(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, code string) (*Customer, error) {
+	row := tx.QueryRow(ctx, `
+		SELECT id, customer_code, name, local_name, phone, whatsapp_phone, customer_type, tier_id, status
+		FROM customers WHERE tenant_id = $1 AND customer_code = $2
+	`, tenantID, code)
+	return scanCustomer(row)
+}
+
 // List returns active customers, optionally filtered by a case-insensitive
 // substring match on name/customer_code/phone (for a customer picker's
 // search box). Ordered by name for a stable, predictable picker list.
@@ -117,9 +163,9 @@ func SetCreditLimit(ctx context.Context, tx pgx.Tx, tenantID, customerID uuid.UU
 // CreditProfile mirrors customer_credit_profiles. A customer with no row here
 // has zero credit (credit_allowed defaults closed, not open).
 type CreditProfile struct {
-	CreditLimit            decimal.Decimal
-	OverrideRequiredAbove  *decimal.Decimal
-	RiskStatus             string
+	CreditLimit           decimal.Decimal
+	OverrideRequiredAbove *decimal.Decimal
+	RiskStatus            string
 }
 
 func GetCreditProfile(ctx context.Context, tx pgx.Tx, customerID uuid.UUID) (*CreditProfile, error) {
@@ -152,13 +198,13 @@ func OutstandingBalance(ctx context.Context, tx pgx.Tx, customerID uuid.UUID) (d
 }
 
 type LedgerEntry struct {
-	CustomerID   uuid.UUID
-	DocumentType string
-	DocumentID   uuid.UUID
-	Debit        decimal.Decimal
-	Credit       decimal.Decimal
-	Description  string
-	DeviceID     *uuid.UUID
+	CustomerID      uuid.UUID
+	DocumentType    string
+	DocumentID      uuid.UUID
+	Debit           decimal.Decimal
+	Credit          decimal.Decimal
+	Description     string
+	DeviceID        *uuid.UUID
 	CreatedByUserID *uuid.UUID
 }
 

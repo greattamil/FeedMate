@@ -669,6 +669,22 @@ func TestGetInvoiceDetail_ReturnsLinesAndTenders(t *testing.T) {
 	if len(detail.Tenders) != 1 || detail.Tenders[0].Method != "CASH" || !detail.Tenders[0].Amount.Equal(decimal.RequireFromString("3780.00")) {
 		t.Fatalf("expected 1 CASH tender for 3780.00, got %+v", detail.Tenders)
 	}
+	// PRD GST-compliance requirement: every invoice line must carry its own
+	// CGST/SGST tax breakdown for the printed invoice, not just the invoice-
+	// level tax_total.
+	if len(detail.Lines[0].TaxLines) != 2 {
+		t.Fatalf("expected 2 tax components (CGST+SGST) on the line, got %+v", detail.Lines[0].TaxLines)
+	}
+	taxByType := map[string]decimal.Decimal{}
+	for _, tl := range detail.Lines[0].TaxLines {
+		taxByType[tl.TaxType] = tl.Amount
+	}
+	if !taxByType["CGST"].Equal(decimal.RequireFromString("90.00")) || !taxByType["SGST"].Equal(decimal.RequireFromString("90.00")) {
+		t.Fatalf("expected CGST/SGST of 90.00 each (2.5%% of 3600 taxable), got %+v", taxByType)
+	}
+	if detail.Store.LegalName == "" {
+		t.Fatalf("expected the invoice detail to embed the tenant's store profile, got empty legal name")
+	}
 
 	if _, err := svc.GetInvoiceDetail(context.Background(), f.tenantID, uuid.New()); !errors.Is(err, pos.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for a nonexistent invoice, got: %v", err)

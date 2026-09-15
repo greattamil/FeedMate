@@ -15,6 +15,7 @@ import (
 	"github.com/andipatti/feedmate/services/api/internal/domain/customer"
 	"github.com/andipatti/feedmate/services/api/internal/domain/inventory"
 	"github.com/andipatti/feedmate/services/api/internal/domain/product"
+	"github.com/andipatti/feedmate/services/api/internal/domain/settings"
 )
 
 var (
@@ -138,6 +139,7 @@ type InvoiceDetail struct {
 	Header  *InvoiceHeader
 	Lines   []InvoiceLineSummary
 	Tenders []InvoiceTenderRecord
+	Store   settings.StoreProfile
 }
 
 func (s *Service) GetInvoiceDetail(ctx context.Context, tenantID, invoiceID uuid.UUID) (*InvoiceDetail, error) {
@@ -155,9 +157,14 @@ func (s *Service) GetInvoiceDetail(ctx context.Context, tenantID, invoiceID uuid
 		if err != nil {
 			return err
 		}
+		store, err := settings.GetStoreProfile(ctx, tx, tenantID)
+		if err != nil {
+			return err
+		}
 		result.Header = header
 		result.Lines = lines
 		result.Tenders = tenders
+		result.Store = store
 		return nil
 	})
 	if err != nil {

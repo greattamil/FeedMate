@@ -12,6 +12,7 @@ import '../../core/local_db.dart';
 import 'cart_model.dart';
 import 'customer_api.dart';
 import 'customer_picker_screen.dart';
+import 'invoice_detail_screen.dart';
 import 'pos_api.dart';
 
 /// The cart/checkout body: shows the cart, fetches a live server-computed
@@ -264,17 +265,24 @@ class _CartPanelState extends State<CartPanel> {
         _checkingOut = false;
         _selectedCustomer = null;
       });
-      await showDialog<void>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Sale Complete'),
-          content: Text('Invoice ${result.invoiceNumber}\nTotal: ₹${result.grandTotal.toStringAsFixed(2)}'),
-          actions: [
-            TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('OK')),
-          ],
-        ),
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Sale complete — Invoice ${result.invoiceNumber} for ₹${result.grandTotal.toStringAsFixed(2)}')),
       );
-      if (mounted && widget.standalone) Navigator.of(context).pop();
+      // A completed sale is not really "done" until the cashier can see (and
+      // hand over/share) the finalized invoice — auto-navigate straight to
+      // it rather than leaving them looking at a now-empty cart. Standalone
+      // (a pushed CartScreen) replaces itself so the back stack returns past
+      // checkout, not back into an empty cart; embedded (a panel inside
+      // PosScreen) just pushes the detail screen on top.
+      if (widget.standalone) {
+        await Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => InvoiceDetailScreen(invoiceId: result.invoiceId)),
+        );
+      } else {
+        await Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => InvoiceDetailScreen(invoiceId: result.invoiceId)),
+        );
+      }
     } on ApiError catch (e) {
       if (!mounted) return;
       setState(() => _checkingOut = false);

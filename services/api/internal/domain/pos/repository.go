@@ -108,17 +108,30 @@ type InvoiceLineSummary struct {
 	ProductID       uuid.UUID
 	ProductName     string
 	SKU             string
+	HSN             *string
 	UOMCode         string
 	Quantity        decimal.Decimal
 	UnitPrice       decimal.Decimal
+	DiscountAmount  decimal.Decimal
+	TaxableValue    decimal.Decimal
+	TaxTotal        decimal.Decimal
 	LineTotal       decimal.Decimal
 	AlreadyReturned decimal.Decimal
+	TaxLines        []TaxLineDetail
+}
+
+// TaxLineDetail is one tax component (CGST/SGST/IGST/CESS) applied to a
+// single invoice line, for the printed invoice's tax breakdown.
+type TaxLineDetail struct {
+	TaxType string
+	Rate    decimal.Decimal
+	Amount  decimal.Decimal
 }
 
 func ListInvoiceLines(ctx context.Context, tx pgx.Tx, invoiceID uuid.UUID) ([]InvoiceLineSummary, error) {
 	rows, err := tx.Query(ctx, `
-		SELECT l.id, l.product_id, l.product_name_snapshot, l.sku_snapshot, l.uom_code_snapshot,
-		       l.quantity, l.unit_price, l.line_total,
+		SELECT l.id, l.product_id, l.product_name_snapshot, l.sku_snapshot, l.hsn_snapshot, l.uom_code_snapshot,
+		       l.quantity, l.unit_price, l.discount_amount, l.taxable_value, l.tax_total, l.line_total,
 		       COALESCE((
 		           SELECT SUM(srl.quantity) FROM sales_return_lines srl
 		           JOIN sales_returns sr ON sr.id = srl.sales_return_id
@@ -136,11 +149,49 @@ func ListInvoiceLines(ctx context.Context, tx pgx.Tx, invoiceID uuid.UUID) ([]In
 	var out []InvoiceLineSummary
 	for rows.Next() {
 		var l InvoiceLineSummary
-		if err := rows.Scan(&l.ID, &l.ProductID, &l.ProductName, &l.SKU, &l.UOMCode,
-			&l.Quantity, &l.UnitPrice, &l.LineTotal, &l.AlreadyReturned); err != nil {
+		if err := rows.Scan(&l.ID, &l.ProductID, &l.ProductName, &l.SKU, &l.HSN, &l.UOMCode,
+			&l.Quantity, &l.UnitPrice, &l.DiscountAmount, &l.TaxableValue, &l.TaxTotal, &l.LineTotal, &l.AlreadyReturned); err != nil {
 			return nil, err
 		}
 		out = append(out, l)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	taxByLine, err := ListTaxLinesByInvoice(ctx, tx, invoiceID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		out[i].TaxLines = taxByLine[out[i].ID]
+	}
+	return out, nil
+}
+
+// ListTaxLinesByInvoice returns every tax component posted for an invoice,
+// grouped by invoice_line_id, for the printed invoice's per-line CGST/SGST/
+// IGST breakdown (PRD GST-compliance requirement).
+func ListTaxLinesByInvoice(ctx context.Context, tx pgx.Tx, invoiceID uuid.UUID) (map[uuid.UUID][]TaxLineDetail, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT invoice_line_id, tax_type, rate, tax_amount
+		FROM invoice_tax_lines
+		WHERE invoice_id = $1
+		ORDER BY tax_type
+	`, invoiceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := map[uuid.UUID][]TaxLineDetail{}
+	for rows.Next() {
+		var lineID uuid.UUID
+		var t TaxLineDetail
+		if err := rows.Scan(&lineID, &t.TaxType, &t.Rate, &t.Amount); err != nil {
+			return nil, err
+		}
+		out[lineID] = append(out[lineID], t)
 	}
 	return out, rows.Err()
 }

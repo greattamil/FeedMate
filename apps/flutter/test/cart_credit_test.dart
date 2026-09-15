@@ -141,6 +141,19 @@ void main() {
           'duplicate': false,
         });
       }
+      if (request.url.path == '/api/v1/pos/invoices/inv-1' && request.method == 'GET') {
+        return _jsonOk({
+          'id': 'inv-1',
+          'invoice_number': 'INV-0001',
+          'taxable_total': '1200.00',
+          'tax_total': '0.00',
+          'grand_total': '1200.00',
+          'payment_status': 'CREDIT',
+          'status': 'FINALIZED',
+          'lines': [],
+          'tenders': [],
+        });
+      }
       return http.Response('not found', 404);
     });
 
@@ -165,8 +178,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(invoiceAttempts, 2);
-    expect(find.text('Sale Complete'), findsOneWidget);
-    expect(find.textContaining('INV-0001'), findsOneWidget);
+    // Checkout now auto-navigates straight to the finalized invoice's detail
+    // screen rather than showing a blocking "Sale Complete" dialog.
+    expect(find.text('INV-0001'), findsWidgets);
+    expect(find.byKey(const Key('invoice_detail_grand_total')), findsOneWidget);
   });
 
   testWidgets('split payment across CASH and CREDIT posts both tenders summing to the total', (tester) async {
@@ -205,6 +220,19 @@ void main() {
           'invoice_number': 'INV-0002',
           'grand_total': '1200.00',
           'duplicate': false,
+        });
+      }
+      if (request.url.path == '/api/v1/pos/invoices/inv-2' && request.method == 'GET') {
+        return _jsonOk({
+          'id': 'inv-2',
+          'invoice_number': 'INV-0002',
+          'taxable_total': '1200.00',
+          'tax_total': '0.00',
+          'grand_total': '1200.00',
+          'payment_status': 'CREDIT',
+          'status': 'FINALIZED',
+          'lines': [],
+          'tenders': [],
         });
       }
       return http.Response('not found', 404);
@@ -247,7 +275,8 @@ void main() {
     await tester.tap(find.byKey(const Key('checkout_button')));
     await tester.pumpAndSettle();
 
-    expect(find.text('Sale Complete'), findsOneWidget);
+    expect(find.text('INV-0002'), findsWidgets);
+    expect(find.byKey(const Key('invoice_detail_grand_total')), findsOneWidget);
     expect(postedBody, isNotNull);
     expect(postedBody!['customer_id'], 'cust-1');
     final tenders = postedBody!['tenders'] as List<dynamic>;
@@ -327,6 +356,12 @@ void main() {
         postedBody = jsonDecode(request.body) as Map<String, dynamic>;
         return _jsonOk({'invoice_id': 'inv-1', 'invoice_number': 'INV-0001', 'grand_total': '1200.00', 'duplicate': false});
       }
+      if (request.url.path == '/api/v1/pos/invoices/inv-1' && request.method == 'GET') {
+        return _jsonOk({
+          'id': 'inv-1', 'invoice_number': 'INV-0001', 'taxable_total': '1200.00', 'tax_total': '0.00',
+          'grand_total': '1200.00', 'payment_status': 'PAID', 'status': 'FINALIZED', 'lines': [], 'tenders': [],
+        });
+      }
       return http.Response('not found', 404);
     });
 
@@ -377,6 +412,12 @@ void main() {
       if (request.url.path == '/api/v1/pos/invoices') {
         postedBody = jsonDecode(request.body) as Map<String, dynamic>;
         return _jsonOk({'invoice_id': 'inv-1', 'invoice_number': 'INV-0001', 'grand_total': '1200.00', 'duplicate': false});
+      }
+      if (request.url.path == '/api/v1/pos/invoices/inv-1' && request.method == 'GET') {
+        return _jsonOk({
+          'id': 'inv-1', 'invoice_number': 'INV-0001', 'taxable_total': '1200.00', 'tax_total': '0.00',
+          'grand_total': '1200.00', 'payment_status': 'PAID', 'status': 'FINALIZED', 'lines': [], 'tenders': [],
+        });
       }
       return http.Response('not found', 404);
     });

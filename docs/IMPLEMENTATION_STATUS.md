@@ -1140,6 +1140,41 @@ reminders, and bag-vs-bulk loose-weight billing — all reasonable feature
 ideas, but out of scope for a UI/UX bug-fix pass and not part of the
 report's own "Next Steps" shortlist that was actually acted on.
 
+## Phase 50 — Post-Checkout Auto-Redirect, Full Invoice Detail, PDF Generation & Share (Backend + Flutter)
+
+The user asked for a missing checkout flow: after a sale completes, the app
+should auto-navigate to a detailed invoice page (not just a "Sale Complete"
+dialog that clears the cart), that page should show every important detail
+(shop identity/compliance info, per-line tax breakdown — not just invoice
+totals), and it should generate and let the cashier share a real PDF file
+of the invoice.
+
+| Area | Change |
+|---|---|
+| Backend: per-line tax breakdown | `pos.InvoiceLineSummary` gained `HSN`, `DiscountAmount`, `TaxableValue`, `TaxTotal`, and `TaxLines []TaxLineDetail`; new `pos.ListTaxLinesByInvoice` reads the existing `invoice_tax_lines` table (already populated at finalize time, but never previously read back) and `ListInvoiceLines` now joins it in, keyed by `invoice_line_id` |
+| Backend: shop details on the invoice | `pos.InvoiceDetail` gained a `Store settings.StoreProfile` field, populated via `settings.GetStoreProfile` inside the same read transaction as the rest of `GetInvoiceDetail` — mirrors the existing `customer_name_snapshot` precedent (the invoice always reflects real data at fetch time; a full point-in-time snapshot of store details was judged unnecessary since store profile changes are rare and this is a live reprint view, not an accounting document) |
+| Backend: HTTP response | `GetInvoiceDetail` handler now returns `hsn`, `discount_amount`, `taxable_value`, `tax_total`, and `tax_breakdown: [{tax_type, rate, amount}]` per line, plus a `store: {legal_name, trade_name, gstin, fssai_license_no, phone, email, address_line1/2, city, district, state_code, postal_code, receipt_header, receipt_footer}` object |
+| Flutter: models | `invoice_history_api.dart` gained `InvoiceLineTax` and `InvoiceStoreDetail` (with a `fullAddress` helper), and `InvoiceLineDetail`/`InvoiceDetail` were extended to parse the new fields |
+| Flutter: auto-redirect | `CartPanel._checkout()`'s success path no longer shows a blocking "Sale Complete" `AlertDialog` — it shows a `SnackBar` and immediately navigates to `InvoiceDetailScreen(invoiceId: result.invoiceId)`: `pushReplacement` for the standalone (pushed `CartScreen`) host so the back stack returns past checkout rather than into an empty cart, plain `push` for the embedded (in-`PosScreen`) host |
+| Flutter: invoice detail screen | `InvoiceDetailScreen` gained a shop-identity header card (legal/trade name, address, phone, GSTIN, FSSAI), an HSN + CGST/SGST/IGST chip breakdown per line, an AppBar share icon, and a bottom "Share Invoice PDF" button |
+| Flutter: PDF generation | New `invoice_pdf.dart` (`pdf: ^3.11.3` dependency added) builds a complete tax-invoice PDF from the loaded `InvoiceDetail`: shop header, invoice/customer meta, a line-items table with HSN/qty/rate/discount/taxable/tax breakdown/total columns, totals block, tenders, and receipt footer |
+| Flutter: share | `shareInvoicePdf()` mirrors the existing `shareCsv()` pattern from Phase 41 (`core/csv_export.dart`): renders the PDF, writes it to a temp file via `path_provider`, opens the native share sheet via `share_plus` |
+
+| Area | Status | Evidence |
+|---|---|---|
+| Backend tax-breakdown + store-profile embedding | **VERIFIED** | Extended `TestGetInvoiceDetail_ReturnsLinesAndTenders`: asserts the line carries exactly 2 tax components (CGST/SGST, 90.00 each on a 3600 taxable line) and that `detail.Store.LegalName` is non-empty. Full `pos` package integration suite passes against live PostgreSQL |
+| Backend build/vet | **VERIFIED** | `go build ./...` and `go vet ./...` clean across the whole module after the `pos`→`settings` import addition |
+| Flutter auto-redirect | **VERIFIED** | `cart_credit_test.dart`'s two checkout-completion tests updated: mock a `GET /api/v1/pos/invoices/{id}` response and assert `invoice_detail_grand_total` is now visible post-checkout instead of the old "Sale Complete" dialog text |
+| Flutter PDF generation | **VERIFIED** | New `invoice_pdf_test.dart`: asserts the generated document is a real, non-empty PDF (`%PDF-` magic bytes present) |
+| Full Flutter suite | **VERIFIED** | 115 tests, all passing (2 new PDF tests, plus the 2 updated checkout tests) |
+| **Real bug caught live, not by any test — fixed before considering this phase done**: the shared invoice PDF rendered every currency amount as a blank glyph box on a real device. Root cause: the `pdf` package's default core Helvetica font has no glyph for U+20B9 (₹) — it silently renders as a "tofu" box instead of throwing | **FIXED** | Replaced every `'₹...'` literal in `invoice_pdf.dart` with `'Rs....'` (fully within Helvetica's WinAnsi-encoded range). Added a source-level regression test asserting the file never contains a literal `₹`, with a comment explaining why. Pulled the actual PDF the app generated on the Android emulator via `adb exec-out run-as ... cat` (not `adb shell ... cat`, which corrupts binary data piped through a text-mode shell — this cost real debugging time before the true bug was isolated) and confirmed via `pypdf` text extraction that every amount now reads correctly (`Rs.1102.50` etc.) with no missing glyphs |
+| End-to-end live verification on the Android emulator against the rebuilt backend | **VERIFIED, live** | Full real flow exercised twice (once before, once after the ₹-glyph fix): added a product to the cart, charged cash, watched the SnackBar fire and the screen auto-navigate straight to the new invoice's detail page (shop header "Bala Feeds / Main Road, Andipatti, TN", customer defaulted to "Walking Customer", CGST/SGST chips shown), tapped "Share Invoice PDF", confirmed the native Android share sheet opened with a real `Invoice_INV-2627-000NN.pdf` file, and pulled that exact file off the device to verify its contents |
+
+Not implemented from this request: no physical printer integration (out of
+scope — no printer hardware adapter exists in this app yet, tracked
+separately below) and no point-in-time snapshot of store details on the
+invoice (deliberate — see the design note above).
+
 ## Not Yet Started
 
 Customer/supplier aging (30/60/90-day buckets) and margin reports,

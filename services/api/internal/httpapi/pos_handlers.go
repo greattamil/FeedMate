@@ -96,16 +96,32 @@ func (h *POSHandlers) GetInvoiceDetail(w http.ResponseWriter, r *http.Request) {
 
 	lines := make([]map[string]interface{}, 0, len(detail.Lines))
 	for _, l := range detail.Lines {
-		lines = append(lines, map[string]interface{}{
-			"id":           l.ID.String(),
-			"product_id":   l.ProductID.String(),
-			"product_name": l.ProductName,
-			"sku":          l.SKU,
-			"uom_code":     l.UOMCode,
-			"quantity":     l.Quantity.StringFixed(3),
-			"unit_price":   l.UnitPrice.StringFixed(2),
-			"line_total":   l.LineTotal.StringFixed(2),
-		})
+		taxBreakdown := make([]map[string]interface{}, 0, len(l.TaxLines))
+		for _, t := range l.TaxLines {
+			taxBreakdown = append(taxBreakdown, map[string]interface{}{
+				"tax_type": t.TaxType,
+				"rate":     t.Rate.StringFixed(2),
+				"amount":   t.Amount.StringFixed(2),
+			})
+		}
+		row := map[string]interface{}{
+			"id":              l.ID.String(),
+			"product_id":      l.ProductID.String(),
+			"product_name":    l.ProductName,
+			"sku":             l.SKU,
+			"uom_code":        l.UOMCode,
+			"quantity":        l.Quantity.StringFixed(3),
+			"unit_price":      l.UnitPrice.StringFixed(2),
+			"discount_amount": l.DiscountAmount.StringFixed(2),
+			"taxable_value":   l.TaxableValue.StringFixed(2),
+			"tax_total":       l.TaxTotal.StringFixed(2),
+			"line_total":      l.LineTotal.StringFixed(2),
+			"tax_breakdown":   taxBreakdown,
+		}
+		if l.HSN != nil {
+			row["hsn"] = *l.HSN
+		}
+		lines = append(lines, row)
 	}
 	tenders := make([]map[string]interface{}, 0, len(detail.Tenders))
 	for _, t := range detail.Tenders {
@@ -116,6 +132,44 @@ func (h *POSHandlers) GetInvoiceDetail(w http.ResponseWriter, r *http.Request) {
 		tenders = append(tenders, row)
 	}
 	header := detail.Header
+	store := map[string]interface{}{
+		"legal_name":     detail.Store.LegalName,
+		"address_line1":  detail.Store.AddressLine1,
+		"city":           detail.Store.City,
+		"state_code":     detail.Store.StateCode,
+		"invoice_prefix": detail.Store.InvoicePrefix,
+	}
+	if detail.Store.TradeName != nil {
+		store["trade_name"] = *detail.Store.TradeName
+	}
+	if detail.Store.GSTIN != nil {
+		store["gstin"] = *detail.Store.GSTIN
+	}
+	if detail.Store.FSSAILicenseNo != nil {
+		store["fssai_license_no"] = *detail.Store.FSSAILicenseNo
+	}
+	if detail.Store.Phone != nil {
+		store["phone"] = *detail.Store.Phone
+	}
+	if detail.Store.Email != nil {
+		store["email"] = *detail.Store.Email
+	}
+	if detail.Store.AddressLine2 != nil {
+		store["address_line2"] = *detail.Store.AddressLine2
+	}
+	if detail.Store.District != nil {
+		store["district"] = *detail.Store.District
+	}
+	if detail.Store.PostalCode != nil {
+		store["postal_code"] = *detail.Store.PostalCode
+	}
+	if detail.Store.ReceiptHeader != nil {
+		store["receipt_header"] = *detail.Store.ReceiptHeader
+	}
+	if detail.Store.ReceiptFooter != nil {
+		store["receipt_footer"] = *detail.Store.ReceiptFooter
+	}
+
 	resp := map[string]interface{}{
 		"id":              header.ID.String(),
 		"invoice_number":  header.InvoiceNumber,
@@ -129,6 +183,7 @@ func (h *POSHandlers) GetInvoiceDetail(w http.ResponseWriter, r *http.Request) {
 		"status":          header.Status,
 		"lines":           lines,
 		"tenders":         tenders,
+		"store":           store,
 	}
 	if header.CustomerNameSnap != nil {
 		resp["customer_name"] = *header.CustomerNameSnap

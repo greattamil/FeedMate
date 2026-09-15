@@ -1,6 +1,6 @@
-import 'dart:io';
+import 'dart:convert';
+import 'dart:typed_data';
 
-import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 /// One field of a CSV row, quoted per RFC 4180 whenever it contains a
@@ -31,8 +31,7 @@ String buildCsv(List<String> headers, List<List<String>> rows) {
 /// text, which most apps would otherwise mangle or truncate).
 Future<void> shareCsv({required String fileName, required List<String> headers, required List<List<String>> rows}) async {
   final csv = buildCsv(headers, rows);
-  final dir = await getTemporaryDirectory();
-  final file = File('${dir.path}/$fileName');
-  await file.writeAsString(csv);
-  await SharePlus.instance.share(ShareParams(files: [XFile(file.path)], fileNameOverrides: [fileName]));
+  final bytes = Uint8List.fromList(utf8.encode(csv));
+  final file = XFile.fromData(bytes, mimeType: 'text/csv', name: fileName);
+  await SharePlus.instance.share(ShareParams(files: [file], fileNameOverrides: [fileName]));
 }

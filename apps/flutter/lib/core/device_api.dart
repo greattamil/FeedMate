@@ -1,6 +1,4 @@
-import 'dart:io' show Platform;
-
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform, kIsWeb;
 
 import 'api_client.dart';
 
@@ -96,11 +94,20 @@ class DeviceApi {
     });
   }
 
+  // Must match the devices.platform CHECK constraint exactly
+  // (db/migrations/0002_identity_rbac.up.sql): 'ANDROID', 'IOS', 'WEB', or
+  // 'OTHER' — there is no 'WINDOWS' value, so a Windows desktop client (an
+  // always-connected back-office role, not a distinct platform the backend
+  // tracks separately) registers as 'OTHER'.
   String _platformName() {
     if (kIsWeb) return 'WEB';
-    if (Platform.isAndroid) return 'ANDROID';
-    if (Platform.isIOS) return 'IOS';
-    if (Platform.isWindows) return 'WINDOWS';
-    return 'OTHER';
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+        return 'ANDROID';
+      case TargetPlatform.iOS:
+        return 'IOS';
+      default:
+        return 'OTHER';
+    }
   }
 }

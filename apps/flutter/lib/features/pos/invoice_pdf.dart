@@ -1,7 +1,4 @@
-import 'dart:io';
-
 import 'package:intl/intl.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
@@ -190,15 +187,15 @@ pw.Widget _tendersBlock(InvoiceDetail invoice) {
   );
 }
 
-/// Renders [invoice] to a PDF, writes it to a temp file, and opens the
-/// platform share sheet — mirrors core/csv_export.dart's shareCsv() pattern
-/// so every "share a generated document" flow in this app works the same way.
+/// Renders [invoice] to a PDF and opens the platform share sheet — mirrors
+/// core/csv_export.dart's shareCsv() pattern so every "share a generated
+/// document" flow in this app works the same way, including on platforms
+/// (web) with no filesystem to write a temp file to: XFile.fromData() wraps
+/// the bytes directly rather than going through dart:io's File.
 Future<void> shareInvoicePdf(InvoiceDetail invoice) async {
   final doc = buildInvoicePdf(invoice);
   final bytes = await doc.save();
-  final dir = await getTemporaryDirectory();
   final fileName = 'Invoice_${invoice.invoiceNumber.replaceAll('/', '-')}.pdf';
-  final file = File('${dir.path}/$fileName');
-  await file.writeAsBytes(bytes);
-  await SharePlus.instance.share(ShareParams(files: [XFile(file.path)], fileNameOverrides: [fileName]));
+  final file = XFile.fromData(bytes, mimeType: 'application/pdf', name: fileName);
+  await SharePlus.instance.share(ShareParams(files: [file], fileNameOverrides: [fileName]));
 }

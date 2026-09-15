@@ -1,13 +1,13 @@
 import 'dart:async';
-import 'dart:io' show Platform;
 
 import 'package:connectivity_plus/connectivity_plus.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'core/api_client.dart';
 import 'core/auth_session.dart';
+import 'core/in_memory_local_db.dart';
 import 'core/local_db.dart';
 import 'core/local_db_sqlcipher.dart';
 import 'core/secure_storage.dart';
@@ -18,6 +18,17 @@ import 'features/pos/cart_model.dart';
 import 'features/pos/product_repository.dart';
 import 'features/shell/app_shell.dart';
 
+/// sqflite_sqlcipher (the encrypted offline store) only ships platform
+/// channels for Android/iOS/macOS — see local_db_sqlcipher.dart's doc
+/// comment. Windows and web run as always-connected back-office/admin
+/// clients instead (the physical counter terminal role stays Android/iOS),
+/// so they get [InMemoryLocalDatabase] rather than crashing on a missing
+/// plugin. Never uses `dart:io`'s `Platform` — that import alone fails to
+/// compile for web; `defaultTargetPlatform` is the cross-platform-safe
+/// equivalent.
+bool get _supportsEncryptedLocalDb =>
+    !kIsWeb && (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS);
+
 /// Resolves the API base URL for local development. An Android emulator
 /// reaches the host machine's localhost via the special alias 10.0.2.2;
 /// Windows/desktop/web reach it directly via 127.0.0.1. Override with
@@ -25,14 +36,14 @@ import 'features/shell/app_shell.dart';
 String _defaultApiBaseUrl() {
   const override = String.fromEnvironment('API_BASE_URL');
   if (override.isNotEmpty) return override;
-  if (!kIsWeb && Platform.isAndroid) return 'http://10.0.2.2:8081';
+  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) return 'http://10.0.2.2:8081';
   return 'http://127.0.0.1:8081';
 }
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final storage = SecureStorage();
-  final localDb = await openEncryptedLocalDatabase(storage);
+  final localDb = _supportsEncryptedLocalDb ? await openEncryptedLocalDatabase(storage) : InMemoryLocalDatabase();
   runApp(FeedMateApp(apiBaseUrl: _defaultApiBaseUrl(), storageOverride: storage, localDbOverride: localDb));
 }
 

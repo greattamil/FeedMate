@@ -34,6 +34,30 @@ func RequestIDFromContext(ctx context.Context) string {
 	return reqctx.RequestID(ctx)
 }
 
+// CORS lets a browser-hosted client (the Flutter web build, served from a
+// different origin/port than this API during local development) call it —
+// without this, every fetch from that origin is blocked by the browser
+// before it ever reaches Go. Auth here is always a Bearer token, never a
+// cookie, so credentialed CORS is unnecessary; reflecting whatever Origin
+// the browser sends keeps local dev working without hardcoding Flutter's
+// ephemeral dev-server port. A production deployment serving a real public
+// web frontend should tighten this to an explicit origin allow-list.
+func CORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if origin := r.Header.Get("Origin"); origin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Vary", "Origin")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Request-ID")
+		}
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // Recoverer converts a panic into a safe INTERNAL_ERROR response instead of
 // crashing the process or leaking a stack trace to the client.
 func Recoverer(next http.Handler) http.Handler {

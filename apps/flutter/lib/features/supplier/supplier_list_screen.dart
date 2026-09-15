@@ -109,6 +109,7 @@ class _SupplierListScreenState extends State<SupplierListScreen> {
       ),
       floatingActionButton: canManage
           ? FloatingActionButton.extended(
+              heroTag: null,
               key: const Key('add_supplier_fab'),
               onPressed: _addSupplier,
               icon: const Icon(Icons.add_business_rounded),
@@ -247,7 +248,7 @@ class _SupplierListScreenState extends State<SupplierListScreen> {
   /// A shopkeeper browsing this directory wants to see who they owe money
   /// to without opening each supplier individually — an amber "Payable"
   /// pill when we owe them, a neutral "Settled" pill otherwise. Mirrors
-  /// khata_customer_list_screen.dart's _balanceBadge on the payable side.
+  /// customer_list_screen.dart's _balanceBadge on the payable side.
   Widget _payableBadge(Decimal payable) {
     final isOwed = payable > Decimal.zero;
     return Container(

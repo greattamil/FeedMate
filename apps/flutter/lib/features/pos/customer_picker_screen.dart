@@ -11,7 +11,7 @@ import '../../core/theme/app_typography.dart';
 import 'customer_api.dart';
 
 /// Modernized Customer Picker for FeedMate.
-/// Allows cashiers to search and select a customer for Khata credit billing.
+/// Allows cashiers to search and select a customer for credit billing.
 class CustomerPickerScreen extends StatefulWidget {
   const CustomerPickerScreen({super.key});
 
@@ -71,7 +71,7 @@ class _CustomerPickerScreenState extends State<CustomerPickerScreen> {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: const Text('Select Customer for Khata', style: AppTypography.headline),
+        title: const Text('Select Customer', style: AppTypography.headline),
       ),
       body: Column(
         children: [

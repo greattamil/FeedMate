@@ -25,6 +25,8 @@ type createCustomerRequest struct {
 	LocalName     string `json:"local_name,omitempty"`
 	Phone         string `json:"phone,omitempty"`
 	WhatsAppPhone string `json:"whatsapp_phone,omitempty"`
+	Email         string `json:"email,omitempty"`
+	GSTIN         string `json:"gstin,omitempty"`
 	CustomerType  string `json:"customer_type,omitempty"`
 	CreditLimit   string `json:"credit_limit,omitempty"`
 }
@@ -46,6 +48,12 @@ func customerToJSON(c *customer.Customer) map[string]interface{} {
 	if c.WhatsAppPhone != nil {
 		out["whatsapp_phone"] = *c.WhatsAppPhone
 	}
+	if c.Email != nil {
+		out["email"] = *c.Email
+	}
+	if c.GSTIN != nil {
+		out["gstin"] = *c.GSTIN
+	}
 	return out
 }
 
@@ -64,7 +72,8 @@ func (h *CustomerHandlers) Create(w http.ResponseWriter, r *http.Request) {
 
 	in := customer.CreateInput{
 		CustomerCode: req.CustomerCode, Name: req.Name, LocalName: req.LocalName,
-		Phone: req.Phone, WhatsAppPhone: req.WhatsAppPhone, CustomerType: req.CustomerType,
+		Phone: req.Phone, WhatsAppPhone: req.WhatsAppPhone, Email: req.Email, GSTIN: req.GSTIN,
+		CustomerType: req.CustomerType,
 	}
 	if req.CreditLimit != "" {
 		limit, err := decimal.NewFromString(req.CreditLimit)
@@ -85,6 +94,91 @@ func (h *CustomerHandlers) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	WriteJSON(w, http.StatusCreated, customerToJSON(created))
+}
+
+type updateCustomerRequest struct {
+	Name          string `json:"name"`
+	LocalName     string `json:"local_name,omitempty"`
+	Phone         string `json:"phone,omitempty"`
+	WhatsAppPhone string `json:"whatsapp_phone,omitempty"`
+	Email         string `json:"email,omitempty"`
+	GSTIN         string `json:"gstin,omitempty"`
+	CustomerType  string `json:"customer_type,omitempty"`
+}
+
+// Update revises a customer's editable fields. customer_code is immutable
+// and not accepted here — see customer.Update's doc comment.
+func (h *CustomerHandlers) Update(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	claims, ok := reqctx.Claims(r.Context())
+	if !ok {
+		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid customer id")
+		return
+	}
+	var req updateCustomerRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid request body")
+		return
+	}
+
+	updated, err := h.Customer.Update(r.Context(), claims.TenantID, id, customer.UpdateInput{
+		Name: req.Name, LocalName: req.LocalName, Phone: req.Phone, WhatsAppPhone: req.WhatsAppPhone,
+		Email: req.Email, GSTIN: req.GSTIN, CustomerType: req.CustomerType,
+	})
+	if err != nil {
+		if errors.Is(err, customer.ErrValidation) {
+			WriteError(w, reqID, CodeValidation, err.Error())
+			return
+		}
+		if errors.Is(err, customer.ErrNotFound) {
+			WriteError(w, reqID, CodeNotFound, "customer not found")
+			return
+		}
+		WriteError(w, reqID, CodeInternal, "failed to update customer: "+err.Error())
+		return
+	}
+	WriteJSON(w, http.StatusOK, customerToJSON(updated))
+}
+
+type setCustomerStatusRequest struct {
+	Active bool `json:"active"`
+}
+
+// SetStatus activates or deactivates a customer — never a hard delete, since
+// historical invoice/ledger rows reference it (mirrors
+// SupplierHandlers.SetStatus).
+func (h *CustomerHandlers) SetStatus(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	claims, ok := reqctx.Claims(r.Context())
+	if !ok {
+		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid customer id")
+		return
+	}
+	var req setCustomerStatusRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid request body")
+		return
+	}
+	updated, err := h.Customer.SetActive(r.Context(), claims.TenantID, id, req.Active)
+	if err != nil {
+		if errors.Is(err, customer.ErrNotFound) {
+			WriteError(w, reqID, CodeNotFound, "customer not found")
+			return
+		}
+		WriteError(w, reqID, CodeInternal, "failed to update customer status: "+err.Error())
+		return
+	}
+	WriteJSON(w, http.StatusOK, customerToJSON(updated))
 }
 
 func (h *CustomerHandlers) List(w http.ResponseWriter, r *http.Request) {

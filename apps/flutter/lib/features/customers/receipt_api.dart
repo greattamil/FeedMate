@@ -17,7 +17,7 @@ class RecordReceiptResult {
   }
 }
 
-/// Records a receipt collected in person against a customer's Khata — see
+/// Records a receipt collected in person against a customer's ledger — see
 /// services/api/internal/httpapi/payment_handlers.go's RecordManualReceipt.
 /// UPI collection goes through a different, provider-verified path
 /// (pos_api.dart's quote/finalize flow uses payment intents, not this).

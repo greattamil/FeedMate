@@ -19,7 +19,7 @@ import '../contra/contra_screen.dart';
 import '../docseries/doc_series_screen.dart';
 import '../eod/eod_api.dart';
 import '../eod/eod_screen.dart';
-import '../khata/khata_customer_list_screen.dart';
+import '../customers/customer_list_screen.dart';
 import '../pos/invoice_history_screen.dart';
 import '../procurement/grn_history_screen.dart';
 import '../procurement/grn_screen.dart';
@@ -59,8 +59,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
 
   // Live KPI values
   SalesSummary? _todaySales;
-  Decimal? _totalKhataOutstanding;
-  int _overdueKhataCount = 0;
+  Decimal? _totalCustomerOutstanding;
+  int _overdueCustomerCount = 0;
   int _expiringBatchCount = 0;
   int _lowStockCount = 0;
   int _outOfStockCount = 0;
@@ -96,7 +96,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
         if (mounted) setState(() => _todaySales = summary);
       } catch (_) {}
 
-      // 3. Fetch Khata balances
+      // 3. Fetch customer ledger balances
       try {
         final reportsApi = ReportsApi(client);
         final balances = await reportsApi.customerBalances();
@@ -108,8 +108,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
         }
         if (mounted) {
           setState(() {
-            _totalKhataOutstanding = total;
-            _overdueKhataCount = overdue;
+            _totalCustomerOutstanding = total;
+            _overdueCustomerCount = overdue;
           });
         }
       } catch (_) {}
@@ -424,7 +424,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
 
   Widget _buildKpiMetricsRow() {
     final sales = _todaySales;
-    final khata = _totalKhataOutstanding;
+    final customerOutstanding = _totalCustomerOutstanding;
     final eod = _eodSession;
 
     return LayoutBuilder(
@@ -441,13 +441,13 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
             iconBg: AppColors.primaryContainer,
           ),
           _buildKpiCard(
-            title: "Khata Receivables",
-            value: khata != null ? '₹${khata.toStringAsFixed(2)}' : '—',
-            subtitle: _overdueKhataCount > 0 ? '$_overdueKhataCount over credit limit' : 'All accounts healthy',
+            title: "Customer Receivables",
+            value: customerOutstanding != null ? '₹${customerOutstanding.toStringAsFixed(2)}' : '—',
+            subtitle: _overdueCustomerCount > 0 ? '$_overdueCustomerCount over credit limit' : 'All accounts healthy',
             icon: Icons.account_balance_wallet_rounded,
             iconColor: AppColors.danger,
             iconBg: AppColors.dangerContainer,
-            isAlert: _overdueKhataCount > 0,
+            isAlert: _overdueCustomerCount > 0,
           ),
           _buildKpiCard(
             title: "Cash Session (EOD)",
@@ -546,12 +546,12 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
         onTap: widget.onOpenPos,
       ),
       _ActionItem(
-        title: 'Khata Ledger',
+        title: 'Customer Ledger',
         subtitle: 'Customers & receipts',
         icon: Icons.people_alt_rounded,
         gradient: AppColors.gradientIndigo,
         onTap: () => Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const KhataCustomerListScreen()),
+          MaterialPageRoute(builder: (_) => const CustomerListScreen()),
         ),
       ),
       _ActionItem(

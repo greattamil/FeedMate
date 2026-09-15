@@ -19,6 +19,8 @@ type Customer struct {
 	LocalName     *string
 	Phone         *string
 	WhatsAppPhone *string
+	Email         *string
+	GSTIN         *string
 	CustomerType  string
 	TierID        *uuid.UUID
 	Status        string
@@ -34,7 +36,7 @@ type Customer struct {
 
 func GetByID(ctx context.Context, tx pgx.Tx, id uuid.UUID) (*Customer, error) {
 	row := tx.QueryRow(ctx, `
-		SELECT id, customer_code, name, local_name, phone, whatsapp_phone, customer_type, tier_id, status
+		SELECT id, customer_code, name, local_name, phone, whatsapp_phone, email, gstin, customer_type, tier_id, status
 		FROM customers WHERE id = $1
 	`, id)
 	return scanCustomer(row)
@@ -42,7 +44,7 @@ func GetByID(ctx context.Context, tx pgx.Tx, id uuid.UUID) (*Customer, error) {
 
 func scanCustomer(row pgx.Row) (*Customer, error) {
 	var c Customer
-	if err := row.Scan(&c.ID, &c.CustomerCode, &c.Name, &c.LocalName, &c.Phone, &c.WhatsAppPhone, &c.CustomerType, &c.TierID, &c.Status); err != nil {
+	if err := row.Scan(&c.ID, &c.CustomerCode, &c.Name, &c.LocalName, &c.Phone, &c.WhatsAppPhone, &c.Email, &c.GSTIN, &c.CustomerType, &c.TierID, &c.Status); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -59,10 +61,10 @@ func scanCustomer(row pgx.Row) (*Customer, error) {
 // a substitute for actually configuring one.
 func Create(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, c *Customer, creditLimit *decimal.Decimal) error {
 	row := tx.QueryRow(ctx, `
-		INSERT INTO customers (tenant_id, customer_code, name, local_name, phone, whatsapp_phone, customer_type, tier_id, status)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'ACTIVE')
+		INSERT INTO customers (tenant_id, customer_code, name, local_name, phone, whatsapp_phone, email, gstin, customer_type, tier_id, status)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'ACTIVE')
 		RETURNING id, status
-	`, tenantID, c.CustomerCode, c.Name, c.LocalName, c.Phone, c.WhatsAppPhone, c.CustomerType, c.TierID)
+	`, tenantID, c.CustomerCode, c.Name, c.LocalName, c.Phone, c.WhatsAppPhone, c.Email, c.GSTIN, c.CustomerType, c.TierID)
 	if err := row.Scan(&c.ID, &c.Status); err != nil {
 		return err
 	}
@@ -74,6 +76,45 @@ func Create(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, c *Customer, cre
 		if err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// Update revises a customer's editable master-data fields. customer_code is
+// never touched here — like supplier.Update's supplier_code, it is the
+// immutable business key every historical invoice/ledger row references.
+// Status (active/inactive) is handled separately by SetActive, not here, so
+// an edit can never accidentally reactivate/deactivate a customer as a side
+// effect of saving unrelated field changes.
+func Update(ctx context.Context, tx pgx.Tx, c *Customer) error {
+	tag, err := tx.Exec(ctx, `
+		UPDATE customers
+		SET name = $2, local_name = $3, phone = $4, whatsapp_phone = $5, email = $6, gstin = $7, customer_type = $8, updated_at = now()
+		WHERE id = $1
+	`, c.ID, c.Name, c.LocalName, c.Phone, c.WhatsAppPhone, c.Email, c.GSTIN, c.CustomerType)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetActive activates or deactivates a customer — never a hard delete, since
+// historical invoices/ledger entries reference it (mirrors
+// supplier.SetActive/product.SetActive).
+func SetActive(ctx context.Context, tx pgx.Tx, id uuid.UUID, active bool) error {
+	status := "ACTIVE"
+	if !active {
+		status = "INACTIVE"
+	}
+	tag, err := tx.Exec(ctx, `UPDATE customers SET status = $2, updated_at = now() WHERE id = $1`, id, status)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
 	}
 	return nil
 }
@@ -118,7 +159,7 @@ func GetOrCreateWalkIn(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) (*Cus
 
 func getByCode(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, code string) (*Customer, error) {
 	row := tx.QueryRow(ctx, `
-		SELECT id, customer_code, name, local_name, phone, whatsapp_phone, customer_type, tier_id, status
+		SELECT id, customer_code, name, local_name, phone, whatsapp_phone, email, gstin, customer_type, tier_id, status
 		FROM customers WHERE tenant_id = $1 AND customer_code = $2
 	`, tenantID, code)
 	return scanCustomer(row)

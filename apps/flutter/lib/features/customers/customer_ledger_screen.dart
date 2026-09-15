@@ -7,21 +7,26 @@ import '../../core/api_client.dart';
 import '../../core/api_error.dart';
 import '../../core/auth_session.dart';
 import '../pos/customer_api.dart';
+import 'customer_form_dialog.dart';
 import 'receipt_api.dart';
 
-/// A customer's Khata statement: current credit position plus the itemized
-/// ledger behind it. The balance shown is always what the server just
-/// computed from the ledger (never a locally-summed number) — see PRD 10.1:
-/// the receivable balance is derived, not a separately maintained field.
-class KhataDetailScreen extends StatefulWidget {
+/// A customer's ledger: current credit position plus the itemized history
+/// behind it, and the full CRUD actions for their master record (edit,
+/// deactivate/reactivate) — the mirror image of SupplierDetailScreen: a
+/// debit here increases what the customer owes (e.g. a credit sale), a
+/// credit decreases it (e.g. a receipt). The balance shown is always what
+/// the server just computed from the ledger (never a locally-summed
+/// number) — see PRD 10.1: the receivable balance is derived, not a
+/// separately maintained field.
+class CustomerLedgerScreen extends StatefulWidget {
   final String customerId;
-  const KhataDetailScreen({super.key, required this.customerId});
+  const CustomerLedgerScreen({super.key, required this.customerId});
 
   @override
-  State<KhataDetailScreen> createState() => _KhataDetailScreenState();
+  State<CustomerLedgerScreen> createState() => _CustomerLedgerScreenState();
 }
 
-class _KhataDetailScreenState extends State<KhataDetailScreen> {
+class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
   CustomerDetail? _detail;
   List<LedgerEntry> _entries = [];
   bool _loading = true;
@@ -112,6 +117,74 @@ class _KhataDetailScreenState extends State<KhataDetailScreen> {
     }
   }
 
+  Future<void> _editCustomer() async {
+    final detail = _detail;
+    if (detail == null) return;
+    final result = await showDialog<CustomerFormResult>(
+      context: context,
+      builder: (context) => CustomerFormDialog(existing: detail),
+    );
+    if (result == null) return;
+
+    try {
+      final api = CustomerApi(context.read<ApiClient>());
+      await api.update(
+        customerId: widget.customerId,
+        name: result.name,
+        localName: result.localName,
+        phone: result.phone,
+        email: result.email,
+        gstin: result.gstin,
+        customerType: result.customerType,
+      );
+      if (!mounted) return;
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Customer updated')));
+    } on ApiError catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
+  Future<void> _toggleActive() async {
+    final detail = _detail;
+    if (detail == null) return;
+    final makeActive = !detail.active;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(makeActive ? 'Reactivate Customer?' : 'Deactivate Customer?'),
+        content: Text(makeActive
+            ? '${detail.name} will be available again for new sales and credit.'
+            : '${detail.name} will be hidden from customer pickers. Existing invoices and ledger history are unaffected.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+          FilledButton(
+            key: const Key('customer_toggle_active_confirm'),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(makeActive ? 'Reactivate' : 'Deactivate'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      final api = CustomerApi(context.read<ApiClient>());
+      await api.setActive(widget.customerId, makeActive);
+      if (!mounted) return;
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(makeActive ? 'Customer reactivated' : 'Customer deactivated')),
+      );
+    } on ApiError catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final detail = _detail;
@@ -119,20 +192,34 @@ class _KhataDetailScreenState extends State<KhataDetailScreen> {
     final canManage = session.hasPermission('credit.configure');
     return Scaffold(
       appBar: AppBar(
-        title: Text(detail?.name ?? 'Khata'),
+        title: Text(detail?.name ?? 'Customer'),
         actions: [
-          if (detail != null && canManage)
+          if (detail != null && canManage) ...[
+            IconButton(
+              key: const Key('edit_customer_button'),
+              onPressed: _editCustomer,
+              icon: const Icon(Icons.edit_rounded),
+              tooltip: 'Edit Customer',
+            ),
             IconButton(
               key: const Key('edit_credit_limit_button'),
               onPressed: _editCreditLimit,
               icon: const Icon(Icons.edit_note_rounded),
               tooltip: 'Edit Credit Limit',
             ),
+            IconButton(
+              key: const Key('toggle_customer_active_button'),
+              onPressed: _toggleActive,
+              icon: Icon(detail.active ? Icons.block_rounded : Icons.check_circle_outline_rounded),
+              tooltip: detail.active ? 'Deactivate Customer' : 'Reactivate Customer',
+            ),
+          ],
         ],
       ),
       floatingActionButton: detail == null
           ? null
           : FloatingActionButton.extended(
+              heroTag: null,
               key: const Key('record_receipt_fab'),
               onPressed: _recordReceipt,
               icon: const Icon(Icons.add),
@@ -150,6 +237,10 @@ class _KhataDetailScreenState extends State<KhataDetailScreen> {
                     ),
                   ])
                 : ListView(
+                    // Bottom padding reserves room for the extended
+                    // "Record Receipt" FAB, which otherwise floats over
+                    // the last ledger row and makes it hard to read.
+                    padding: const EdgeInsets.only(bottom: 96),
                     children: [
                       if (detail != null) _buildSummaryCard(detail),
                       const Divider(height: 1),
@@ -191,13 +282,14 @@ class _KhataDetailScreenState extends State<KhataDetailScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Container(
+                  key: const Key('customer_status_badge'),
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.2),
+                    color: Colors.white.withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
-                    '${detail.customerCode} · ${detail.customerType}',
+                    '${detail.customerCode} · ${detail.customerType}${detail.active ? '' : ' · INACTIVE'}',
                     style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
                   ),
                 ),
@@ -216,13 +308,13 @@ class _KhataDetailScreenState extends State<KhataDetailScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 _summaryStat('Outstanding', detail.outstandingBalance,
-                    key: 'khata_outstanding_balance',
+                    key: 'customer_outstanding_balance',
                     color: Colors.white),
                 _summaryStat('Credit Limit', detail.creditLimit,
-                    key: 'khata_credit_limit',
+                    key: 'customer_credit_limit',
                     color: Colors.white70),
                 _summaryStat('Available', detail.availableCredit,
-                    key: 'khata_available_credit',
+                    key: 'customer_available_credit',
                     color: Colors.white70),
               ],
             ),
@@ -232,7 +324,7 @@ class _KhataDetailScreenState extends State<KhataDetailScreen> {
               child: LinearProgressIndicator(
                 value: ratio,
                 minHeight: 6,
-                backgroundColor: Colors.white.withOpacity(0.25),
+                backgroundColor: Colors.white.withValues(alpha: 0.25),
                 valueColor: AlwaysStoppedAnimation<Color>(
                   overLimit ? const Color(0xFFFDE047) : const Color(0xFF6EE7B7),
                 ),
@@ -244,7 +336,7 @@ class _KhataDetailScreenState extends State<KhataDetailScreen> {
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
-                    color: Colors.yellowAccent.withOpacity(0.2),
+                    color: Colors.yellowAccent.withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: const Text(
@@ -284,7 +376,7 @@ class _KhataDetailScreenState extends State<KhataDetailScreen> {
         border: Border.all(color: const Color(0xFFE2E8F0)),
       ),
       child: ListTile(
-        key: Key('khata_ledger_entry_${e.id}'),
+        key: Key('customer_ledger_entry_${e.id}'),
         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
         leading: Container(
           width: 38,

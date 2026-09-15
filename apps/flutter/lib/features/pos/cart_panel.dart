@@ -30,7 +30,7 @@ import 'pos_api.dart';
 /// catalog and there is nothing to pop back from).
 ///
 /// Supports either a single full-amount tender (CASH or CREDIT against a
-/// selected customer's Khata) or a split payment across multiple tender
+/// selected customer's credit account) or a split payment across multiple tender
 /// lines (e.g. part CASH, part UPI, part CREDIT) that must sum to exactly
 /// the invoice grand total — the server enforces the match (see
 /// pos.ErrTenderMismatch) and only counts the CREDIT portion toward the
@@ -637,7 +637,7 @@ class _CartPanelState extends State<CartPanel> {
                           ButtonSegment(
                             value: 'CREDIT',
                             icon: Icon(Icons.account_balance_wallet_rounded, size: 16),
-                            label: Text('Credit (Khata)'),
+                            label: Text('Credit'),
                             enabled: true,
                           ),
                         ],
@@ -758,7 +758,7 @@ class _CartPanelState extends State<CartPanel> {
                         ? Text('${_selectedCustomer!.customerCode} · ${_selectedCustomer!.phone ?? ""}')
                         : Text(
                             _anyCreditTender
-                                ? 'Required for Khata credit billing'
+                                ? 'Required for credit billing'
                                 : 'Optional — billed to Walking Customer if left blank',
                             style: const TextStyle(fontSize: 12),
                           ),
@@ -818,7 +818,7 @@ class _CartPanelState extends State<CartPanel> {
                         : Text(
                             _offline
                                 ? 'Queue Sale (Offline)'
-                                : (_tenderMethod == 'CREDIT' ? 'Charge to Khata' : 'Charge Cash'),
+                                : (_tenderMethod == 'CREDIT' ? 'Charge on Credit' : 'Charge Cash'),
                             style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                           ),
                   ),

@@ -11,17 +11,21 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_decorations.dart';
 import '../../core/theme/app_typography.dart';
 import '../pos/customer_api.dart';
-import 'khata_detail_screen.dart';
+import 'customer_form_dialog.dart';
+import 'customer_ledger_screen.dart';
 
-/// Modernized Customer Directory for Khata Ledger.
-class KhataCustomerListScreen extends StatefulWidget {
-  const KhataCustomerListScreen({super.key});
+/// The customer master-data directory: search, add, and jump into a
+/// customer's ledger (which itself links to edit/deactivate) — the same
+/// structure as ProductListScreen/SupplierListScreen, so CRUD works the
+/// same way everywhere in this app.
+class CustomerListScreen extends StatefulWidget {
+  const CustomerListScreen({super.key});
 
   @override
-  State<KhataCustomerListScreen> createState() => _KhataCustomerListScreenState();
+  State<CustomerListScreen> createState() => _CustomerListScreenState();
 }
 
-class _KhataCustomerListScreenState extends State<KhataCustomerListScreen> {
+class _CustomerListScreenState extends State<CustomerListScreen> {
   final _controller = TextEditingController();
   Timer? _debounce;
   List<CustomerSummary> _results = [];
@@ -69,24 +73,27 @@ class _KhataCustomerListScreenState extends State<KhataCustomerListScreen> {
   }
 
   Future<void> _addCustomer() async {
-    final draft = await showDialog<_CustomerFormResult>(
+    final draft = await showDialog<CustomerFormResult>(
       context: context,
-      builder: (context) => const _CustomerFormDialog(),
+      builder: (context) => const CustomerFormDialog(),
     );
     if (draft == null) return;
 
     try {
       final api = CustomerApi(context.read<ApiClient>());
       await api.create(
-        customerCode: draft.customerCode,
+        customerCode: draft.customerCode!,
         name: draft.name,
+        localName: draft.localName,
         phone: draft.phone,
+        email: draft.email,
+        gstin: draft.gstin,
         customerType: draft.customerType,
         creditLimit: draft.creditLimit,
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${draft.name} added to Khata directory')),
+        SnackBar(content: Text('${draft.name} added to customer directory')),
       );
       await _search(_controller.text);
     } on ApiError catch (e) {
@@ -102,10 +109,11 @@ class _KhataCustomerListScreenState extends State<KhataCustomerListScreen> {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: const Text('Customer Khata Directory', style: AppTypography.headline),
+        title: const Text('Customers', style: AppTypography.headline),
       ),
       floatingActionButton: canManage
           ? FloatingActionButton.extended(
+              heroTag: null,
               key: const Key('add_customer_fab'),
               onPressed: _addCustomer,
               icon: const Icon(Icons.person_add_alt_1_rounded),
@@ -119,10 +127,10 @@ class _KhataCustomerListScreenState extends State<KhataCustomerListScreen> {
             padding: const EdgeInsets.all(16),
             color: AppColors.surface,
             child: TextField(
-              key: const Key('khata_search_field'),
+              key: const Key('customer_search_field'),
               controller: _controller,
               decoration: InputDecoration(
-                labelText: 'Search farmer by name, code, or phone',
+                labelText: 'Search customer by name, code, or phone',
                 prefixIcon: const Icon(Icons.search_rounded, color: AppColors.primary),
                 suffixIcon: _controller.text.isNotEmpty
                     ? IconButton(
@@ -161,7 +169,7 @@ class _KhataCustomerListScreenState extends State<KhataCustomerListScreen> {
                     ),
                   )
                 : ListView.builder(
-                    key: const Key('khata_results_list'),
+                    key: const Key('customer_results_list'),
                     padding: const EdgeInsets.all(12),
                     itemCount: _results.length,
                     itemBuilder: (context, index) {
@@ -175,7 +183,7 @@ class _KhataCustomerListScreenState extends State<KhataCustomerListScreen> {
                           boxShadow: AppDecorations.cardShadow,
                         ),
                         child: ListTile(
-                          key: Key('khata_customer_${c.id}'),
+                          key: Key('customer_row_${c.id}'),
                           contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                           leading: Container(
                             width: 44,
@@ -186,7 +194,7 @@ class _KhataCustomerListScreenState extends State<KhataCustomerListScreen> {
                             ),
                             child: Center(
                               child: Text(
-                                c.name.isNotEmpty ? c.name.substring(0, 1).toUpperCase() : 'K',
+                                c.name.isNotEmpty ? c.name.substring(0, 1).toUpperCase() : 'C',
                                 style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
                               ),
                             ),
@@ -228,7 +236,7 @@ class _KhataCustomerListScreenState extends State<KhataCustomerListScreen> {
                           ),
                           onTap: () {
                             Navigator.of(context).push(
-                              MaterialPageRoute(builder: (_) => KhataDetailScreen(customerId: c.id)),
+                              MaterialPageRoute(builder: (_) => CustomerLedgerScreen(customerId: c.id)),
                             );
                           },
                         ),
@@ -261,135 +269,6 @@ class _KhataCustomerListScreenState extends State<KhataCustomerListScreen> {
           color: isDue ? AppColors.onDangerContainer : AppColors.onSuccessContainer,
         ),
       ),
-    );
-  }
-}
-
-class _CustomerFormResult {
-  final String customerCode;
-  final String name;
-  final String? phone;
-  final String customerType;
-  final Decimal? creditLimit;
-
-  _CustomerFormResult({
-    required this.customerCode,
-    required this.name,
-    this.phone,
-    required this.customerType,
-    this.creditLimit,
-  });
-}
-
-class _CustomerFormDialog extends StatefulWidget {
-  const _CustomerFormDialog();
-
-  @override
-  State<_CustomerFormDialog> createState() => _CustomerFormDialogState();
-}
-
-class _CustomerFormDialogState extends State<_CustomerFormDialog> {
-  final _formKey = GlobalKey<FormState>();
-  final _codeController = TextEditingController();
-  final _nameController = TextEditingController();
-  final _phoneController = TextEditingController();
-  final _creditLimitController = TextEditingController();
-  String _customerType = 'RETAIL';
-
-  @override
-  void dispose() {
-    _codeController.dispose();
-    _nameController.dispose();
-    _phoneController.dispose();
-    _creditLimitController.dispose();
-    super.dispose();
-  }
-
-  void _submit() {
-    if (!_formKey.currentState!.validate()) return;
-    Navigator.of(context).pop(
-      _CustomerFormResult(
-        customerCode: _codeController.text.trim(),
-        name: _nameController.text.trim(),
-        phone: _phoneController.text.trim().isEmpty ? null : _phoneController.text.trim(),
-        customerType: _customerType,
-        creditLimit: _creditLimitController.text.trim().isEmpty
-            ? null
-            : Decimal.parse(_creditLimitController.text.trim()),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Add Customer', style: AppTypography.headline),
-      content: Form(
-        key: _formKey,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextFormField(
-                key: const Key('customer_code_field'),
-                controller: _codeController,
-                decoration: const InputDecoration(labelText: 'Customer Code'),
-                validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                key: const Key('customer_name_field'),
-                controller: _nameController,
-                decoration: const InputDecoration(labelText: 'Name'),
-                validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                key: const Key('customer_phone_field'),
-                controller: _phoneController,
-                decoration: const InputDecoration(labelText: 'Phone (optional)'),
-                keyboardType: TextInputType.phone,
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                key: const Key('customer_type_field'),
-                initialValue: _customerType,
-                decoration: const InputDecoration(labelText: 'Customer Type'),
-                items: const [
-                  DropdownMenuItem(value: 'RETAIL', child: Text('Retail')),
-                  DropdownMenuItem(value: 'WHOLESALE', child: Text('Wholesale')),
-                  DropdownMenuItem(value: 'FARMER', child: Text('Farmer')),
-                ],
-                onChanged: (v) => setState(() => _customerType = v ?? 'RETAIL'),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                key: const Key('customer_credit_limit_field'),
-                controller: _creditLimitController,
-                decoration: const InputDecoration(labelText: 'Initial Credit Limit (optional)'),
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                validator: (v) {
-                  if (v == null || v.trim().isEmpty) return null;
-                  try {
-                    Decimal.parse(v.trim());
-                    return null;
-                  } catch (_) {
-                    return 'Invalid amount';
-                  }
-                },
-              ),
-            ],
-          ),
-        ),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
-        FilledButton(
-          key: const Key('customer_form_submit'),
-          onPressed: _submit,
-          child: const Text('Add'),
-        ),
-      ],
     );
   }
 }

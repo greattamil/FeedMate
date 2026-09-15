@@ -104,7 +104,7 @@ class PosApi {
   /// OTHER) that must sum to exactly the invoice grand total — a single
   /// full-amount CASH or CREDIT tender is just the one-element case. A
   /// CREDIT tender requires a customer (the receivable is posted against
-  /// their Khata ledger — see customer.PostLedgerEntry). If the CREDIT
+  /// their customer ledger — see customer.PostLedgerEntry). If the CREDIT
   /// portion would push the customer over their configured credit limit,
   /// the server rejects it unless the cashier supplies an explicit override
   /// reason and holds the credit.override permission — permission alone is

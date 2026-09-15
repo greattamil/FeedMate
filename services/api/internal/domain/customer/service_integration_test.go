@@ -330,3 +330,124 @@ func TestCustomerListLedger_ReturnsEntriesNewestFirstAndRejectsUnknownCustomer(t
 		t.Fatalf("expected ErrNotFound for a nonexistent customer, got: %v", err)
 	}
 }
+
+// Regression test for a real bug reported live: the Flutter "Add Customer"
+// dialog's default-selected and one alternate customer_type ("RETAIL",
+// "WHOLESALE") did not match the customers_customer_type_check DB
+// constraint (which only allows WALK_IN/FARMER/WHOLESALE_DEALER/
+// AAVIN_SUBCONTRACTOR/OTHER), so every customer creation attempt with the
+// default selection failed with an opaque 500 rather than a clear
+// validation error. Fixed by validating customer_type against the exact
+// same allow-list before ever reaching the database, and by fixing the
+// Flutter dropdown's options to match.
+func TestCustomerCreate_RejectsCustomerTypeNotInDBConstraint(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	tenantID := seedTenant(t, db)
+	svc := customer.NewService(db)
+
+	for _, badType := range []string{"RETAIL", "WHOLESALE", "WALK_IN", "made-up"} {
+		_, err := svc.Create(context.Background(), tenantID, customer.CreateInput{
+			CustomerCode: "BADTYPE-" + badType, Name: "Bad Type Customer", CustomerType: badType,
+		})
+		if !errors.Is(err, customer.ErrValidation) {
+			t.Fatalf("expected ErrValidation for customer_type %q, got: %v", badType, err)
+		}
+	}
+
+	for _, goodType := range []string{"FARMER", "WHOLESALE_DEALER", "AAVIN_SUBCONTRACTOR", "OTHER"} {
+		_, err := svc.Create(context.Background(), tenantID, customer.CreateInput{
+			CustomerCode: "GOODTYPE-" + goodType, Name: "Good Type Customer", CustomerType: goodType,
+		})
+		if err != nil {
+			t.Fatalf("expected customer_type %q to be accepted, got: %v", goodType, err)
+		}
+	}
+}
+
+func TestCustomerUpdate_ChangesEditableFieldsNeverCode(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	tenantID := seedTenant(t, db)
+	svc := customer.NewService(db)
+
+	created, err := svc.Create(context.Background(), tenantID, customer.CreateInput{
+		CustomerCode: "EDIT001", Name: "Original Name", Phone: "9000000000", CustomerType: "FARMER",
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	updated, err := svc.Update(context.Background(), tenantID, created.ID, customer.UpdateInput{
+		Name: "Updated Name", Phone: "9111111111", Email: "updated@example.com", CustomerType: "WHOLESALE_DEALER",
+	})
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if updated.Name != "Updated Name" {
+		t.Fatalf("expected name 'Updated Name', got %q", updated.Name)
+	}
+	if updated.Phone == nil || *updated.Phone != "9111111111" {
+		t.Fatalf("expected phone '9111111111', got %v", updated.Phone)
+	}
+	if updated.Email == nil || *updated.Email != "updated@example.com" {
+		t.Fatalf("expected email to be set, got %v", updated.Email)
+	}
+	if updated.CustomerType != "WHOLESALE_DEALER" {
+		t.Fatalf("expected customer_type 'WHOLESALE_DEALER', got %q", updated.CustomerType)
+	}
+	if updated.CustomerCode != "EDIT001" {
+		t.Fatalf("customer_code must never change on update, got %q", updated.CustomerCode)
+	}
+
+	if _, err := svc.Update(context.Background(), tenantID, uuid.New(), customer.UpdateInput{Name: "X"}); !errors.Is(err, customer.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for a nonexistent customer, got: %v", err)
+	}
+	if _, err := svc.Update(context.Background(), tenantID, created.ID, customer.UpdateInput{Name: ""}); !errors.Is(err, customer.ErrValidation) {
+		t.Fatalf("expected ErrValidation for an empty name, got: %v", err)
+	}
+}
+
+func TestCustomerSetActive_TogglesStatusWithoutHardDelete(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	tenantID := seedTenant(t, db)
+	svc := customer.NewService(db)
+
+	created, err := svc.Create(context.Background(), tenantID, customer.CreateInput{
+		CustomerCode: "TOGGLE001", Name: "Toggle Test", CustomerType: "FARMER",
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	deactivated, err := svc.SetActive(context.Background(), tenantID, created.ID, false)
+	if err != nil {
+		t.Fatalf("deactivate: %v", err)
+	}
+	if deactivated.Status != "INACTIVE" {
+		t.Fatalf("expected status INACTIVE, got %s", deactivated.Status)
+	}
+
+	// Never a hard delete — the row (and its history) must still exist and
+	// be fetchable by id even while inactive.
+	fetched, _, _, err := svc.GetByID(context.Background(), tenantID, created.ID)
+	if err != nil {
+		t.Fatalf("get by id after deactivate: %v", err)
+	}
+	if fetched.Status != "INACTIVE" {
+		t.Fatalf("expected fetched status INACTIVE, got %s", fetched.Status)
+	}
+
+	reactivated, err := svc.SetActive(context.Background(), tenantID, created.ID, true)
+	if err != nil {
+		t.Fatalf("reactivate: %v", err)
+	}
+	if reactivated.Status != "ACTIVE" {
+		t.Fatalf("expected status ACTIVE after reactivation, got %s", reactivated.Status)
+	}
+
+	if _, err := svc.SetActive(context.Background(), tenantID, uuid.New(), false); !errors.Is(err, customer.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for a nonexistent customer, got: %v", err)
+	}
+}

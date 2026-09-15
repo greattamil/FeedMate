@@ -9,7 +9,7 @@ import '../../core/auth_session.dart';
 import 'supplier_api.dart';
 import 'supplier_form_dialog.dart';
 
-/// A supplier's payable statement — the mirror image of KhataDetailScreen:
+/// A supplier's payable statement — the mirror image of CustomerLedgerScreen:
 /// a credit here increases what the shop owes the supplier (e.g. a GRN), a
 /// debit decreases it (e.g. a payment). The balance shown always comes from
 /// a fresh server computation, never a client-side running total.
@@ -184,6 +184,7 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
       floatingActionButton: detail == null
           ? null
           : FloatingActionButton.extended(
+              heroTag: null,
               key: const Key('record_payment_fab'),
               onPressed: _recordPayment,
               icon: const Icon(Icons.add),

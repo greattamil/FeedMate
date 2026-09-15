@@ -16,7 +16,7 @@ import 'catalog_panel.dart';
 /// real point-of-sale terminal — tapping a product adds it to the cart and
 /// the cart panel updates immediately, with no navigation to a separate
 /// cart page required to see it, adjust quantities, or check out.
-/// Back-office actions (Khata, GRN, Reports, staff/admin screens, etc.)
+/// Back-office actions (Customers, GRN, Reports, staff/admin screens, etc.)
 /// intentionally do not live here any more — they're one tap away from the
 /// Home Dashboard's MANAGE grid — so this screen stays focused on the one
 /// thing a cashier is doing at the counter: ringing up a sale.

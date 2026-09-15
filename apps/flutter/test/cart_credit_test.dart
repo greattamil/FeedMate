@@ -76,7 +76,7 @@ void main() {
     await tester.pumpWidget(_wrapCartScreen(httpClient: client, cart: cart));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Credit (Khata)'));
+    await tester.tap(find.text('Credit'));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('customer_picker_tile')), findsOneWidget);
     expect(find.text('Select customer'), findsOneWidget);
@@ -160,7 +160,7 @@ void main() {
     await tester.pumpWidget(_wrapCartScreen(httpClient: client, cart: cart));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Credit (Khata)'));
+    await tester.tap(find.text('Credit'));
     await tester.pumpAndSettle();
 
     await tester.tap(find.byKey(const Key('customer_picker_tile')));

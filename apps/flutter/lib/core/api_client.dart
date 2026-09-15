@@ -8,7 +8,7 @@ import 'secure_storage.dart';
 /// token attachment and refresh-on-401 retry; it does not implement any
 /// business logic or offline queuing — the server is always the authority
 /// (see PRD A28: "the server is authoritative for finalized invoices,
-/// payments, inventory, accounting, Khata, tax, compliance state").
+/// payments, inventory, accounting, customer ledger, tax, compliance state").
 ///
 /// baseUrl defaults to the Android emulator's host-loopback alias
 /// (10.0.2.2), which is how an emulator reaches a server running on the

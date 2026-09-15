@@ -108,6 +108,7 @@ func main() {
 	r := chi.NewRouter()
 	r.Use(appmw.RequestID)
 	r.Use(appmw.Recoverer)
+	r.Use(appmw.CORS)
 
 	r.Get("/health/live", healthHandlers.Live)
 	r.Get("/health/ready", healthHandlers.Ready)
@@ -223,6 +224,8 @@ func main() {
 			r.Get("/customers/{id}", customerHandlers.Get)
 			r.Get("/customers/{id}/ledger", customerHandlers.Ledger)
 			r.With(appmw.RequirePermission("credit.configure")).Post("/customers", customerHandlers.Create)
+			r.With(appmw.RequirePermission("credit.configure")).Put("/customers/{id}", customerHandlers.Update)
+			r.With(appmw.RequirePermission("credit.configure")).Post("/customers/{id}/status", customerHandlers.SetStatus)
 			r.With(appmw.RequirePermission("credit.configure")).Put("/customers/{id}/credit-limit", customerHandlers.SetCreditLimit)
 
 			r.Get("/suppliers", supplierHandlers.List)

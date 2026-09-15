@@ -1,5 +1,5 @@
 // Widget tests for the supplier payable feature — the mirror image of
-// khata_test.dart on the payable side: searching for a supplier, viewing
+// customer_management_test.dart on the payable side: searching for a supplier, viewing
 // their statement (payable summary + itemized ledger), and recording a
 // payment. Uses a mocked HTTP client — end-to-end behavior against the real
 // Go server is verified separately (see docs/IMPLEMENTATION_STATUS.md).

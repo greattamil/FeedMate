@@ -159,6 +159,47 @@ func TestCustomerList_SearchesByNameCodeAndPhone(t *testing.T) {
 	}
 }
 
+// TestCustomerList_ExcludesWalkingCustomer guards the "known customer only
+// for credit" rule from the picker side: the Walking Customer must never
+// appear as a selectable option in the same picker used for Khata credit
+// billing, since selecting it and then choosing CREDIT is exactly the
+// mistake pos.Service.FinalizeInvoice's hard, non-overridable rejection
+// exists to prevent (defense in depth — this test guards the picker's
+// half, the pos package's tests guard the finalize-time half).
+func TestCustomerList_ExcludesWalkingCustomer(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	tenantID := seedTenant(t, db)
+	svc := customer.NewService(db)
+
+	if _, err := svc.Create(context.Background(), tenantID, customer.CreateInput{CustomerCode: "REAL01", Name: "Real Registered Customer"}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	err := db.WithAdminTx(context.Background(), func(tx pgx.Tx) error {
+		_, err := customer.GetOrCreateWalkIn(context.Background(), tx, tenantID)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("create walk-in customer: %v", err)
+	}
+
+	all, err := svc.List(context.Background(), tenantID, "", 10)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(all) != 1 || all[0].CustomerCode != "REAL01" {
+		t.Fatalf("expected only the real registered customer, walk-in must be excluded, got %+v", all)
+	}
+
+	byCode, err := svc.List(context.Background(), tenantID, customer.WalkInCustomerCode, 10)
+	if err != nil {
+		t.Fatalf("list by walk-in code: %v", err)
+	}
+	if len(byCode) != 0 {
+		t.Fatalf("expected the Walking Customer to be unreachable even by an exact code search, got %+v", byCode)
+	}
+}
+
 func TestCustomerSetCreditLimit_RequiresExistingCustomerAndNonNegative(t *testing.T) {
 	db := connectTest(t)
 	defer db.Close()

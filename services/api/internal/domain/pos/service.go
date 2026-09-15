@@ -222,6 +222,7 @@ func (s *Service) FinalizeInvoice(ctx context.Context, tenantID, deviceID, userI
 		}
 
 		var customerName *string
+		var customerCode string
 		if req.CustomerID != nil {
 			c, err := customer.GetByID(ctx, tx, *req.CustomerID)
 			if err != nil {
@@ -231,6 +232,7 @@ func (s *Service) FinalizeInvoice(ctx context.Context, tenantID, deviceID, userI
 				return fmt.Errorf("%w: customer is not active", ErrValidation)
 			}
 			customerName = &c.Name
+			customerCode = c.CustomerCode
 		}
 
 		type preparedLine struct {
@@ -304,6 +306,22 @@ func (s *Service) FinalizeInvoice(ctx context.Context, tenantID, deviceID, userI
 		if creditAmount.GreaterThan(decimal.Zero) {
 			if req.CustomerID == nil {
 				return fmt.Errorf("%w: credit tender requires a customer", ErrValidation)
+			}
+			// Hard rule, never overridable by credit.override: the Walking
+			// Customer is a shared anonymous bucket with no single
+			// accountable person behind it — extending credit to it would
+			// mean every unknown walk-in shares one open-ended balance no
+			// one can ever be asked to repay. Only a real, registered
+			// customer can be billed on credit. This check is intentionally
+			// placed before the credit-limit/override logic below so no
+			// permission or reason can bypass it. Keyed off customer_code,
+			// not customer_type — WALK_IN is also this table's default type
+			// for any ordinary customer nobody categorized, so plenty of
+			// real customers can legitimately share that type (see
+			// customer.List's doc comment); customer_code is the only value
+			// GetOrCreateWalkIn reserves uniquely for this one row.
+			if customerCode == customer.WalkInCustomerCode {
+				return fmt.Errorf("%w: the Walking Customer cannot be used for a credit sale — select a registered customer", ErrValidation)
 			}
 			profile, err := customer.GetCreditProfile(ctx, tx, *req.CustomerID)
 			if err != nil {

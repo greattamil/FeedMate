@@ -329,6 +329,42 @@ func TestFinalizeInvoice_NoCustomerFallsBackToWalkIn(t *testing.T) {
 			t.Fatalf("expected ErrValidation for a credit tender with no customer, got %v", err)
 		}
 	})
+
+	t.Run("a CREDIT tender explicitly against the Walking Customer is rejected, even with an override requested", func(t *testing.T) {
+		// The Walking Customer is a shared anonymous bucket — it must never
+		// carry credit, and unlike an ordinary credit-limit breach, this
+		// rule is not something credit.override can bypass. Resolve the
+		// tenant's walk-in customer id the same way a customerless cash
+		// sale would (a prior subtest in this file already created it).
+		var walkIn uuid.UUID
+		err := db.WithAdminTx(context.Background(), func(tx pgx.Tx) error {
+			c, err := customer.GetOrCreateWalkIn(context.Background(), tx, f.tenantID)
+			if err != nil {
+				return err
+			}
+			walkIn = c.ID
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("resolve walk-in customer: %v", err)
+		}
+
+		req := pos.FinalizeRequest{
+			ClientTransactionID: uuid.New(),
+			LocationID:          f.locationID,
+			CustomerID:          &walkIn,
+			Lines:               []pos.SaleLine{{ProductID: f.productID, Quantity: decimal.RequireFromString("1")}},
+			Tenders:             []pos.Tender{{Method: "CREDIT", Amount: decimal.RequireFromString("1260.00")}},
+			CreditOverride: struct {
+				Requested bool
+				Reason    string
+			}{Requested: true, Reason: "manager approved"},
+		}
+		_, err = svc.FinalizeInvoice(context.Background(), f.tenantID, f.deviceID, f.userID, req)
+		if !errors.Is(err, pos.ErrValidation) {
+			t.Fatalf("expected ErrValidation for a credit sale against the Walking Customer even with override requested, got %v", err)
+		}
+	})
 }
 
 func TestFinalizeInvoice_InsufficientStock(t *testing.T) {

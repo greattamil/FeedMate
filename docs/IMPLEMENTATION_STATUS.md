@@ -1073,6 +1073,26 @@ Full Flutter suite: 109 tests, all passing. Full Go suite
 analyze` and `go build`/`gofmt` clean. Live-verified end to end on the
 Android emulator against the real Go backend and PostgreSQL.
 
+## Phase 48 — Hard Rule: Walking Customer Can Never Get Credit (Backend)
+
+User-flagged gap right after Phase 47 shipped: nothing stopped a cashier
+from explicitly picking "Walking Customer" out of the customer picker and
+then choosing CREDIT — the zero credit limit on that row would normally
+reject it, but `credit.override` could force it through, silently
+extending shared, unattributable credit to an anonymous bucket nobody can
+ever be asked to repay. Two independent layers now close this.
+
+| Area | Status | Evidence |
+|---|---|---|
+| `pos.Service.FinalizeInvoice`: a CREDIT tender against the Walking Customer is now rejected unconditionally — the check runs before the credit-limit/override logic, so no permission or reason can bypass it (unlike an ordinary over-limit sale, which `credit.override` can still push through for a real customer) | **VERIFIED** | New subtest `a CREDIT tender explicitly against the Walking Customer is rejected, even with an override requested`: resolves the tenant's real walk-in customer id, attempts a CREDIT sale against it with `CreditOverride.Requested: true` and a reason, still gets `ErrValidation`. Full backend suite re-run clean |
+| `customer.List` (the query behind both the Khata credit picker and the Khata Ledger customer list) now excludes the Walking Customer entirely, so it can never be explicitly selected in the first place | **VERIFIED** | New `TestCustomerList_ExcludesWalkingCustomer`: a real customer and the walk-in customer coexist in the same tenant; an unfiltered list returns only the real one, and even an exact search for the reserved `WALK-IN` code returns nothing |
+| **Bug caught and fixed before it shipped**: the exclusion is keyed off `customer_code = "WALK-IN"`, not `customer_type = "WALK_IN"` — `WALK_IN` is also this table's *default* `customer_type` for any ordinary customer nobody bothered to categorize (see the column default and `Service.Create`'s own fallback), so an initial type-based filter broke a pre-existing test by hiding real customers that happened to carry the default type. Caught immediately by that pre-existing test failing, not shipped | **VERIFIED** | `TestCustomerList_SearchesByNameCodeAndPhone` (pre-existing, unrelated to this phase) failed the moment the type-based filter was added, confirming the bug before any commit; fixed by switching the discriminator to `customer_code`, which `GetOrCreateWalkIn` alone ever sets to that reserved value, then re-ran clean |
+| Flutter needed no changes — the credit picker (`CustomerPickerScreen`) and the Khata Ledger customer list both already call the same `List`/search endpoint, so the exclusion applies everywhere automatically | **VERIFIED** | Full Flutter suite re-run unchanged, 109/109 passing |
+
+Full Go suite (`-tags=integration` against live PostgreSQL): all passing.
+Full Flutter suite: 109 tests, all passing (no Flutter files touched this
+phase). `go build`/`gofmt` clean.
+
 ## Not Yet Started
 
 Customer/supplier aging (30/60/90-day buckets) and margin reports,

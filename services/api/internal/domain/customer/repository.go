@@ -116,9 +116,21 @@ func getByCode(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, code string) 
 	return scanCustomer(row)
 }
 
-// List returns active customers, optionally filtered by a case-insensitive
-// substring match on name/customer_code/phone (for a customer picker's
-// search box). Ordered by name for a stable, predictable picker list.
+// List returns active, non-walk-in customers, optionally filtered by a
+// case-insensitive substring match on name/customer_code/phone (for a
+// customer picker's search box). Ordered by name for a stable, predictable
+// picker list. The Walking Customer is deliberately excluded here by its
+// reserved customer_code (WalkInCustomerCode) — never by customer_type,
+// since "WALK_IN" is also this table's default customer_type for any
+// ordinary customer nobody bothered to categorize (see the column default
+// and Service.Create's fallback), so plenty of real, named customers can
+// legitimately carry that same type. customer_code is unique per tenant
+// and only ever assigned this reserved value by GetOrCreateWalkIn, so it's
+// the only safe discriminator. The Walking Customer is excluded here
+// because it's an automatic fallback for a sale with nobody picked, never
+// something a cashier should explicitly select, and it can never carry a
+// CREDIT tender (see pos.Service.FinalizeInvoice's walk-in exclusion) —
+// showing it in a credit-customer picker would only invite that mistake.
 func List(ctx context.Context, tx pgx.Tx, query string, limit int) ([]Customer, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 50
@@ -127,10 +139,11 @@ func List(ctx context.Context, tx pgx.Tx, query string, limit int) ([]Customer, 
 		SELECT id, customer_code, name, local_name, phone, whatsapp_phone, customer_type, tier_id, status
 		FROM customers
 		WHERE status = 'ACTIVE'
+		  AND customer_code != $3
 		  AND ($1 = '' OR name ILIKE '%' || $1 || '%' OR customer_code ILIKE '%' || $1 || '%' OR phone ILIKE '%' || $1 || '%')
 		ORDER BY name
 		LIMIT $2
-	`, query, limit)
+	`, query, limit, WalkInCustomerCode)
 	if err != nil {
 		return nil, err
 	}

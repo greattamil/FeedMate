@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 
 	"github.com/andipatti/feedmate/services/api/internal/domain/reports"
 	"github.com/andipatti/feedmate/services/api/internal/reqctx"
@@ -46,19 +47,26 @@ func (h *ReportsHandlers) SalesSummary(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, reqID, CodeInternal, "failed to compute sales summary: "+err.Error())
 		return
 	}
+	WriteJSON(w, http.StatusOK, salesSummaryJSON(summary))
+}
 
+// salesSummaryJSON is the shared wire shape for a SalesSummary, used by both
+// the standalone /reports/sales-summary endpoint and the bundled dashboard
+// overview below, so the two never drift into representing the same numbers
+// differently.
+func salesSummaryJSON(summary *reports.SalesSummary) map[string]interface{} {
 	byTender := make([]map[string]string, 0, len(summary.ByTender))
 	for _, t := range summary.ByTender {
 		byTender = append(byTender, map[string]string{"method": t.Method, "total": t.Total.StringFixed(2)})
 	}
-	WriteJSON(w, http.StatusOK, map[string]interface{}{
+	return map[string]interface{}{
 		"invoice_count":  summary.InvoiceCount,
 		"gross_sales":    summary.GrossSales.StringFixed(2),
 		"discount_total": summary.DiscountTotal.StringFixed(2),
 		"tax_total":      summary.TaxTotal.StringFixed(2),
 		"net_sales":      summary.NetSales.StringFixed(2),
 		"by_tender":      byTender,
-	})
+	}
 }
 
 func (h *ReportsHandlers) StockOnHand(w http.ResponseWriter, r *http.Request) {
@@ -87,11 +95,11 @@ func (h *ReportsHandlers) StockOnHand(w http.ResponseWriter, r *http.Request) {
 	out := make([]map[string]interface{}, 0, len(lines))
 	for _, l := range lines {
 		item := map[string]interface{}{
-			"product_id":             l.ProductID.String(),
-			"sku":                    l.SKU,
-			"name":                   l.ProductName,
-			"total_available":        l.TotalAvailable.StringFixed(3),
-			"batch_count":            l.BatchCount,
+			"product_id":              l.ProductID.String(),
+			"sku":                     l.SKU,
+			"name":                    l.ProductName,
+			"total_available":         l.TotalAvailable.StringFixed(3),
+			"batch_count":             l.BatchCount,
 			"expiring_within_30_days": l.ExpiringWithin30Days,
 		}
 		if l.NearestExpiry != nil {
@@ -162,8 +170,8 @@ func (h *ReportsHandlers) StockSummary(w http.ResponseWriter, r *http.Request) {
 		out = append(out, item)
 	}
 	WriteJSON(w, http.StatusOK, map[string]interface{}{
-		"products":          out,
-		"low_stock_count":   lowStockCount,
+		"products":           out,
+		"low_stock_count":    lowStockCount,
 		"out_of_stock_count": outOfStockCount,
 	})
 }
@@ -235,4 +243,119 @@ func (h *ReportsHandlers) EODHistory(w http.ResponseWriter, r *http.Request) {
 		out = append(out, item)
 	}
 	WriteJSON(w, http.StatusOK, map[string]interface{}{"sessions": out})
+}
+
+// DashboardOverview serves the detailed analytics dashboard's one, big
+// bundled read — see reports.Service.DashboardOverview's doc comment.
+// Every number here is traceable to the exact same source rows the
+// standalone /reports/* endpoints read; this is not a second,
+// independently-maintained aggregate.
+func (h *ReportsHandlers) DashboardOverview(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	claims, ok := reqctx.Claims(r.Context())
+	if !ok {
+		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		return
+	}
+
+	overview, err := h.Reports.DashboardOverview(r.Context(), claims.TenantID)
+	if err != nil {
+		WriteError(w, reqID, CodeInternal, "failed to compute dashboard overview: "+err.Error())
+		return
+	}
+
+	trend := make([]map[string]interface{}, 0, len(overview.SalesTrend))
+	for _, d := range overview.SalesTrend {
+		trend = append(trend, map[string]interface{}{
+			"date":          d.Date.Format("2006-01-02"),
+			"invoice_count": d.InvoiceCount,
+			"net_sales":     d.NetSales.StringFixed(2),
+		})
+	}
+
+	topProducts := make([]map[string]interface{}, 0, len(overview.TopProducts))
+	for _, p := range overview.TopProducts {
+		topProducts = append(topProducts, map[string]interface{}{
+			"product_id": p.ProductID.String(),
+			"sku":        p.SKU,
+			"name":       p.ProductName,
+			"qty_sold":   p.QtySold.StringFixed(3),
+			"revenue":    p.Revenue.StringFixed(2),
+		})
+	}
+
+	// Top 5 only for the dashboard's compact lists — Receivables/Payables
+	// carry the full sorted set for any caller that wants more, but a
+	// "detailed" dashboard still means curated, not a dump of every row.
+	topN := func(n int, total int) int {
+		if total < n {
+			return total
+		}
+		return n
+	}
+	receivables := make([]map[string]interface{}, 0, topN(5, len(overview.Receivables)))
+	for _, c := range overview.Receivables[:topN(5, len(overview.Receivables))] {
+		receivables = append(receivables, map[string]interface{}{
+			"customer_id":  c.CustomerID.String(),
+			"name":         c.Name,
+			"balance":      c.Balance.StringFixed(2),
+			"credit_limit": c.CreditLimit.StringFixed(2),
+		})
+	}
+	payables := make([]map[string]interface{}, 0, topN(5, len(overview.Payables)))
+	for _, s := range overview.Payables[:topN(5, len(overview.Payables))] {
+		payables = append(payables, map[string]interface{}{
+			"supplier_id": s.SupplierID.String(),
+			"name":        s.Name,
+			"payable":     s.Payable.StringFixed(2),
+		})
+	}
+
+	totalReceivables := decimalSum(overview.Receivables, func(c reports.CustomerBalance) decimal.Decimal { return c.Balance })
+	totalPayables := decimalSum(overview.Payables, func(s reports.SupplierBalance) decimal.Decimal { return s.Payable })
+
+	recentInvoices := make([]map[string]interface{}, 0, len(overview.RecentInvoices))
+	for _, inv := range overview.RecentInvoices {
+		item := map[string]interface{}{
+			"invoice_number": inv.InvoiceNumber,
+			"grand_total":    inv.GrandTotal.StringFixed(2),
+			"payment_status": inv.PaymentStatus,
+		}
+		if inv.CustomerName != nil {
+			item["customer_name"] = *inv.CustomerName
+		}
+		if inv.FinalizedAt != nil {
+			item["finalized_at"] = inv.FinalizedAt.Format(time.RFC3339)
+		}
+		recentInvoices = append(recentInvoices, item)
+	}
+
+	health := overview.StockHealth
+	WriteJSON(w, http.StatusOK, map[string]interface{}{
+		"today":        salesSummaryJSON(overview.Today),
+		"yesterday":    salesSummaryJSON(overview.Yesterday),
+		"last_30_days": salesSummaryJSON(overview.Last30Days),
+		"sales_trend":  trend,
+		"top_products": topProducts,
+		"stock_health": map[string]interface{}{
+			"total_products":    health.TotalProducts,
+			"in_stock":          health.InStock,
+			"low_stock":         health.LowStock,
+			"out_of_stock":      health.OutOfStock,
+			"total_stock_value": health.TotalStockValue.StringFixed(2),
+		},
+		"receivables":       receivables,
+		"total_receivables": totalReceivables.StringFixed(2),
+		"payables":          payables,
+		"total_payables":    totalPayables.StringFixed(2),
+		"recent_invoices":   recentInvoices,
+	})
+}
+
+func decimalSum[T any](items []T, get func(T) decimal.Decimal) decimal.Decimal {
+	total := decimal.Zero
+	for _, item := range items {
+		total = total.Add(get(item))
+	}
+	return total
 }

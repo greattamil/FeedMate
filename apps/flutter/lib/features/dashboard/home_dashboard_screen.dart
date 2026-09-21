@@ -15,6 +15,7 @@ import '../auditlog/audit_log_screen.dart';
 import '../auth/generate_pairing_code_screen.dart';
 import '../auth/login_screen.dart';
 import '../auth/device_management_screen.dart';
+import 'analytics_dashboard_screen.dart';
 import '../contra/contra_screen.dart';
 import '../docseries/doc_series_screen.dart';
 import '../eod/eod_api.dart';
@@ -604,6 +605,16 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
           onTap: widget.onOpenReports ?? () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const ReportsScreen()),
               ),
+        ),
+      if (session.hasPermission('report.view'))
+        _ActionItem(
+          title: 'Business Insights',
+          subtitle: 'Trends, top sellers & more',
+          icon: Icons.insights_rounded,
+          gradient: AppColors.gradientSunset,
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const AnalyticsDashboardScreen()),
+          ),
         ),
       _ActionItem(
         title: 'Offline Outbox',

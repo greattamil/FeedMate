@@ -425,3 +425,134 @@ func TestEODHistory_ReflectsClosedSession(t *testing.T) {
 		t.Fatalf("expected opening cash 500.00, got %s", history[0].OpeningCash)
 	}
 }
+
+// The analytics dashboard the user asked for directly: one bundled call
+// covering sales trend, best sellers, stock health, receivables/payables,
+// and recent activity. This test finalizes a real credit sale and seeds a
+// real supplier payable, then checks every section of the bundle actually
+// reflects them — not just that the endpoint returns 200.
+func TestDashboardOverview_ReflectsRealActivityAcrossEverySection(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	f := seedFixture(t, db)
+	posSvc := pos.NewService(db)
+	reportsSvc := reports.NewService(db)
+
+	// A credit sale today: 3 bags at 1200 = 3600 + 5% GST = 3780, all on
+	// credit against the fixture customer — this should show up in Today's
+	// sales summary, the sales trend's last day, TopProducts, and
+	// Receivables all at once.
+	result, err := posSvc.FinalizeInvoice(context.Background(), f.tenantID, f.deviceID, f.userID, pos.FinalizeRequest{
+		ClientTransactionID: uuid.New(), LocationID: f.locationID, CustomerID: &f.customerID,
+		Lines:   []pos.SaleLine{{ProductID: f.productID, Quantity: decimal.RequireFromString("3")}},
+		Tenders: []pos.Tender{{Method: "CREDIT", Amount: decimal.RequireFromString("3780.00")}},
+	})
+	if err != nil {
+		t.Fatalf("finalize credit sale: %v", err)
+	}
+
+	// A real supplier with a real payable, seeded directly (no procurement
+	// package dependency needed just to prove the dashboard reads it).
+	supplierID := uuid.New()
+	if err := db.WithAdminTx(context.Background(), func(tx pgx.Tx) error {
+		ctx := context.Background()
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO suppliers (id, tenant_id, supplier_code, legal_name, status)
+			VALUES ($1,$2,'SUP1','Dashboard Test Mill','ACTIVE')
+		`, supplierID, f.tenantID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `
+			INSERT INTO supplier_ledger_entries (tenant_id, supplier_id, document_type, document_id, credit, description)
+			VALUES ($1,$2,'GRN',$3,'25000.00','Dashboard test GRN')
+		`, f.tenantID, supplierID, uuid.New())
+		return err
+	}); err != nil {
+		t.Fatalf("seed supplier payable: %v", err)
+	}
+
+	overview, err := reportsSvc.DashboardOverview(context.Background(), f.tenantID)
+	if err != nil {
+		t.Fatalf("dashboard overview: %v", err)
+	}
+
+	// --- Today / sales trend ---
+	if overview.Today.InvoiceCount != 1 {
+		t.Fatalf("expected 1 invoice today, got %d", overview.Today.InvoiceCount)
+	}
+	if !overview.Today.NetSales.Equal(decimal.RequireFromString("3780.00")) {
+		t.Fatalf("expected today's net sales 3780.00, got %s", overview.Today.NetSales)
+	}
+	if len(overview.SalesTrend) != 14 {
+		t.Fatalf("expected exactly 14 days of trend data, got %d", len(overview.SalesTrend))
+	}
+	lastDay := overview.SalesTrend[len(overview.SalesTrend)-1]
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	if !lastDay.Date.Equal(today) {
+		t.Fatalf("expected the trend's last entry to be today (%s), got %s", today, lastDay.Date)
+	}
+	if !lastDay.NetSales.Equal(decimal.RequireFromString("3780.00")) {
+		t.Fatalf("expected today's trend entry to carry the 3780.00 sale, got %s", lastDay.NetSales)
+	}
+
+	// --- Top products ---
+	foundProduct := false
+	for _, p := range overview.TopProducts {
+		if p.ProductID == f.productID {
+			foundProduct = true
+			if !p.Revenue.Equal(decimal.RequireFromString("3780.00")) {
+				t.Fatalf("expected top-product revenue 3780.00, got %s", p.Revenue)
+			}
+			if !p.QtySold.Equal(decimal.RequireFromString("3")) {
+				t.Fatalf("expected top-product qty 3, got %s", p.QtySold)
+			}
+		}
+	}
+	if !foundProduct {
+		t.Fatalf("expected the fixture product in TopProducts, got %+v", overview.TopProducts)
+	}
+
+	// --- Stock health: fixture product started at 50, sold 3, so 47 remain ---
+	if overview.StockHealth.TotalProducts < 1 {
+		t.Fatal("expected at least the fixture product counted in stock health")
+	}
+
+	// --- Receivables ---
+	foundCustomer := false
+	for _, c := range overview.Receivables {
+		if c.CustomerID == f.customerID {
+			foundCustomer = true
+			if !c.Balance.Equal(decimal.RequireFromString("3780.00")) {
+				t.Fatalf("expected customer balance 3780.00, got %s", c.Balance)
+			}
+		}
+	}
+	if !foundCustomer {
+		t.Fatalf("expected the fixture customer in Receivables, got %+v", overview.Receivables)
+	}
+
+	// --- Payables ---
+	foundSupplier := false
+	for _, s := range overview.Payables {
+		if s.SupplierID == supplierID {
+			foundSupplier = true
+			if !s.Payable.Equal(decimal.RequireFromString("25000.00")) {
+				t.Fatalf("expected supplier payable 25000.00, got %s", s.Payable)
+			}
+		}
+	}
+	if !foundSupplier {
+		t.Fatalf("expected the seeded supplier in Payables, got %+v", overview.Payables)
+	}
+
+	// --- Recent invoices ---
+	foundInvoice := false
+	for _, inv := range overview.RecentInvoices {
+		if inv.InvoiceNumber != "" && result != nil && inv.GrandTotal.Equal(decimal.RequireFromString("3780.00")) {
+			foundInvoice = true
+		}
+	}
+	if !foundInvoice {
+		t.Fatalf("expected the just-finalized invoice in RecentInvoices, got %+v", overview.RecentInvoices)
+	}
+}

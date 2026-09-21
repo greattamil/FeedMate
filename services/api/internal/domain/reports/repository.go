@@ -73,12 +73,12 @@ func GetSalesSummary(ctx context.Context, tx pgx.Tx, dateFrom, dateTo time.Time)
 }
 
 type StockOnHandLine struct {
-	ProductID       uuid.UUID
-	SKU             string
-	ProductName     string
-	TotalAvailable  decimal.Decimal
-	BatchCount      int64
-	NearestExpiry   *time.Time
+	ProductID            uuid.UUID
+	SKU                  string
+	ProductName          string
+	TotalAvailable       decimal.Decimal
+	BatchCount           int64
+	NearestExpiry        *time.Time
 	ExpiringWithin30Days bool
 }
 
@@ -190,9 +190,9 @@ func GetStockSummary(ctx context.Context, tx pgx.Tx, locationID *uuid.UUID) ([]S
 }
 
 type CustomerBalance struct {
-	CustomerID uuid.UUID
-	Name       string
-	Balance    decimal.Decimal
+	CustomerID  uuid.UUID
+	Name        string
+	Balance     decimal.Decimal
 	CreditLimit decimal.Decimal
 }
 
@@ -267,6 +267,226 @@ func GetEODHistory(ctx context.Context, tx pgx.Tx, dateFrom, dateTo time.Time) (
 			return nil, err
 		}
 		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// DailySales is one day's totals for the dashboard's sales trend chart.
+type DailySales struct {
+	Date         time.Time
+	InvoiceCount int64
+	NetSales     decimal.Decimal
+}
+
+// GetSalesTrend returns exactly [days] consecutive days ending today
+// (inclusive), oldest first — every day present even with zero sales, via
+// generate_series LEFT JOINed to the real invoice totals, so a trend chart
+// never has to guess whether a missing day means "no data yet" or "no
+// sales that day" (they're the same thing here: zero). Sourced from the
+// same sales_invoices GetSalesSummary reads, never a separate rollup.
+func GetSalesTrend(ctx context.Context, tx pgx.Tx, days int) ([]DailySales, error) {
+	if days <= 0 || days > 90 {
+		days = 14
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT d.day::date,
+		       COALESCE(COUNT(si.id), 0),
+		       COALESCE(SUM(si.grand_total), 0)
+		FROM generate_series(CURRENT_DATE - ($1::int - 1), CURRENT_DATE, interval '1 day') AS d(day)
+		LEFT JOIN sales_invoices si
+		       ON si.invoice_date::date = d.day AND si.status = 'FINALIZED'
+		GROUP BY d.day
+		ORDER BY d.day
+	`, days)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []DailySales
+	for rows.Next() {
+		var d DailySales
+		if err := rows.Scan(&d.Date, &d.InvoiceCount, &d.NetSales); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// TopProduct is one product's contribution to revenue in a trailing window,
+// for the dashboard's best-sellers list.
+type TopProduct struct {
+	ProductID   uuid.UUID
+	SKU         string
+	ProductName string
+	QtySold     decimal.Decimal
+	Revenue     decimal.Decimal
+}
+
+// GetTopProducts ranks products by revenue over the trailing [days] days,
+// summed directly from sales_invoice_lines (its product_name_snapshot/
+// sku_snapshot are used rather than joining products, since a sale's
+// history should read back exactly what was actually sold even if the
+// product was later renamed — the same snapshot convention invoices
+// already use everywhere else).
+func GetTopProducts(ctx context.Context, tx pgx.Tx, days, limit int) ([]TopProduct, error) {
+	if days <= 0 || days > 365 {
+		days = 30
+	}
+	if limit <= 0 || limit > 50 {
+		limit = 8
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT sil.product_id, sil.sku_snapshot, sil.product_name_snapshot,
+		       SUM(sil.quantity), SUM(sil.line_total)
+		FROM sales_invoice_lines sil
+		JOIN sales_invoices si ON si.id = sil.invoice_id
+		WHERE si.status = 'FINALIZED'
+		  AND si.invoice_date >= CURRENT_DATE - ($1::int - 1)
+		GROUP BY sil.product_id, sil.sku_snapshot, sil.product_name_snapshot
+		ORDER BY SUM(sil.line_total) DESC
+		LIMIT $2
+	`, days, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []TopProduct
+	for rows.Next() {
+		var p TopProduct
+		if err := rows.Scan(&p.ProductID, &p.SKU, &p.ProductName, &p.QtySold, &p.Revenue); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// StockHealth is the tenant-wide stock snapshot for the dashboard: how many
+// products are fine vs. need attention, and what the whole catalog's
+// on-hand quantity is worth at selling price. Purpose-built for this one
+// summary rather than reusing GetStockSummary's per-line result, so that
+// function's existing contract/tests are never disturbed by a dashboard
+// concern (total stock value) that has nothing to do with the per-product
+// Stock Management screen it serves.
+type StockHealth struct {
+	TotalProducts   int64
+	InStock         int64
+	LowStock        int64
+	OutOfStock      int64
+	TotalStockValue decimal.Decimal
+}
+
+func GetStockHealth(ctx context.Context, tx pgx.Tx) (*StockHealth, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT p.reorder_level, p.selling_price, COALESCE(SUM(b.available_qty), 0) AS on_hand
+		FROM products p
+		LEFT JOIN batches b ON b.product_id = p.id AND b.status = 'ACTIVE'
+		WHERE p.active
+		GROUP BY p.id, p.reorder_level, p.selling_price
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var health StockHealth
+	for rows.Next() {
+		var reorderLevel, sellingPrice *decimal.Decimal
+		var onHand decimal.Decimal
+		if err := rows.Scan(&reorderLevel, &sellingPrice, &onHand); err != nil {
+			return nil, err
+		}
+		health.TotalProducts++
+		switch {
+		case onHand.LessThanOrEqual(decimal.Zero):
+			health.OutOfStock++
+		case reorderLevel != nil && onHand.LessThanOrEqual(*reorderLevel):
+			health.LowStock++
+		default:
+			health.InStock++
+		}
+		if sellingPrice != nil {
+			health.TotalStockValue = health.TotalStockValue.Add(onHand.Mul(*sellingPrice))
+		}
+	}
+	return &health, rows.Err()
+}
+
+// SupplierBalance mirrors CustomerBalance on the payable side, for the
+// dashboard's top-creditors list.
+type SupplierBalance struct {
+	SupplierID uuid.UUID
+	Name       string
+	Payable    decimal.Decimal
+}
+
+// GetSupplierPayables derives every supplier's outstanding payable from
+// supplier_ledger_entries (SUM(credit)-SUM(debit) — the opposite convention
+// from a customer ledger, since a GRN credits what the shop owes) and
+// returns only suppliers with a non-zero payable, highest first.
+func GetSupplierPayables(ctx context.Context, tx pgx.Tx) ([]SupplierBalance, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT s.id, s.legal_name, bal.payable
+		FROM suppliers s
+		JOIN (
+			SELECT supplier_id, SUM(credit) - SUM(debit) AS payable
+			FROM supplier_ledger_entries
+			GROUP BY supplier_id
+		) bal ON bal.supplier_id = s.id
+		WHERE bal.payable <> 0
+		ORDER BY bal.payable DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []SupplierBalance
+	for rows.Next() {
+		var b SupplierBalance
+		if err := rows.Scan(&b.SupplierID, &b.Name, &b.Payable); err != nil {
+			return nil, err
+		}
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
+// RecentInvoice is one finalized sale for the dashboard's activity feed.
+type RecentInvoice struct {
+	InvoiceNumber string
+	CustomerName  *string
+	GrandTotal    decimal.Decimal
+	PaymentStatus string
+	FinalizedAt   *time.Time
+}
+
+func GetRecentInvoices(ctx context.Context, tx pgx.Tx, limit int) ([]RecentInvoice, error) {
+	if limit <= 0 || limit > 50 {
+		limit = 8
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT invoice_number, customer_name_snapshot, grand_total, payment_status, finalized_at
+		FROM sales_invoices
+		WHERE status = 'FINALIZED'
+		ORDER BY finalized_at DESC NULLS LAST
+		LIMIT $1
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []RecentInvoice
+	for rows.Next() {
+		var r RecentInvoice
+		if err := rows.Scan(&r.InvoiceNumber, &r.CustomerName, &r.GrandTotal, &r.PaymentStatus, &r.FinalizedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
 	}
 	return out, rows.Err()
 }

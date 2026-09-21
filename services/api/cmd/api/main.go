@@ -198,6 +198,7 @@ func main() {
 			r.Get("/reports/stock-summary", reportsHandlers.StockSummary)
 			r.With(appmw.RequirePermission("report.view")).Get("/reports/customer-balances", reportsHandlers.CustomerBalances)
 			r.With(appmw.RequirePermission("report.view")).Get("/reports/eod-history", reportsHandlers.EODHistory)
+			r.With(appmw.RequirePermission("report.view")).Get("/reports/dashboard", reportsHandlers.DashboardOverview)
 
 			r.With(appmw.RequirePermission("tenant.admin")).Get("/audit-logs", auditLogHandlers.List)
 

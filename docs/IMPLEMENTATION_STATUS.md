@@ -1221,6 +1221,64 @@ the new screen (the API accepts an optional `location_id` filter already;
 the UI shows the tenant-wide total, matching how the rest of the app
 currently treats single-location shops as the common case).
 
+## Phase 54 — Block Zero-Stock Cart Adds + Per-Product Stock Alert Control (Backend + Flutter)
+
+The user reported that adding an out-of-stock product to the cart only
+failed at checkout, not immediately, and that the dashboard's low/
+out-of-stock alerting had no way to exclude a specific product a shop
+owner didn't care to be nagged about (e.g. a slow-moving or seasonal
+item permanently near zero stock).
+
+| Area | Change |
+|---|---|
+| Flutter: POS Catalog panel | `onTap` now blocks adding a zero-stock product immediately, with a clear error SnackBar, instead of deferring to `FinalizeInvoice`'s server-side check at payment time; the "+Add" pill shows "Unavailable" with a block icon for out-of-stock tiles |
+| Backend: schema | New column `products.stock_alert_enabled boolean NOT NULL DEFAULT true` (migration 0019) — a per-product "central control" so a shop owner can exclude one product's stock level from dashboard/report alerting without hiding its real quantity anywhere else |
+| Backend: `product` domain | `Product.StockAlertEnabled` wired through `Create`/`Update`/`GetByID`/`GetByBarcode`/`List`; the HTTP request field is `*bool` (not plain `bool`) specifically so an older client that omits the field can't silently flip it to `false` — nil means "leave the column's own default" |
+| Backend: `reports.GetStockSummary` | Now also selects/returns `alerts_enabled` per line, so the Stock Management screen and any alert-aggregation logic can see and act on the flag without a second query |
+| Flutter: Product Form | New "Low/out-of-stock alerts" switch |
+| Flutter: Stock Management screen | Per-row alert toggle switch — the primary place a shop owner is expected to use this control, since it's already listing every product |
+| Flutter: catalog regression test | New `catalog_panel_test.dart` case, deliberately proven to catch the original bug by temporarily reverting the fix and confirming the test failed before restoring it |
+
+| Area | Status | Evidence |
+|---|---|---|
+| `*bool` nil-safety for `stock_alert_enabled` | **VERIFIED** | New `TestProductStockAlertEnabled_RoundTripsThroughCreateUpdateAndReads` — confirms a request omitting the field keeps the column's `true` default, and an explicit `false` is honored and persists across reads |
+| `GetStockSummary` alerts-disabled behavior | **VERIFIED** | New `TestStockSummary_AlertsDisabledStaysFactualButExcludable` — a product with alerts disabled still reports its real on-hand qty and status, only the `alerts_enabled` flag differs |
+| Backend build/vet/tests | **VERIFIED** | `go build ./...`, `go vet ./...`, full integration suite green |
+| Flutter cart-block regression test validity | **VERIFIED** | Test confirmed to genuinely catch the bug: temporarily reverted the `onTap` guard, watched the new test fail with the expected assertion, then restored the fix |
+| End-to-end live verification on the Android emulator | **VERIFIED, live** | Via `uiautomator` dumps (not coordinate-guessing): tapping the known zero-stock "CRUD Test Product Renamed" tile from Counter refused the add with an error SnackBar; the Product Form's "Low/out-of-stock alerts" switch is present and togglable; Stock Management's per-row toggle is present and, when switched off, the product is excluded from the dashboard's low/out-of-stock attention count |
+
+## Phase 55 — Advanced Analytics Dashboard (Backend + Flutter)
+
+The user asked for "the most advanced, powerful, detailed, colorful"
+dashboard — a dedicated page distinct from the existing quick-tile home
+screen and the existing tabular Reports screen — that "never misses
+anything" important about the business at a glance.
+
+| Area | Change |
+|---|---|
+| Backend: new queries (`reports` domain) | `GetSalesTrend` (14-day daily net sales via `generate_series`, so days with zero sales still appear rather than creating a gap a chart would have to guess about), `GetTopProducts` (best sellers by revenue over a trailing window, from invoice-line snapshots — never from the live product table, so a later rename/price-change never rewrites history), `GetStockHealth` (tenant-wide in-stock/low-stock/out-of-stock counts plus total stock value at selling price — deliberately a *new* query rather than reusing the already-well-tested `GetStockSummary`, to avoid touching it for an unrelated dashboard-only aggregate), `GetSupplierPayables` (mirrors the existing `GetCustomerBalances`), `GetRecentInvoices` |
+| Backend: `Service.DashboardOverview` | Bundles today/yesterday/last-30-days sales summaries, the 14-day trend, top 8 products, stock health, full receivables/payables lists (with totals), and the 8 most recent invoices into one `WithTenantReadTx` call — one HTTP round trip instead of seven |
+| Backend: endpoint | `GET /api/v1/reports/dashboard`, gated on `report.view` like the rest of `/reports/*` |
+| Flutter: `dashboard_overview_api.dart` | Typed models for the full response shape, plus a `netSalesGrowthPct` getter that returns `null` (not a fabricated number) when yesterday had zero net sales, since a percentage change from zero is undefined |
+| Flutter: `AnalyticsDashboardScreen` | A new dedicated screen using `fl_chart` (newly added dependency) and the existing `AppColors` gradient palette: a colorful gradient KPI row (today's net sales with a day-over-day growth pill, today's invoices, total receivables, total payables, stock value), a 14-day sales trend line chart, a payment-mix donut, a stock-health donut, a best-sellers list with revenue bars, top-5 debtor and creditor lists, and a recent-activity feed |
+| Flutter: navigation | New "Business Insights" tile added to the Home dashboard's Quick Operations grid (alongside, not replacing, the existing "Analytics & Reports" tile), gated on `report.view` |
+
+| Area | Status | Evidence |
+|---|---|---|
+| `DashboardOverview` reflects real activity across every section | **VERIFIED** | New `TestDashboardOverview_ReflectsRealActivityAcrossEverySection` — finalizes a real credit sale and seeds a real supplier payable, then asserts every section of the bundled response reflects them correctly |
+| Backend build/vet/tests | **VERIFIED** | `go build ./...`, `go vet ./...`, full integration suite green |
+| Flutter models/screen | **VERIFIED** | `flutter analyze` clean on all new files; new `analytics_dashboard_test.dart` (3 tests: full-data rendering across every section, all-empty-state rendering, load-failure retry) all passing against a mocked HTTP response, not a live server |
+| Full Flutter suite regression | **VERIFIED** | 136 tests, all passing, including the pre-existing `home_dashboard_manage_test.dart` (confirms the new Quick Operations tile doesn't affect the separately-tested Manage grid) |
+| End-to-end live verification on the Android emulator against the rebuilt backend | **VERIFIED, live** | Navigated Home → Business Insights on a real device session; every section rendered real, non-zero data pulled from the live database: KPI cards (₹0 today's sales, ₹103,260 receivables, ₹291,825 payables, ₹397,250 stock value), a 14-day trend chart showing a real sales spike, a payment mix donut (75% credit / 25% cash), a stock health donut (3 in stock, 1 out of stock of 4 products), a best-sellers list, top debtors ("Test Farmer" ₹103,000), top creditors ("Live Test Feed Mill" ₹291,825), and a recent-activity feed of real invoices (INV-2627-00025, etc.) |
+
+Not implemented from this request: no per-user dashboard customization
+(section order/visibility is fixed), no export/print of the dashboard
+itself (the existing Reports screen already has PDF/CSV export for the
+underlying data), and no drill-down from a chart element into its
+underlying invoice/product list (each section is a read-only summary;
+the existing Reports and Stock Management screens remain the place to
+drill into the detail behind these numbers).
+
 ## Not Yet Started
 
 Customer/supplier aging (30/60/90-day buckets) and margin reports,

@@ -92,6 +92,13 @@ class StockSummaryLine {
   final Decimal? reorderLevel;
   final Decimal? reorderTarget;
   final String status;
+  // Whether this product counts toward the dashboard's low/out-of-stock
+  // banner and the Stock Management screen's aggregate counts — a shop
+  // owner's per-product opt-out (see product.Product.StockAlertEnabled
+  // server-side). [status] above is always the real, factual stock state
+  // regardless of this flag; it never gets faked as "OK" just because
+  // alerts are off for this one product.
+  final bool alertsEnabled;
 
   StockSummaryLine({
     required this.productId,
@@ -102,6 +109,7 @@ class StockSummaryLine {
     required this.reorderLevel,
     required this.reorderTarget,
     required this.status,
+    required this.alertsEnabled,
   });
 
   bool get isOutOfStock => status == 'OUT_OF_STOCK';
@@ -117,6 +125,7 @@ class StockSummaryLine {
       reorderLevel: json['reorder_level'] != null ? Decimal.parse(json['reorder_level'] as String) : null,
       reorderTarget: json['reorder_target'] != null ? Decimal.parse(json['reorder_target'] as String) : null,
       status: json['status'] as String,
+      alertsEnabled: json['stock_alert_enabled'] as bool? ?? true,
     );
   }
 }

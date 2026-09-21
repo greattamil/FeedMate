@@ -300,6 +300,31 @@ class _CatalogPanelState extends State<CatalogPanel> {
                         child: InkWell(
                           borderRadius: AppDecorations.borderRadiusMd,
                           onTap: () {
+                            // Real bug, reported live: a zero-stock product
+                            // could be added to the cart with no feedback at
+                            // all — the only rejection was the server's
+                            // ErrInsufficientStock at checkout, potentially
+                            // after the cashier had already picked a tender
+                            // and customer. The stock chip already tells the
+                            // cashier this item is out of stock; tapping it
+                            // must refuse the add right here, not silently
+                            // queue up a sale that can only fail later.
+                            if (stock != null && stock.isOutOfStock) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Row(
+                                    children: [
+                                      const Icon(Icons.error_outline_rounded, color: Colors.white, size: 18),
+                                      const SizedBox(width: 8),
+                                      Expanded(child: Text('${p.name} is out of stock — cannot add to cart')),
+                                    ],
+                                  ),
+                                  backgroundColor: AppColors.danger,
+                                  behavior: SnackBarBehavior.floating,
+                                ),
+                              );
+                              return;
+                            }
                             context.read<CartModel>().addProduct(p);
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
@@ -419,17 +444,27 @@ class _CatalogPanelState extends State<CatalogPanel> {
                                     Container(
                                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                       decoration: BoxDecoration(
-                                        color: AppColors.primaryContainer,
+                                        color: stock != null && stock.isOutOfStock
+                                            ? AppColors.surfaceSecondary
+                                            : AppColors.primaryContainer,
                                         borderRadius: BorderRadius.circular(AppDecorations.radiusFull),
                                       ),
                                       child: Row(
                                         mainAxisSize: MainAxisSize.min,
-                                        children: const [
-                                          Icon(Icons.add_rounded, size: 14, color: AppColors.primary),
-                                          SizedBox(width: 2),
+                                        children: [
+                                          Icon(
+                                            stock != null && stock.isOutOfStock ? Icons.block_rounded : Icons.add_rounded,
+                                            size: 14,
+                                            color: stock != null && stock.isOutOfStock ? AppColors.textSecondary : AppColors.primary,
+                                          ),
+                                          const SizedBox(width: 2),
                                           Text(
-                                            'Add',
-                                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.primary),
+                                            stock != null && stock.isOutOfStock ? 'Unavailable' : 'Add',
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.bold,
+                                              color: stock != null && stock.isOutOfStock ? AppColors.textSecondary : AppColors.primary,
+                                            ),
                                           ),
                                         ],
                                       ),

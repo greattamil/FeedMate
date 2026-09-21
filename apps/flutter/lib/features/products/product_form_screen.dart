@@ -51,6 +51,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   bool _expiryRequired = false;
   bool _looseSaleAllowed = false;
   bool _scaleRequired = false;
+  bool _stockAlertEnabled = true;
   final List<String> _barcodes = [];
   final List<String> _aliases = [];
 
@@ -92,6 +93,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       _expiryRequired = e.expiryRequired;
       _looseSaleAllowed = e.looseSaleAllowed;
       _scaleRequired = e.scaleRequired;
+      _stockAlertEnabled = e.stockAlertEnabled;
       _barcodes.addAll(e.barcodes);
       _aliases.addAll(e.aliases);
     }
@@ -213,6 +215,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       scaleRequired: _scaleRequired,
       productType: _productType,
       active: widget.existing?.active ?? true,
+      stockAlertEnabled: _stockAlertEnabled,
       barcodes: _barcodes,
       aliases: _aliases,
     );
@@ -410,6 +413,18 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                       ),
                     ),
                   ],
+                ),
+                SwitchListTile(
+                  key: const Key('product_form_stock_alert_switch'),
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Low/out-of-stock alerts'),
+                  subtitle: const Text(
+                    'When off, this product is excluded from the dashboard\'s '
+                    'stock alert banner and the Stock Management screen\'s '
+                    'counts — its real stock level still shows everywhere.',
+                  ),
+                  value: _stockAlertEnabled,
+                  onChanged: (v) => setState(() => _stockAlertEnabled = v),
                 ),
                 const Divider(height: 32),
                 Text('Handling flags', style: AppTypography.title),

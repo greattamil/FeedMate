@@ -133,12 +133,13 @@ func (h *ReportsHandlers) StockSummary(w http.ResponseWriter, r *http.Request) {
 	lowStockCount, outOfStockCount := 0, 0
 	for _, l := range lines {
 		item := map[string]interface{}{
-			"product_id":  l.ProductID.String(),
-			"sku":         l.SKU,
-			"name":        l.ProductName,
-			"uom_code":    l.UOMCode,
-			"on_hand_qty": l.OnHandQty.StringFixed(3),
-			"status":      l.Status,
+			"product_id":          l.ProductID.String(),
+			"sku":                 l.SKU,
+			"name":                l.ProductName,
+			"uom_code":            l.UOMCode,
+			"on_hand_qty":         l.OnHandQty.StringFixed(3),
+			"status":              l.Status,
+			"stock_alert_enabled": l.AlertsEnabled,
 		}
 		if l.ReorderLevel != nil {
 			item["reorder_level"] = l.ReorderLevel.StringFixed(3)
@@ -146,10 +147,17 @@ func (h *ReportsHandlers) StockSummary(w http.ResponseWriter, r *http.Request) {
 		if l.ReorderTarget != nil {
 			item["reorder_target"] = l.ReorderTarget.StringFixed(3)
 		}
-		if l.Status == "LOW_STOCK" {
-			lowStockCount++
-		} else if l.Status == "OUT_OF_STOCK" {
-			outOfStockCount++
+		// A product with alerts turned off still reports its real,
+		// factual Status above (never hidden or faked as "OK") — it's
+		// simply excluded from the aggregate counts that drive the
+		// dashboard's low-stock banner, which is the whole point of the
+		// per-product control (see product.Product.StockAlertEnabled).
+		if l.AlertsEnabled {
+			if l.Status == "LOW_STOCK" {
+				lowStockCount++
+			} else if l.Status == "OUT_OF_STOCK" {
+				outOfStockCount++
+			}
 		}
 		out = append(out, item)
 	}

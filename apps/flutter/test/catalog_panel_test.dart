@@ -139,4 +139,69 @@ void main() {
     expect(capturedQ, 'premium');
     expect(capturedCategoryId, 'cat-goat');
   });
+
+  // Regression test for a real bug reported live: tapping an out-of-stock
+  // product silently added it to the cart with no feedback at all — the
+  // only rejection was the server's ErrInsufficientStock at checkout,
+  // potentially after the cashier had already picked a tender and
+  // customer. The stock chip already told the cashier this item was out
+  // of stock; the tap itself must now refuse the add immediately.
+  testWidgets('tapping an out-of-stock product refuses to add it to the cart', (tester) async {
+    final client = MockClient((request) async {
+      if (request.url.path == '/api/v1/categories') {
+        return _jsonOk({'categories': []});
+      }
+      if (request.url.path == '/api/v1/products/search') {
+        return _jsonOk({
+          'results': [
+            {
+              'product': {
+                'id': 'p-out', 'sku': 'OUT-01', 'name': 'Empty Feed Sack',
+                'selling_price': '400.00', 'batch_required': false,
+                'loose_sale_allowed': false, 'active': true,
+              },
+              'match_type': 'FUZZY',
+            }
+          ]
+        });
+      }
+      if (request.url.path == '/api/v1/reports/stock-summary') {
+        return _jsonOk({
+          'products': [
+            {'product_id': 'p-out', 'sku': 'OUT-01', 'name': 'Empty Feed Sack', 'uom_code': 'BAG', 'on_hand_qty': '0.000', 'status': 'OUT_OF_STOCK', 'stock_alert_enabled': true},
+          ],
+          'low_stock_count': 0,
+          'out_of_stock_count': 1,
+        });
+      }
+      return http.Response('not found', 404);
+    });
+
+    late CartModel cart;
+    final storage = SecureStorage(store: InMemoryKeyValueStore());
+    storage.saveTokens(accessToken: 'tok', refreshToken: 'ref', tenantId: 'tenant-123');
+    final apiClient = ApiClient(baseUrl: 'http://test.invalid', storage: storage, httpClient: client);
+    final localDb = FakeLocalDatabase();
+    cart = CartModel();
+    await tester.pumpWidget(MultiProvider(
+      providers: [
+        Provider<ApiClient>.value(value: apiClient),
+        ChangeNotifierProvider<CartModel>.value(value: cart),
+        Provider<LocalDatabase>.value(value: localDb),
+        Provider<ProductRepository>(create: (_) => ProductRepository(client: apiClient, localDb: localDb)),
+      ],
+      child: const MaterialApp(home: Scaffold(body: CatalogPanel())),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Out of stock'), findsOneWidget);
+    expect(find.text('Unavailable'), findsOneWidget);
+
+    await tester.tap(find.text('Empty Feed Sack'));
+    await tester.pumpAndSettle();
+
+    expect(cart.isEmpty, isTrue, reason: 'an out-of-stock product must never be added to the cart');
+    expect(find.textContaining('out of stock — cannot add to cart'), findsOneWidget);
+    expect(find.textContaining('Added Empty Feed Sack to cart'), findsNothing);
+  });
 }

@@ -52,8 +52,15 @@ type productRequest struct {
 	LooseSaleAllowed     bool     `json:"loose_sale_allowed"`
 	ScaleRequired        bool     `json:"scale_required"`
 	ProductType          string   `json:"product_type,omitempty"`
-	Barcodes             []string `json:"barcodes,omitempty"`
-	Aliases              []string `json:"aliases,omitempty"`
+	// A pointer, unlike the other booleans above: a plain bool can't tell
+	// "the caller explicitly turned alerts off" apart from "the caller
+	// doesn't know this field exists yet" (e.g. an older client build), and
+	// those two cases must not be treated the same — the column defaults to
+	// true precisely so a client that's silent on this never flips a
+	// product's alerts off by omission. nil means "use the default".
+	StockAlertEnabled *bool    `json:"stock_alert_enabled,omitempty"`
+	Barcodes          []string `json:"barcodes,omitempty"`
+	Aliases           []string `json:"aliases,omitempty"`
 }
 
 // toProduct converts the wire request into a product.Product, validating
@@ -73,6 +80,7 @@ func (req *productRequest) toProduct(w http.ResponseWriter, reqID string) (produ
 	p.BatchRequired, p.ExpiryRequired = req.BatchRequired, req.ExpiryRequired
 	p.LooseSaleAllowed, p.ScaleRequired = req.LooseSaleAllowed, req.ScaleRequired
 	p.ProductType = req.ProductType
+	p.StockAlertEnabled = req.StockAlertEnabled == nil || *req.StockAlertEnabled
 
 	if req.LocalNameTa != "" {
 		p.LocalNameTa = &req.LocalNameTa
@@ -154,6 +162,7 @@ type productResponse struct {
 	ScaleRequired        bool   `json:"scale_required"`
 	ProductType          string `json:"product_type"`
 	Active               bool   `json:"active"`
+	StockAlertEnabled    bool   `json:"stock_alert_enabled"`
 }
 
 func toProductResponse(p *product.Product) productResponse {
@@ -170,6 +179,7 @@ func toProductResponse(p *product.Product) productResponse {
 		ScaleRequired:        p.ScaleRequired,
 		ProductType:          p.ProductType,
 		Active:               p.Active,
+		StockAlertEnabled:    p.StockAlertEnabled,
 	}
 	if p.LocalNameTa != nil {
 		resp.LocalNameTa = *p.LocalNameTa

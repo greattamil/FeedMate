@@ -30,6 +30,14 @@ class ProductDetail {
   final bool scaleRequired;
   final String productType;
   final bool active;
+  // The central, per-product control for low/out-of-stock alerting (see
+  // product.Product.StockAlertEnabled server-side): turning this off keeps
+  // this product's real stock status visible everywhere (Product List,
+  // Stock Management, POS catalog) but excludes it from the dashboard's
+  // alert banner and the Stock Management screen's aggregate counts — for
+  // a made-to-order or rarely-stocked item a shop owner doesn't want
+  // nagging them. Defaults to true (opt-out, not opt-in).
+  final bool stockAlertEnabled;
   final List<String> barcodes;
   final List<String> aliases;
 
@@ -58,6 +66,7 @@ class ProductDetail {
     required this.scaleRequired,
     required this.productType,
     required this.active,
+    this.stockAlertEnabled = true,
     this.barcodes = const [],
     this.aliases = const [],
   });
@@ -95,8 +104,27 @@ class ProductDetail {
       scaleRequired: json['scale_required'] as bool? ?? false,
       productType: json['product_type'] as String? ?? 'FEED',
       active: json['active'] as bool? ?? true,
+      stockAlertEnabled: json['stock_alert_enabled'] as bool? ?? true,
       barcodes: (json['barcodes'] as List<dynamic>? ?? []).cast<String>(),
       aliases: (json['aliases'] as List<dynamic>? ?? []).cast<String>(),
+    );
+  }
+
+  /// Used by the Stock Management screen's quick alert toggle: flips just
+  /// stockAlertEnabled while sending every other field back unchanged,
+  /// since the update endpoint replaces the whole record (see
+  /// product.repository.Update's doc comment — there is no partial-patch
+  /// endpoint for a single field).
+  ProductDetail copyWith({bool? stockAlertEnabled}) {
+    return ProductDetail(
+      id: id, sku: sku, name: name, localNameTa: localNameTa, categoryId: categoryId, brandId: brandId,
+      defaultSaleUomId: defaultSaleUomId, defaultPurchaseUomId: defaultPurchaseUomId, baseInventoryUomId: baseInventoryUomId,
+      hsnCode: hsnCode, taxProfileId: taxProfileId, packSize: packSize, standardWeightKg: standardWeightKg,
+      mrp: mrp, sellingPrice: sellingPrice, reorderLevel: reorderLevel, reorderTarget: reorderTarget, minPriceFloor: minPriceFloor,
+      batchRequired: batchRequired, expiryRequired: expiryRequired, looseSaleAllowed: looseSaleAllowed, scaleRequired: scaleRequired,
+      productType: productType, active: active,
+      stockAlertEnabled: stockAlertEnabled ?? this.stockAlertEnabled,
+      barcodes: barcodes, aliases: aliases,
     );
   }
 
@@ -133,6 +161,7 @@ class ProductDetail {
       'loose_sale_allowed': looseSaleAllowed,
       'scale_required': scaleRequired,
       'product_type': productType,
+      'stock_alert_enabled': stockAlertEnabled,
       'barcodes': barcodes,
       'aliases': aliases,
     };
@@ -220,6 +249,14 @@ class ProductAdminApi {
 
   Future<void> setActive(String productId, bool active) async {
     await client.postAuthed('/api/v1/products/$productId/status', {'active': active});
+  }
+
+  /// Quick toggle for the Stock Management screen's central alert control —
+  /// fetches the current record and re-saves it with only
+  /// stockAlertEnabled changed (see ProductDetail.copyWith).
+  Future<ProductDetail> setStockAlertEnabled(String productId, bool enabled) async {
+    final current = await getDetail(productId);
+    return update(productId, current.copyWith(stockAlertEnabled: enabled));
   }
 
   Future<List<MasterDataOption>> listCategories() async {

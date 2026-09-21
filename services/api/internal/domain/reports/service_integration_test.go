@@ -295,6 +295,62 @@ func TestStockSummary_ReflectsOnHandAndReorderStatus(t *testing.T) {
 	}
 }
 
+// Regression test for a feature the user asked for directly: a shop owner
+// wants to turn off low/out-of-stock alerting for one product (e.g. a
+// made-to-order item) without it lying about that product's real stock
+// level anywhere — Status must stay factual, only AlertsEnabled (which the
+// HTTP handler uses to decide whether to count this line toward the
+// dashboard's aggregate low_stock_count/out_of_stock_count) should differ.
+func TestStockSummary_AlertsDisabledStaysFactualButExcludable(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	f := seedFixture(t, db)
+	reportsSvc := reports.NewService(db)
+
+	// A second, genuinely out-of-stock product (never received via GRN)
+	// with alerting explicitly turned off.
+	noAlertProductID := uuid.New()
+	if err := db.WithAdminTx(context.Background(), func(tx pgx.Tx) error {
+		_, err := tx.Exec(context.Background(), `
+			INSERT INTO products (id, tenant_id, sku, name, default_sale_uom_id, default_purchase_uom_id, base_inventory_uom_id, selling_price, batch_required, expiry_required, stock_alert_enabled)
+			VALUES ($1,$2,$3,'Made To Order Product',$4,$4,$5,'500.00',false,false,false)
+		`, noAlertProductID, f.tenantID, "SKU-"+uuid.NewString()[:8], uomBag, uomKG)
+		return err
+	}); err != nil {
+		t.Fatalf("seed no-alert product: %v", err)
+	}
+
+	lines, err := reportsSvc.StockSummary(context.Background(), f.tenantID, nil)
+	if err != nil {
+		t.Fatalf("stock summary: %v", err)
+	}
+	byID := map[uuid.UUID]reports.StockSummaryLine{}
+	for _, l := range lines {
+		byID[l.ProductID] = l
+	}
+
+	noAlert, ok := byID[noAlertProductID]
+	if !ok {
+		t.Fatal("no-alert product missing from stock summary")
+	}
+	if noAlert.Status != "OUT_OF_STOCK" {
+		t.Fatalf("expected Status to stay factually OUT_OF_STOCK regardless of the alert toggle, got %s", noAlert.Status)
+	}
+	if noAlert.AlertsEnabled {
+		t.Fatal("expected AlertsEnabled to be false for a product with stock_alert_enabled=false")
+	}
+
+	// The fixture product never touched stock_alert_enabled, so it must
+	// keep the column's true default.
+	fixtureLine, ok := byID[f.productID]
+	if !ok {
+		t.Fatal("fixture product missing from stock summary")
+	}
+	if !fixtureLine.AlertsEnabled {
+		t.Fatal("expected AlertsEnabled to default to true for a product that never had it changed")
+	}
+}
+
 func TestCustomerBalances_ZeroBalanceExcluded(t *testing.T) {
 	db := connectTest(t)
 	defer db.Close()

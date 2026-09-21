@@ -376,3 +376,82 @@ func TestProductUpdateSetActiveList(t *testing.T) {
 		}
 	})
 }
+
+// The stock-alert control the user asked for directly: a shop owner should
+// be able to turn off low/out-of-stock alerting for one product without it
+// affecting anything else about the product. Covers both Create (an
+// explicit true and an explicit false) and Update (flipping an existing
+// product's setting), and confirms it round-trips through GetByID and List
+// — every read path a caller might use, not just the one Create returns.
+func TestProductStockAlertEnabled_RoundTripsThroughCreateUpdateAndReads(t *testing.T) {
+	dsn := mustEnv(t, "DATABASE_URL")
+	adminDSN := mustEnv(t, "DATABASE_ADMIN_URL")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	db, err := dbctx.Connect(ctx, dsn, adminDSN)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer db.Close()
+
+	tenantID := seedTenant(t, db)
+	svc := product.NewService(db)
+
+	alertsOn, err := svc.Create(context.Background(), tenantID, product.CreateInput{
+		Product: product.Product{
+			SKU: "ALERT-ON-" + uuid.NewString()[:8], Name: "Alerts On Product",
+			DefaultSaleUOMID: uomBag, DefaultPurchaseUOMID: uomBag, BaseInventoryUOMID: uomKG,
+			StockAlertEnabled: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("create (alerts on): %v", err)
+	}
+	if !alertsOn.StockAlertEnabled {
+		t.Fatal("expected StockAlertEnabled=true to persist from Create")
+	}
+
+	alertsOff, err := svc.Create(context.Background(), tenantID, product.CreateInput{
+		Product: product.Product{
+			SKU: "ALERT-OFF-" + uuid.NewString()[:8], Name: "Alerts Off Product",
+			DefaultSaleUOMID: uomBag, DefaultPurchaseUOMID: uomBag, BaseInventoryUOMID: uomKG,
+			StockAlertEnabled: false,
+		},
+	})
+	if err != nil {
+		t.Fatalf("create (alerts off): %v", err)
+	}
+	if alertsOff.StockAlertEnabled {
+		t.Fatal("expected StockAlertEnabled=false to persist from Create, not silently default to true")
+	}
+
+	fetched, err := svc.GetByID(context.Background(), tenantID, alertsOff.ID)
+	if err != nil {
+		t.Fatalf("get by id: %v", err)
+	}
+	if fetched.StockAlertEnabled {
+		t.Fatal("expected GetByID to reflect the persisted false, not the column's true default")
+	}
+
+	updated, err := svc.Update(context.Background(), tenantID, alertsOff.ID, product.UpdateInput{
+		Product: product.Product{
+			Name: "Alerts Off Product", DefaultSaleUOMID: uomBag, DefaultPurchaseUOMID: uomBag, BaseInventoryUOMID: uomKG,
+			StockAlertEnabled: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("update to turn alerts back on: %v", err)
+	}
+	if !updated.StockAlertEnabled {
+		t.Fatal("expected Update to be able to flip StockAlertEnabled back to true")
+	}
+
+	page, err := svc.List(context.Background(), tenantID, product.ListOptions{Query: "Alerts On Product"})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(page.Products) != 1 || !page.Products[0].StockAlertEnabled {
+		t.Fatalf("expected List to also carry StockAlertEnabled=true, got %+v", page.Products)
+	}
+}

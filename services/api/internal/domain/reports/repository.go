@@ -130,7 +130,16 @@ type StockSummaryLine struct {
 	OnHandQty     decimal.Decimal
 	ReorderLevel  *decimal.Decimal
 	ReorderTarget *decimal.Decimal
-	Status        string // OUT_OF_STOCK | LOW_STOCK | OK
+	Status        string // OUT_OF_STOCK | LOW_STOCK | OK — always factual,
+	// computed from real on-hand qty regardless of AlertsEnabled below.
+	// AlertsEnabled never changes what Status says; it only tells the
+	// caller whether this line should count toward the aggregate
+	// low/out-of-stock totals a dashboard banner shows (see
+	// product.Product.StockAlertEnabled's doc comment for why this exists —
+	// a shop owner can turn off alerting for one product, e.g. a
+	// made-to-order item, without it ever lying about that product's real
+	// stock level here or anywhere else that reads this line).
+	AlertsEnabled bool
 }
 
 // GetStockSummary lists every active product with its on-hand quantity
@@ -147,13 +156,13 @@ func GetStockSummary(ctx context.Context, tx pgx.Tx, locationID *uuid.UUID) ([]S
 	rows, err := tx.Query(ctx, `
 		SELECT p.id, p.sku, p.name, u.code,
 		       COALESCE(SUM(b.available_qty), 0) AS on_hand,
-		       p.reorder_level, p.reorder_target
+		       p.reorder_level, p.reorder_target, p.stock_alert_enabled
 		FROM products p
 		JOIN uoms u ON u.id = p.default_sale_uom_id
 		LEFT JOIN batches b ON b.product_id = p.id AND b.status = 'ACTIVE'
 		         AND ($1::uuid IS NULL OR b.location_id = $1)
 		WHERE p.active
-		GROUP BY p.id, p.sku, p.name, u.code, p.reorder_level, p.reorder_target
+		GROUP BY p.id, p.sku, p.name, u.code, p.reorder_level, p.reorder_target, p.stock_alert_enabled
 		ORDER BY p.name
 	`, locationID)
 	if err != nil {
@@ -164,7 +173,7 @@ func GetStockSummary(ctx context.Context, tx pgx.Tx, locationID *uuid.UUID) ([]S
 	var out []StockSummaryLine
 	for rows.Next() {
 		var l StockSummaryLine
-		if err := rows.Scan(&l.ProductID, &l.SKU, &l.ProductName, &l.UOMCode, &l.OnHandQty, &l.ReorderLevel, &l.ReorderTarget); err != nil {
+		if err := rows.Scan(&l.ProductID, &l.SKU, &l.ProductName, &l.UOMCode, &l.OnHandQty, &l.ReorderLevel, &l.ReorderTarget, &l.AlertsEnabled); err != nil {
 			return nil, err
 		}
 		switch {

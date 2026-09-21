@@ -8,6 +8,7 @@ import '../../core/api_error.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_decorations.dart';
 import '../../core/theme/app_typography.dart';
+import '../products/product_admin_api.dart';
 import 'reports_api.dart';
 
 /// A single, real-time view of every product's stock status — the "portal"
@@ -67,6 +68,33 @@ class _StockManagementScreenState extends State<StockManagementScreen> {
         _error = e.message;
         _loading = false;
       });
+    }
+  }
+
+  bool _togglingAlerts = false;
+
+  /// The central control the user asked for: instead of every product
+  /// nagging the dashboard's low/out-of-stock banner by default, a shop
+  /// owner can flip this switch per product right from the screen that
+  /// already lists all of them — no need to open each product's edit form
+  /// separately (though the same switch exists there too, for discoverability).
+  Future<void> _toggleAlerts(StockSummaryLine line, bool enabled) async {
+    if (_togglingAlerts) return;
+    setState(() => _togglingAlerts = true);
+    try {
+      final api = ProductAdminApi(context.read<ApiClient>());
+      await api.setStockAlertEnabled(line.productId, enabled);
+      if (!mounted) return;
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(enabled ? '${line.name}: alerts turned on' : '${line.name}: alerts turned off'),
+      ));
+    } on ApiError catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    } finally {
+      if (mounted) setState(() => _togglingAlerts = false);
     }
   }
 
@@ -250,50 +278,80 @@ class _StockManagementScreenState extends State<StockManagementScreen> {
         border: Border.all(color: AppColors.border),
         boxShadow: AppDecorations.cardShadow,
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(l.name, style: AppTypography.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-                const SizedBox(height: 4),
-                Row(
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Flexible(
-                      child: Text(l.sku, style: AppTypography.caption, overflow: TextOverflow.ellipsis),
-                    ),
-                    if (l.reorderLevel != null) ...[
-                      const SizedBox(width: 8),
-                      Flexible(
-                        child: Text(
-                          'Reorder at ${l.reorderLevel!.toStringAsFixed(0)} ${l.uomCode}',
-                          style: AppTypography.caption,
-                          overflow: TextOverflow.ellipsis,
+                    Text(l.name, style: AppTypography.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(l.sku, style: AppTypography.caption, overflow: TextOverflow.ellipsis),
                         ),
-                      ),
-                    ],
+                        if (l.reorderLevel != null) ...[
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: Text(
+                              'Reorder at ${l.reorderLevel!.toStringAsFixed(0)} ${l.uomCode}',
+                              style: AppTypography.caption,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
                   ],
                 ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                '${l.onHandQty.toString()} ${l.uomCode}',
-                style: AppTypography.title.copyWith(fontWeight: FontWeight.w800),
               ),
-              const SizedBox(height: 4),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(color: badgeBg, borderRadius: BorderRadius.circular(AppDecorations.radiusFull)),
+              const SizedBox(width: 8),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    '${l.onHandQty.toString()} ${l.uomCode}',
+                    style: AppTypography.title.copyWith(fontWeight: FontWeight.w800),
+                  ),
+                  const SizedBox(height: 4),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(color: badgeBg, borderRadius: BorderRadius.circular(AppDecorations.radiusFull)),
+                    child: Text(
+                      badgeLabel,
+                      style: AppTypography.caption.copyWith(fontWeight: FontWeight.bold, color: badgeFg),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const Divider(height: 20),
+          Row(
+            children: [
+              Icon(
+                l.alertsEnabled ? Icons.notifications_active_outlined : Icons.notifications_off_outlined,
+                size: 16,
+                color: l.alertsEnabled ? AppColors.textSecondary : AppColors.warning,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
                 child: Text(
-                  badgeLabel,
-                  style: AppTypography.caption.copyWith(fontWeight: FontWeight.bold, color: badgeFg),
+                  l.alertsEnabled ? 'Low/out-of-stock alerts on' : 'Alerts off — excluded from dashboard banner',
+                  style: AppTypography.caption.copyWith(
+                    color: l.alertsEnabled ? AppColors.textSecondary : AppColors.warning,
+                    fontWeight: l.alertsEnabled ? FontWeight.normal : FontWeight.bold,
+                  ),
                 ),
+              ),
+              Switch(
+                key: Key('stock_alert_toggle_${l.productId}'),
+                value: l.alertsEnabled,
+                onChanged: _togglingAlerts ? null : (v) => _toggleAlerts(l, v),
               ),
             ],
           ),

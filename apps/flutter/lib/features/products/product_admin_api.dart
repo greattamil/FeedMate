@@ -206,6 +206,70 @@ class MasterDataOption {
   MasterDataOption({required this.id, required this.label});
 }
 
+/// A full tax profile record — the shop owner's central, per-product
+/// control over GST treatment. Mirrors
+/// services/api/internal/httpapi/masterdata_handlers.go's taxProfileJSON.
+/// [priceInclusive] is the field this screen exists for: when true, a
+/// product assigned to this profile has its selling price treated as
+/// already including GST (pos.priceLine backs the taxable value out of
+/// it), rather than adding GST on top at billing.
+class TaxProfileDetail {
+  final String id;
+  final String code;
+  final String description;
+  final String supplyType;
+  final Decimal cgstRate;
+  final Decimal sgstRate;
+  final Decimal igstRate;
+  final Decimal cessRate;
+  final bool priceInclusive;
+  final bool active;
+
+  TaxProfileDetail({
+    required this.id,
+    required this.code,
+    required this.description,
+    required this.supplyType,
+    required this.cgstRate,
+    required this.sgstRate,
+    required this.igstRate,
+    required this.cessRate,
+    required this.priceInclusive,
+    required this.active,
+  });
+
+  /// The combined GST rate this profile charges — what a shop owner
+  /// actually thinks of as "the GST rate" when CGST+SGST (intra-state) or
+  /// IGST (inter-state) are really just a legal split of one rate.
+  Decimal get totalRate => cgstRate + sgstRate + igstRate + cessRate;
+
+  factory TaxProfileDetail.fromJson(Map<String, dynamic> json) {
+    return TaxProfileDetail(
+      id: json['id'] as String,
+      code: json['code'] as String,
+      description: json['description'] as String,
+      supplyType: json['supply_type'] as String,
+      cgstRate: Decimal.parse(json['cgst_rate'] as String),
+      sgstRate: Decimal.parse(json['sgst_rate'] as String),
+      igstRate: Decimal.parse(json['igst_rate'] as String),
+      cessRate: Decimal.parse(json['cess_rate'] as String),
+      priceInclusive: json['price_inclusive'] as bool,
+      active: json['active'] as bool,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'code': code,
+        'description': description,
+        'supply_type': supplyType,
+        'cgst_rate': cgstRate.toString(),
+        'sgst_rate': sgstRate.toString(),
+        'igst_rate': igstRate.toString(),
+        'cess_rate': cessRate.toString(),
+        'price_inclusive': priceInclusive,
+      };
+}
+
 /// Wraps the product master-data CRUD endpoints and the small read-only
 /// category/brand/UOM/tax-profile lookup lists a product form needs. All
 /// business rules (SKU immutability, never hard-deleting a referenced
@@ -309,5 +373,29 @@ class ProductAdminApi {
     return (response['tax_profiles'] as List<dynamic>)
         .map((t) => MasterDataOption(id: t['id'] as String, label: '${t['code']} — ${t['description']}'))
         .toList();
+  }
+
+  /// The full record list (including inactive) for the dedicated GST/Tax
+  /// Profiles management screen — the "central control" the product form's
+  /// simple [listTaxProfiles] dropdown can't show (it never returns
+  /// inactive rows, and doesn't carry rates or priceInclusive).
+  Future<List<TaxProfileDetail>> listAllTaxProfiles() async {
+    final response = await client.getAuthed('/api/v1/tax-profiles/all');
+    return (response['tax_profiles'] as List<dynamic>)
+        .map((t) => TaxProfileDetail.fromJson(t as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<TaxProfileDetail> createTaxProfile(TaxProfileDetail profile) async {
+    final response = await client.postAuthed('/api/v1/tax-profiles', profile.toJson());
+    return TaxProfileDetail.fromJson(response);
+  }
+
+  Future<void> updateTaxProfile(String taxProfileId, TaxProfileDetail profile) async {
+    await client.putAuthed('/api/v1/tax-profiles/$taxProfileId', profile.toJson());
+  }
+
+  Future<void> setTaxProfileActive(String taxProfileId, bool active) async {
+    await client.postAuthed('/api/v1/tax-profiles/$taxProfileId/status', {'active': active});
   }
 }

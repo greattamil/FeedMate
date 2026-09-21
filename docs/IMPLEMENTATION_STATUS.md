@@ -1279,6 +1279,44 @@ underlying invoice/product list (each section is a read-only summary;
 the existing Reports and Stock Management screens remain the place to
 drill into the detail behind these numbers).
 
+## Phase 56 — Invoice PDF Download/Preview + GST Inclusive/Exclusive Pricing Control (Backend + Flutter)
+
+The user asked for two things on the invoice detail page beyond the
+existing Share button — a real Download-to-disk action and an in-app
+Preview — and separately for a "central control" letting some products'
+selling price already include GST while others add it on top at billing.
+
+| Area | Change |
+|---|---|
+| Flutter: `invoice_pdf.dart` | New `downloadInvoicePdf()` — writes the same PDF `shareInvoicePdf()` builds to a real file (Downloads on Windows/macOS/Linux via `path_provider`'s `getDownloadsDirectory()`; falls back to the app's external-storage directory on Android, where `getDownloadsDirectory()` is unsupported and throws; falls back further to app documents if even that's unavailable; on web, no filesystem exists so it delegates to the existing share flow, which a desktop browser already renders as a native Save-As download) |
+| Flutter: `invoice_pdf_preview_screen.dart` (new) | `InvoicePdfPreviewScreen` wraps the `printing` package's `PdfPreview` widget around the exact same `buildInvoicePdf()` output used by Share and Download, so the preview can never show a different document than what gets shared/saved |
+| Flutter: `invoice_detail_screen.dart` | Three distinct actions now exist in both the AppBar and as bottom buttons: Preview (eye icon), Download (download icon), Share (share icon) — previously only Share existed |
+| **Backend bug fix**: `pos.priceLine` (`quote.go`) | `TaxProfile.PriceInclusive` existed in the schema and struct since early in the project but was never read anywhere — every sale silently treated every product's selling price as tax-exclusive regardless of this flag. Fixed: when the assigned tax profile has `price_inclusive=true`, the taxable value is now backed out of the gross selling price (`taxable = gross / (1 + total_rate/100)`) instead of adding tax on top, so an inclusive-priced product's customer is never charged more than its configured price |
+| Backend: `masterdata` domain | Tax profiles — previously list-only, per an explicit prior doc comment saying they "deserve a dedicated flow, not a quick add button" — now get full `CreateTaxProfile`/`UpdateTaxProfile`/`SetTaxProfileActive`/`ListAllTaxProfiles`, mirroring the existing category/brand CRUD pattern. This *is* that dedicated flow, and it's the actual "central control" requested: a shop owner creates one tax profile per distinct GST treatment (e.g. `GST18-EXCL` and `GST18-INCL`, both at 18%, differing only in `PriceInclusive`) and assigns each product to whichever applies from the product form's existing tax-profile picker — no per-product schema change needed |
+| Backend: routes | `GET /tax-profiles/all`, `POST /tax-profiles`, `PUT /tax-profiles/{id}`, `POST /tax-profiles/{id}/status`, all gated on `product.manage` like every other master-data mutation |
+| Flutter: `tax_profile_screen.dart` (new) | Dedicated "Tax Profiles (GST)" management screen — list with an inclusive/exclusive badge per profile, a create/edit form (code, description, supply type, CGST/SGST/IGST/CESS rates) with the "Price Includes GST" switch front and center, and an active/inactive toggle (never a hard delete, since products/invoices may reference a profile by id). Reachable from Home's Manage grid |
+
+| Area | Status | Evidence |
+|---|---|---|
+| PDF download writes a real, non-empty file | **VERIFIED** | `invoice_pdf_test.dart`'s new case, using a fake `PathProviderPlatform` redirecting to a real temp directory, confirms the saved file starts with `%PDF-` and is non-trivial in size |
+| Invoice detail's three distinct actions | **VERIFIED** | `invoice_history_test.dart`: new cases confirm all three buttons exist in both locations, tapping Preview pushes `InvoicePdfPreviewScreen` for the right invoice, and tapping Download produces a real file at the expected path with a confirming SnackBar |
+| GST-inclusive tax math | **VERIFIED** | New `TestQuote_PriceInclusiveTaxProfileBacksTaxOutOfTheSellingPrice`: a product priced at ₹118.00 inclusive under an 18% profile quotes taxable=₹100.00, tax=₹18.00, and — critically — grand total exactly ₹118.00, never more than the configured price |
+| Tax profile CRUD | **VERIFIED** | New `TestCreateTaxProfile_UpdateAndDeactivate`: creates both an inclusive and exclusive profile at the same rate, validates rejection of an empty description and an invalid supply type, edits rates/description in place, deactivates one (excluded from the active-only list but still present via `ListAllTaxProfiles`), and confirms `ErrNotFound` for a nonexistent id |
+| Backend build/vet/full integration suite | **VERIFIED** | `go build ./...`, `go vet ./...`, and the complete `go test -tags=integration ./...` across every domain package all green |
+| Flutter `tax_profile_screen_test.dart` | **VERIFIED** | 3 tests: listing with badges, creating a profile with `price_inclusive: true` actually in the POST body, and toggling active status |
+| Full Flutter suite regression | **VERIFIED** | 140 tests, all passing (including `home_dashboard_manage_test.dart`, confirming the new "Tax Profiles" Manage-grid tile doesn't break existing navigation coverage) |
+| Testing gotcha found and documented | — | `testWidgets` hung indefinitely (not merely slowly) on any real `dart:io`/platform-channel call — including a fake `PathProviderPlatform`-backed one — unless wrapped in `tester.runAsync()`; a tapped button's fire-and-forget async callback additionally needed a real-delay polling loop (inside `runAsync`) rather than a fixed `pump()` duration, since `tap()` doesn't await the `onPressed` callback it triggers |
+
+Not implemented from this request: no effective-dated rate-change history
+for tax profile edits (`UpdateTaxProfile` mutates the row in place rather
+than closing out the old `effective_to` and inserting a new dated row —
+safe for historical invoices, which snapshot the tax profile at
+finalization time regardless, but means an edit takes effect immediately
+for all future sales rather than from a chosen future date), and no
+in-app viewer chrome beyond what the `printing` package's `PdfPreview`
+widget itself provides (page navigation, zoom, its own print/share
+buttons).
+
 ## Not Yet Started
 
 Customer/supplier aging (30/60/90-day buckets) and margin reports,

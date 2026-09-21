@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/shopspring/decimal"
 
 	"github.com/andipatti/feedmate/services/api/internal/dbctx"
 	"github.com/andipatti/feedmate/services/api/internal/domain/masterdata"
@@ -213,5 +214,92 @@ func TestCreateBrand_AndDeactivate(t *testing.T) {
 	}
 	if len(afterDeactivate) != 0 {
 		t.Fatalf("expected the deactivated brand to be excluded from the active-only list, got %+v", afterDeactivate)
+	}
+}
+
+// TestCreateTaxProfile_UpdateAndDeactivate verifies the "central control"
+// requested for GST-inclusive vs GST-exclusive product pricing: a shop
+// owner can create two profiles at the same rate that differ only in
+// PriceInclusive, edit one afterwards, and deactivate it without deleting
+// it (existing products/invoices may still reference it by id).
+func TestCreateTaxProfile_UpdateAndDeactivate(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	tenantID := seedTenant(t, db)
+	svc := masterdata.NewService(db)
+
+	rate9 := decimal.RequireFromString("9.00")
+	zero := decimal.Zero
+
+	exclusive, err := svc.CreateTaxProfile(context.Background(), tenantID, "GST18-EXCL", "GST 18% (exclusive)", "INTRA_STATE", rate9, rate9, zero, zero, false)
+	if err != nil {
+		t.Fatalf("create exclusive tax profile: %v", err)
+	}
+	if exclusive.PriceInclusive {
+		t.Fatalf("expected the exclusive profile to have PriceInclusive=false")
+	}
+
+	inclusive, err := svc.CreateTaxProfile(context.Background(), tenantID, "GST18-INCL", "GST 18% (inclusive)", "INTRA_STATE", rate9, rate9, zero, zero, true)
+	if err != nil {
+		t.Fatalf("create inclusive tax profile: %v", err)
+	}
+	if !inclusive.PriceInclusive {
+		t.Fatalf("expected the inclusive profile to have PriceInclusive=true")
+	}
+
+	profiles, err := svc.ListTaxProfiles(context.Background(), tenantID)
+	if err != nil {
+		t.Fatalf("list tax profiles: %v", err)
+	}
+	if len(profiles) != 2 {
+		t.Fatalf("expected both profiles to be listed, got %+v", profiles)
+	}
+
+	if _, err := svc.CreateTaxProfile(context.Background(), tenantID, "BAD", "", "INTRA_STATE", zero, zero, zero, zero, false); !errors.Is(err, masterdata.ErrValidation) {
+		t.Fatalf("expected ErrValidation for an empty description, got: %v", err)
+	}
+	if _, err := svc.CreateTaxProfile(context.Background(), tenantID, "BAD2", "desc", "NOT_A_REAL_TYPE", zero, zero, zero, zero, false); !errors.Is(err, masterdata.ErrValidation) {
+		t.Fatalf("expected ErrValidation for an invalid supply_type, got: %v", err)
+	}
+
+	newRate := decimal.RequireFromString("14.00")
+	if err := svc.UpdateTaxProfile(context.Background(), tenantID, inclusive.ID, "GST 28% (inclusive, updated)", "INTRA_STATE", newRate, newRate, zero, zero, true); err != nil {
+		t.Fatalf("update tax profile: %v", err)
+	}
+	updated, err := svc.ListTaxProfiles(context.Background(), tenantID)
+	if err != nil {
+		t.Fatalf("list after update: %v", err)
+	}
+	var found *masterdata.TaxProfile
+	for i := range updated {
+		if updated[i].ID == inclusive.ID {
+			found = &updated[i]
+		}
+	}
+	if found == nil || !found.CGSTRate.Equal(newRate) || found.Description != "GST 28% (inclusive, updated)" {
+		t.Fatalf("expected the update to take effect, got %+v", found)
+	}
+
+	if err := svc.UpdateTaxProfile(context.Background(), tenantID, uuid.New(), "x", "INTRA_STATE", zero, zero, zero, zero, false); !errors.Is(err, masterdata.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound updating a nonexistent tax profile, got: %v", err)
+	}
+
+	if err := svc.SetTaxProfileActive(context.Background(), tenantID, exclusive.ID, false); err != nil {
+		t.Fatalf("deactivate tax profile: %v", err)
+	}
+	afterDeactivate, err := svc.ListTaxProfiles(context.Background(), tenantID)
+	if err != nil {
+		t.Fatalf("list after deactivate: %v", err)
+	}
+	if len(afterDeactivate) != 1 {
+		t.Fatalf("expected the deactivated profile excluded from the active-only list, got %+v", afterDeactivate)
+	}
+
+	allIncludingInactive, err := svc.ListAllTaxProfiles(context.Background(), tenantID)
+	if err != nil {
+		t.Fatalf("list all tax profiles: %v", err)
+	}
+	if len(allIncludingInactive) != 2 {
+		t.Fatalf("expected ListAllTaxProfiles to still include the deactivated profile, got %+v", allIncludingInactive)
 	}
 }

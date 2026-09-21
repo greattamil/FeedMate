@@ -6,6 +6,7 @@ import '../../core/api_client.dart';
 import '../../core/api_error.dart';
 import 'invoice_history_api.dart';
 import 'invoice_pdf.dart';
+import 'invoice_pdf_preview_screen.dart';
 
 /// Read-only reprint view of one finalized invoice: shop details, line
 /// items (with HSN and CGST/SGST/IGST breakdown), and how it was actually
@@ -25,6 +26,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
   InvoiceDetail? _detail;
   bool _loading = true;
   bool _sharing = false;
+  bool _downloading = false;
   String? _error;
 
   static final _dateFormat = DateFormat('dd MMM yyyy, h:mm a');
@@ -71,6 +73,30 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
     }
   }
 
+  Future<void> _downloadPdf() async {
+    final detail = _detail;
+    if (detail == null || _downloading) return;
+    setState(() => _downloading = true);
+    try {
+      final result = await downloadInvoicePdf(detail);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(result.sharedInstead ? 'Choose "Save" in the share sheet to download the PDF' : 'Saved to ${result.savedPath}'),
+      ));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not download invoice: $e')));
+    } finally {
+      if (mounted) setState(() => _downloading = false);
+    }
+  }
+
+  void _previewPdf() {
+    final detail = _detail;
+    if (detail == null) return;
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => InvoicePdfPreviewScreen(invoice: detail)));
+  }
+
   @override
   Widget build(BuildContext context) {
     final detail = _detail;
@@ -78,7 +104,21 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
       appBar: AppBar(
         title: Text(detail?.invoiceNumber ?? 'Invoice'),
         actions: [
-          if (detail != null)
+          if (detail != null) ...[
+            IconButton(
+              key: const Key('invoice_detail_preview_button'),
+              icon: const Icon(Icons.visibility_outlined),
+              tooltip: 'Preview invoice PDF',
+              onPressed: _previewPdf,
+            ),
+            IconButton(
+              key: const Key('invoice_detail_download_button'),
+              icon: _downloading
+                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  : const Icon(Icons.download_rounded),
+              tooltip: 'Download invoice PDF',
+              onPressed: _downloading ? null : _downloadPdf,
+            ),
             IconButton(
               key: const Key('invoice_detail_share_button'),
               icon: _sharing
@@ -87,6 +127,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
               tooltip: 'Share invoice PDF',
               onPressed: _sharing ? null : _sharePdf,
             ),
+          ],
         ],
       ),
       body: _loading
@@ -223,11 +264,33 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
                         SizedBox(
                           width: double.infinity,
                           child: OutlinedButton.icon(
-                            key: const Key('invoice_detail_share_pdf_bottom_button'),
-                            onPressed: _sharing ? null : _sharePdf,
-                            icon: const Icon(Icons.picture_as_pdf_rounded),
-                            label: Text(_sharing ? 'Preparing PDF…' : 'Share Invoice PDF'),
+                            key: const Key('invoice_detail_preview_pdf_bottom_button'),
+                            onPressed: _previewPdf,
+                            icon: const Icon(Icons.visibility_outlined),
+                            label: const Text('Preview Invoice PDF'),
                           ),
+                        ),
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                key: const Key('invoice_detail_download_pdf_bottom_button'),
+                                onPressed: _downloading ? null : _downloadPdf,
+                                icon: const Icon(Icons.download_rounded),
+                                label: Text(_downloading ? 'Saving…' : 'Download PDF'),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                key: const Key('invoice_detail_share_pdf_bottom_button'),
+                                onPressed: _sharing ? null : _sharePdf,
+                                icon: const Icon(Icons.share_rounded),
+                                label: Text(_sharing ? 'Preparing…' : 'Share PDF'),
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),

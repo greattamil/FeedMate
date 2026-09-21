@@ -1,4 +1,8 @@
+import 'dart:io';
+
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:intl/intl.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
@@ -198,4 +202,55 @@ Future<void> shareInvoicePdf(InvoiceDetail invoice) async {
   final fileName = 'Invoice_${invoice.invoiceNumber.replaceAll('/', '-')}.pdf';
   final file = XFile.fromData(bytes, mimeType: 'application/pdf', name: fileName);
   await SharePlus.instance.share(ShareParams(files: [file], fileNameOverrides: [fileName]));
+}
+
+/// Where [downloadInvoicePdf] actually put the file, so the caller can show
+/// a real path (or explain that "download" meant "share" on this platform)
+/// rather than a generic "saved" toast that might be wrong.
+class InvoiceDownloadResult {
+  final String? savedPath;
+  final bool sharedInstead;
+  const InvoiceDownloadResult({this.savedPath, this.sharedInstead = false});
+}
+
+/// Saves [invoice] as a real PDF file on disk (Downloads on Android/
+/// Windows/macOS/Linux) instead of only handing it to the share sheet —
+/// the user asked for these as two distinct actions on the invoice detail
+/// page. Web has no filesystem to write to, so it falls back to the same
+/// share flow as [shareInvoicePdf], which on a desktop browser already
+/// triggers a native "Save As" download.
+Future<InvoiceDownloadResult> downloadInvoicePdf(InvoiceDetail invoice) async {
+  final doc = buildInvoicePdf(invoice);
+  final bytes = await doc.save();
+  final fileName = 'Invoice_${invoice.invoiceNumber.replaceAll('/', '-')}.pdf';
+
+  if (kIsWeb) {
+    await shareInvoicePdf(invoice);
+    return const InvoiceDownloadResult(sharedInstead: true);
+  }
+
+  // getDownloadsDirectory() is only implemented on Windows/macOS/Linux —
+  // it throws UnsupportedError on Android, where the closest real,
+  // file-manager-visible equivalent is the app's external storage
+  // directory (falling back further to the private app documents
+  // directory only if even that is unavailable).
+  Directory? targetDir;
+  try {
+    targetDir = await getDownloadsDirectory();
+  } catch (_) {
+    targetDir = null;
+  }
+  if (targetDir == null) {
+    try {
+      targetDir = await getExternalStorageDirectory();
+    } catch (_) {
+      targetDir = null;
+    }
+  }
+  targetDir ??= await getApplicationDocumentsDirectory();
+
+  final path = '${targetDir.path}${Platform.pathSeparator}$fileName';
+  final file = File(path);
+  await file.writeAsBytes(bytes, flush: true);
+  return InvoiceDownloadResult(savedPath: path);
 }

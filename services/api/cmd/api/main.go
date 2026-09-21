@@ -148,6 +148,10 @@ func main() {
 			r.With(appmw.RequirePermission("product.manage")).Post("/brands/{id}/status", masterDataHandlers.SetBrandActive)
 			r.Get("/uoms", masterDataHandlers.ListUOMs)
 			r.Get("/tax-profiles", masterDataHandlers.ListTaxProfiles)
+			r.With(appmw.RequirePermission("product.manage")).Get("/tax-profiles/all", masterDataHandlers.ListAllTaxProfiles)
+			r.With(appmw.RequirePermission("product.manage")).Post("/tax-profiles", masterDataHandlers.CreateTaxProfile)
+			r.With(appmw.RequirePermission("product.manage")).Put("/tax-profiles/{id}", masterDataHandlers.UpdateTaxProfile)
+			r.With(appmw.RequirePermission("product.manage")).Post("/tax-profiles/{id}/status", masterDataHandlers.SetTaxProfileActive)
 
 			r.With(appmw.RequirePermission("pos.sell")).Post("/pos/quote", posHandlers.Quote)
 			r.With(appmw.RequirePermission("pos.sell")).Post("/pos/invoices", posHandlers.FinalizeInvoice)

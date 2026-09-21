@@ -26,6 +26,7 @@ import '../procurement/grn_history_screen.dart';
 import '../procurement/grn_screen.dart';
 import '../products/master_data_screen.dart';
 import '../products/product_list_screen.dart';
+import '../products/tax_profile_screen.dart';
 import '../reports/reports_api.dart';
 import '../reports/reports_screen.dart';
 import '../reports/stock_management_screen.dart';
@@ -663,6 +664,16 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
           gradient: const LinearGradient(colors: [Color(0xFF7C3AED), Color(0xFFA78BFA)]),
           onTap: () => Navigator.of(context).push(
             MaterialPageRoute(builder: (_) => const MasterDataScreen()),
+          ),
+        ),
+      if (session.hasPermission('product.manage'))
+        _ActionItem(
+          title: 'Tax Profiles',
+          subtitle: 'GST rates & inclusive pricing',
+          icon: Icons.receipt_long_rounded,
+          gradient: const LinearGradient(colors: [Color(0xFF0891B2), Color(0xFF67E8F9)]),
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const TaxProfileScreen()),
           ),
         ),
       if (session.hasPermission('stock.count'))

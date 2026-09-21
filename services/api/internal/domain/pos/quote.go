@@ -46,18 +46,36 @@ func priceLine(ctx context.Context, tx pgx.Tx, line SaleLine) (*pricedLine, erro
 		return nil, fmt.Errorf("%w: product %s has no selling price configured", ErrValidation, p.SKU)
 	}
 
-	lineSubtotal := unitPrice.Mul(line.Quantity)
-	taxableValue := lineSubtotal.Sub(line.DiscountAmount)
-	if taxableValue.LessThan(decimal.Zero) {
-		return nil, fmt.Errorf("%w: discount exceeds line subtotal for product %s", ErrValidation, p.SKU)
-	}
-
 	if p.TaxProfileID == nil {
 		return nil, ErrNoTaxProfile
 	}
 	taxProfile, err := GetActiveTaxProfile(ctx, tx, *p.TaxProfileID)
 	if err != nil {
 		return nil, fmt.Errorf("tax profile for product %s: %w", p.SKU, err)
+	}
+
+	lineSubtotal := unitPrice.Mul(line.Quantity)
+	grossValue := lineSubtotal.Sub(line.DiscountAmount)
+	if grossValue.LessThan(decimal.Zero) {
+		return nil, fmt.Errorf("%w: discount exceeds line subtotal for product %s", ErrValidation, p.SKU)
+	}
+
+	// The tax profile's own PriceInclusive flag is the "central control"
+	// for whether this product's selling price already has GST baked in
+	// (some products are priced MRP-style, inclusive; others are priced
+	// exclusive with tax added at billing) — see
+	// masterdata.TaxProfile.PriceInclusive. When inclusive, the taxable
+	// value must be backed out of the gross amount so the customer is
+	// never charged more than the configured price; CalculateLineTax
+	// itself is never duplicated or reimplemented here, only fed a
+	// different taxable value.
+	taxableValue := grossValue
+	if taxProfile.PriceInclusive {
+		totalRate := taxProfile.CGSTRate.Add(taxProfile.SGSTRate).Add(taxProfile.IGSTRate).Add(taxProfile.CessRate)
+		if !totalRate.IsZero() {
+			divisor := decimal.NewFromInt(100).Add(totalRate).Div(decimal.NewFromInt(100))
+			taxableValue = grossValue.DivRound(divisor, 2)
+		}
 	}
 	comps, lineTax := CalculateLineTax(taxProfile, taxableValue)
 

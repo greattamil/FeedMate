@@ -4,6 +4,25 @@ import 'package:decimal/decimal.dart';
 import 'package:feedmate_app/features/pos/invoice_history_api.dart';
 import 'package:feedmate_app/features/pos/invoice_pdf.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
+
+/// Redirects path_provider's platform channel calls to a real temp
+/// directory so downloadInvoicePdf() can be tested without a device —
+/// getDownloadsDirectory() intentionally returns null here to exercise the
+/// same "unsupported on this platform" fallback path Android takes.
+class _FakePathProviderPlatform extends PathProviderPlatform {
+  _FakePathProviderPlatform(this.dir);
+  final Directory dir;
+
+  @override
+  Future<String?> getApplicationDocumentsPath() async => dir.path;
+
+  @override
+  Future<String?> getExternalStoragePath() async => dir.path;
+
+  @override
+  Future<String?> getDownloadsPath() async => null;
+}
 
 InvoiceDetail _sampleInvoice() {
   return InvoiceDetail(
@@ -75,4 +94,21 @@ void main() {
       expect(source.contains('₹'), isFalse, reason: 'Found a literal ₹ in invoice_pdf.dart — it will render as a blank box in the PDF.');
     },
   );
+
+  test('downloadInvoicePdf writes a real, non-empty PDF file to disk', () async {
+    final tempDir = await Directory.systemTemp.createTemp('invoice_pdf_test');
+    addTearDown(() => tempDir.delete(recursive: true));
+    PathProviderPlatform.instance = _FakePathProviderPlatform(tempDir);
+
+    final result = await downloadInvoicePdf(_sampleInvoice());
+
+    expect(result.sharedInstead, isFalse);
+    expect(result.savedPath, isNotNull);
+    final file = File(result.savedPath!);
+    expect(file.existsSync(), isTrue);
+    final bytes = await file.readAsBytes();
+    expect(bytes.length, greaterThan(500));
+    expect(String.fromCharCodes(bytes.take(5)), '%PDF-');
+    expect(result.savedPath, contains('Invoice_INV-0001.pdf'));
+  });
 }

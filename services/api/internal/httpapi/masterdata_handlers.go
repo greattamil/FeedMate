@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 
 	"github.com/andipatti/feedmate/services/api/internal/domain/masterdata"
 	"github.com/andipatti/feedmate/services/api/internal/reqctx"
@@ -195,6 +196,24 @@ func (h *MasterDataHandlers) ListUOMs(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, map[string]interface{}{"uoms": out})
 }
 
+func taxProfileJSON(t masterdata.TaxProfile) map[string]interface{} {
+	return map[string]interface{}{
+		"id":              t.ID.String(),
+		"code":            t.Code,
+		"description":     t.Description,
+		"supply_type":     t.SupplyType,
+		"cgst_rate":       t.CGSTRate.String(),
+		"sgst_rate":       t.SGSTRate.String(),
+		"igst_rate":       t.IGSTRate.String(),
+		"cess_rate":       t.CessRate.String(),
+		"price_inclusive": t.PriceInclusive,
+		"active":          t.Active,
+	}
+}
+
+// ListTaxProfiles returns only active, currently-effective profiles — what
+// a product create/edit form's picker should offer. Unauthenticated to no
+// permission beyond login, matching categories/brands/UOMs above.
 func (h *MasterDataHandlers) ListTaxProfiles(w http.ResponseWriter, r *http.Request) {
 	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
@@ -209,14 +228,126 @@ func (h *MasterDataHandlers) ListTaxProfiles(w http.ResponseWriter, r *http.Requ
 	}
 	out := make([]map[string]interface{}, 0, len(profiles))
 	for _, t := range profiles {
-		out = append(out, map[string]interface{}{
-			"id":          t.ID.String(),
-			"code":        t.Code,
-			"description": t.Description,
-			"cgst_rate":   t.CGSTRate.String(),
-			"sgst_rate":   t.SGSTRate.String(),
-			"igst_rate":   t.IGSTRate.String(),
-		})
+		out = append(out, taxProfileJSON(t))
 	}
 	WriteJSON(w, http.StatusOK, map[string]interface{}{"tax_profiles": out})
+}
+
+// ListAllTaxProfiles additionally includes inactive profiles — the
+// dedicated GST/tax-profile management screen, gated on product.manage
+// like every other master-data mutation endpoint below.
+func (h *MasterDataHandlers) ListAllTaxProfiles(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	claims, ok := reqctx.Claims(r.Context())
+	if !ok {
+		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		return
+	}
+	profiles, err := h.MasterData.ListAllTaxProfiles(r.Context(), claims.TenantID)
+	if err != nil {
+		WriteError(w, reqID, CodeInternal, "failed to list tax profiles: "+err.Error())
+		return
+	}
+	out := make([]map[string]interface{}, 0, len(profiles))
+	for _, t := range profiles {
+		out = append(out, taxProfileJSON(t))
+	}
+	WriteJSON(w, http.StatusOK, map[string]interface{}{"tax_profiles": out})
+}
+
+type taxProfileRequest struct {
+	Code           string          `json:"code"`
+	Description    string          `json:"description"`
+	SupplyType     string          `json:"supply_type"`
+	CGSTRate       decimal.Decimal `json:"cgst_rate"`
+	SGSTRate       decimal.Decimal `json:"sgst_rate"`
+	IGSTRate       decimal.Decimal `json:"igst_rate"`
+	CessRate       decimal.Decimal `json:"cess_rate"`
+	PriceInclusive bool            `json:"price_inclusive"`
+}
+
+func (h *MasterDataHandlers) CreateTaxProfile(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	claims, ok := reqctx.Claims(r.Context())
+	if !ok {
+		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		return
+	}
+	var req taxProfileRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid request body")
+		return
+	}
+	created, err := h.MasterData.CreateTaxProfile(r.Context(), claims.TenantID, req.Code, req.Description, req.SupplyType,
+		req.CGSTRate, req.SGSTRate, req.IGSTRate, req.CessRate, req.PriceInclusive)
+	if err != nil {
+		if errors.Is(err, masterdata.ErrValidation) {
+			WriteError(w, reqID, CodeValidation, err.Error())
+			return
+		}
+		WriteError(w, reqID, CodeInternal, "failed to create tax profile: "+err.Error())
+		return
+	}
+	WriteJSON(w, http.StatusCreated, taxProfileJSON(*created))
+}
+
+func (h *MasterDataHandlers) UpdateTaxProfile(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	claims, ok := reqctx.Claims(r.Context())
+	if !ok {
+		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid tax profile id")
+		return
+	}
+	var req taxProfileRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid request body")
+		return
+	}
+	if err := h.MasterData.UpdateTaxProfile(r.Context(), claims.TenantID, id, req.Description, req.SupplyType,
+		req.CGSTRate, req.SGSTRate, req.IGSTRate, req.CessRate, req.PriceInclusive); err != nil {
+		if errors.Is(err, masterdata.ErrValidation) {
+			WriteError(w, reqID, CodeValidation, err.Error())
+			return
+		}
+		if errors.Is(err, masterdata.ErrNotFound) {
+			WriteError(w, reqID, CodeNotFound, "tax profile not found")
+			return
+		}
+		WriteError(w, reqID, CodeInternal, "failed to update tax profile: "+err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *MasterDataHandlers) SetTaxProfileActive(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	claims, ok := reqctx.Claims(r.Context())
+	if !ok {
+		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid tax profile id")
+		return
+	}
+	var req setActiveRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid request body")
+		return
+	}
+	if err := h.MasterData.SetTaxProfileActive(r.Context(), claims.TenantID, id, req.Active); err != nil {
+		if errors.Is(err, masterdata.ErrNotFound) {
+			WriteError(w, reqID, CodeNotFound, "tax profile not found")
+			return
+		}
+		WriteError(w, reqID, CodeInternal, "failed to update tax profile status: "+err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

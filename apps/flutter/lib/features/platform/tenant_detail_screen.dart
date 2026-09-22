@@ -2,6 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/api_error.dart';
+import '../../core/responsive.dart';
+import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_decorations.dart';
+import '../../core/theme/app_typography.dart';
 import 'platform_api.dart';
 import 'platform_api_client.dart';
 
@@ -70,16 +74,34 @@ class _TenantDetailScreenState extends State<TenantDetailScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(status == 'ACTIVE' ? 'Reactivate Tenant?' : 'Suspend Tenant?'),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: status == 'ACTIVE' ? AppColors.successContainer : AppColors.warningContainer,
+                borderRadius: AppDecorations.borderRadiusSm,
+              ),
+              child: Icon(
+                status == 'ACTIVE' ? Icons.check_circle_outline_rounded : Icons.pause_circle_outline_rounded,
+                color: status == 'ACTIVE' ? AppColors.success : AppColors.warning,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Text(status == 'ACTIVE' ? 'Reactivate Tenant?' : 'Suspend Tenant?'),
+          ],
+        ),
         content: Text(
           status == 'ACTIVE'
               ? 'This tenant will be able to log in and use the app again immediately.'
               : 'This tenant will be signed out of new logins immediately — existing sessions stop working on their next refresh.',
+          style: const TextStyle(height: 1.4),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
           FilledButton(
             key: const Key('tenant_status_confirm'),
+            style: FilledButton.styleFrom(backgroundColor: status == 'ACTIVE' ? AppColors.success : AppColors.warning),
             onPressed: () => Navigator.of(context).pop(true),
             child: Text(status == 'ACTIVE' ? 'Reactivate' : 'Suspend'),
           ),
@@ -124,109 +146,253 @@ class _TenantDetailScreenState extends State<TenantDetailScreen> {
     await _run(() => api.setTenantFeature(widget.tenantId, code, enabled));
   }
 
+  Color _statusColor(String status) {
+    switch (status) {
+      case 'ACTIVE':
+        return AppColors.success;
+      case 'SUSPENDED':
+        return AppColors.warning;
+      default:
+        return AppColors.danger;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final detail = _detail;
     return Scaffold(
-      backgroundColor: const Color(0xFF0F172A),
+      backgroundColor: AppColors.background,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1E293B),
-        title: Text(detail?.legalName ?? 'Tenant', style: const TextStyle(color: Colors.white)),
+        backgroundColor: AppColors.surface,
+        foregroundColor: AppColors.textPrimary,
+        elevation: 0,
+        title: Text(detail?.legalName ?? 'Tenant', style: AppTypography.headline),
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator(color: Colors.white))
+          ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
           : _error != null
-              ? Center(child: Text(_error!, style: const TextStyle(color: Colors.white)))
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Text(_error!, style: const TextStyle(color: AppColors.danger)),
+                  ),
+                )
               : detail == null
                   ? const SizedBox.shrink()
-                  : ListView(
-                      padding: const EdgeInsets.all(16),
-                      children: [
-                        _card(
-                          title: 'Status',
+                  : SingleChildScrollView(
+                      padding: EdgeInsets.all(context.responsive(mobile: 16.0, desktop: 24.0)),
+                      child: Center(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: ResponsiveBreakpoints.maxContentWidth),
                           child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              Text('Current: ${detail.status}', key: const Key('tenant_detail_status'), style: const TextStyle(color: Colors.white)),
-                              const SizedBox(height: 10),
-                              Row(children: [
-                                if (detail.status != 'ACTIVE')
-                                  FilledButton(
-                                    key: const Key('tenant_reactivate_button'),
-                                    onPressed: () => _changeStatus('ACTIVE'),
-                                    child: const Text('Reactivate'),
-                                  ),
-                                if (detail.status == 'ACTIVE')
-                                  FilledButton(
-                                    key: const Key('tenant_suspend_button'),
-                                    style: FilledButton.styleFrom(backgroundColor: const Color(0xFFF59E0B)),
-                                    onPressed: () => _changeStatus('SUSPENDED'),
-                                    child: const Text('Suspend'),
-                                  ),
-                              ]),
+                              _headerCard(detail),
+                              const SizedBox(height: 16),
+                              context.isDesktop
+                                  ? IntrinsicHeight(
+                                      child: Row(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Expanded(child: _sideColumn(detail)),
+                                          const SizedBox(width: 16),
+                                          Expanded(flex: 2, child: _mainColumn(detail)),
+                                        ],
+                                      ),
+                                    )
+                                  // Mobile: the actionable "control panel" (status/
+                                  // plan/usage) comes first — a platform admin's
+                                  // most common reason to open this screen (suspend
+                                  // a tenant, check their plan) must not require
+                                  // scrolling past branding/feature-flag cards first.
+                                  : Column(children: [_sideColumn(detail), const SizedBox(height: 16), _mainColumn(detail)]),
                             ],
                           ),
                         ),
-                        _card(
-                          title: 'Plan & Billing',
-                          trailing: IconButton(key: const Key('tenant_edit_plan_button'), onPressed: _editPlan, icon: const Icon(Icons.edit_outlined, color: Colors.white70)),
-                          child: Text(
-                            'Plan: ${detail.planCode}${detail.planExpiresAt != null ? ' · Expires ${detail.planExpiresAt!.toLocal().toString().split(' ').first}' : ''}',
-                            style: const TextStyle(color: Colors.white),
-                          ),
-                        ),
-                        _card(
-                          title: 'Whitelabel Branding',
-                          trailing: IconButton(key: const Key('tenant_edit_branding_button'), onPressed: _editBranding, icon: const Icon(Icons.edit_outlined, color: Colors.white70)),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('App name: ${detail.appDisplayName ?? '(default)'}', style: const TextStyle(color: Colors.white)),
-                              Text('Logo URL: ${detail.logoUrl ?? '(none)'}', style: const TextStyle(color: Colors.white70, fontSize: 12)),
-                              Text('Primary color: ${detail.primaryColor ?? '(default)'}', style: const TextStyle(color: Colors.white70, fontSize: 12)),
-                            ],
-                          ),
-                        ),
-                        _card(
-                          title: 'Feature Flags & Modules',
-                          child: Column(
-                            children: _knownFeatureCodes.map((code) {
-                              final enabled = detail.features[code] ?? false;
-                              return SwitchListTile(
-                                key: Key('tenant_feature_switch_$code'),
-                                contentPadding: EdgeInsets.zero,
-                                title: Text(code, style: const TextStyle(color: Colors.white, fontSize: 13)),
-                                value: enabled,
-                                onChanged: (v) => _toggleFeature(code, v),
-                              );
-                            }).toList(),
-                          ),
-                        ),
-                        _card(
-                          title: 'Usage',
-                          child: Text('${detail.userCount} staff user${detail.userCount == 1 ? '' : 's'}', style: const TextStyle(color: Colors.white)),
-                        ),
-                      ],
+                      ),
                     ),
     );
   }
 
-  Widget _card({required String title, required Widget child, Widget? trailing}) {
+  Widget _mainColumn(TenantDetail detail) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _card(
+          title: 'Whitelabel Branding',
+          icon: Icons.palette_outlined,
+          iconColor: AppColors.secondary,
+          trailing: IconButton(key: const Key('tenant_edit_branding_button'), onPressed: _editBranding, icon: const Icon(Icons.edit_outlined, size: 20)),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _kv('App name', detail.appDisplayName ?? '(using platform default)'),
+              _kv('Logo URL', detail.logoUrl ?? '(none)'),
+              _kv('Primary color', detail.primaryColor ?? '(using platform default)'),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        _card(
+          title: 'Feature Flags & Modules',
+          icon: Icons.extension_outlined,
+          iconColor: AppColors.accent,
+          child: Column(
+            children: _knownFeatureCodes.map((code) {
+              final enabled = detail.features[code] ?? false;
+              return SwitchListTile(
+                key: Key('tenant_feature_switch_$code'),
+                contentPadding: EdgeInsets.zero,
+                title: Text(code, style: AppTypography.body),
+                value: enabled,
+                activeThumbColor: AppColors.primary,
+                onChanged: (v) => _toggleFeature(code, v),
+              );
+            }).toList(),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _sideColumn(TenantDetail detail) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _card(
+          title: 'Status',
+          icon: Icons.toggle_on_outlined,
+          iconColor: _statusColor(detail.status),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                key: const Key('tenant_detail_status'),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(color: _statusColor(detail.status).withValues(alpha: 0.12), borderRadius: AppDecorations.borderRadiusFull),
+                child: Text('Current: ${detail.status}', style: AppTypography.caption.copyWith(color: _statusColor(detail.status), fontWeight: FontWeight.bold)),
+              ),
+              const SizedBox(height: 14),
+              if (detail.status != 'ACTIVE')
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    key: const Key('tenant_reactivate_button'),
+                    style: FilledButton.styleFrom(backgroundColor: AppColors.success),
+                    onPressed: () => _changeStatus('ACTIVE'),
+                    child: const Text('Reactivate'),
+                  ),
+                ),
+              if (detail.status == 'ACTIVE')
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    key: const Key('tenant_suspend_button'),
+                    style: FilledButton.styleFrom(backgroundColor: AppColors.warning),
+                    onPressed: () => _changeStatus('SUSPENDED'),
+                    child: const Text('Suspend'),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        _card(
+          title: 'Plan & Billing',
+          icon: Icons.workspace_premium_outlined,
+          iconColor: AppColors.warning,
+          trailing: IconButton(key: const Key('tenant_edit_plan_button'), onPressed: _editPlan, icon: const Icon(Icons.edit_outlined, size: 20)),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _kv('Plan', detail.planCode),
+              _kv('Expires', detail.planExpiresAt != null ? detail.planExpiresAt!.toLocal().toString().split(' ').first : 'No expiry set'),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        _card(
+          title: 'Usage',
+          icon: Icons.people_alt_outlined,
+          iconColor: AppColors.primary,
+          child: _kv('Staff users', '${detail.userCount}'),
+        ),
+      ],
+    );
+  }
+
+  Widget _headerCard(TenantDetail detail) {
+    final statusColor = _statusColor(detail.status);
     return Container(
-      margin: const EdgeInsets.only(bottom: 14),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: const Color(0xFF1E293B), borderRadius: BorderRadius.circular(14)),
-      child: Column(
+      padding: const EdgeInsets.all(20),
+      decoration: AppDecorations.card(gradient: AppColors.gradientHeroMesh, shadows: AppDecorations.emeraldGlow),
+      child: Row(
+        children: [
+          Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), borderRadius: AppDecorations.borderRadiusMd),
+            child: Center(
+              child: Text(
+                detail.legalName.isNotEmpty ? detail.legalName[0].toUpperCase() : '?',
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 24),
+              ),
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(detail.legalName, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20)),
+                const SizedBox(height: 4),
+                Text('${detail.addressLine1}, ${detail.city}, ${detail.stateCode}', style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 13)),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.18), borderRadius: AppDecorations.borderRadiusFull, border: Border.all(color: statusColor.withValues(alpha: 0.6))),
+            child: Text(detail.status, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _kv(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          SizedBox(width: 90, child: Text(label, style: AppTypography.caption)),
+          Expanded(child: Text(value, style: AppTypography.body)),
+        ],
+      ),
+    );
+  }
+
+  Widget _card({required String title, required IconData icon, required Color iconColor, required Widget child, Widget? trailing}) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: AppDecorations.card(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+              Container(
+                padding: const EdgeInsets.all(7),
+                decoration: BoxDecoration(color: iconColor.withValues(alpha: 0.12), borderRadius: AppDecorations.borderRadiusSm),
+                child: Icon(icon, color: iconColor, size: 18),
+              ),
+              const SizedBox(width: 10),
+              Expanded(child: Text(title, style: AppTypography.title)),
               if (trailing != null) trailing,
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 14),
           child,
         ],
       ),

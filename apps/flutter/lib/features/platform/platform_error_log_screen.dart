@@ -4,6 +4,10 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/api_error.dart';
+import '../../core/responsive.dart';
+import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_decorations.dart';
+import '../../core/theme/app_typography.dart';
 import 'platform_api.dart';
 import 'platform_api_client.dart';
 
@@ -55,52 +59,84 @@ class _PlatformErrorLogScreenState extends State<PlatformErrorLogScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) return const Center(child: CircularProgressIndicator(color: Colors.white));
-    if (_error != null) return Center(child: Text(_error!, style: const TextStyle(color: Colors.white)));
-    if (_entries.isEmpty) return const Center(child: Text('No errors recorded — good sign', style: TextStyle(color: Color(0xFF94A3B8))));
+    if (_loading) return const Center(child: CircularProgressIndicator(color: AppColors.primary));
+    if (_error != null) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(_error!, style: AppTypography.body),
+            const SizedBox(height: 12),
+            FilledButton(onPressed: _load, child: const Text('Retry')),
+          ],
+        ),
+      );
+    }
 
     return RefreshIndicator(
       onRefresh: _load,
-      child: ListView.builder(
-        padding: const EdgeInsets.all(16),
-        itemCount: _entries.length,
-        itemBuilder: (context, index) {
-          final e = _entries[index];
-          return Container(
-            key: Key('platform_error_entry_${e.id}'),
-            margin: const EdgeInsets.only(bottom: 8),
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(color: const Color(0xFF1E293B), borderRadius: BorderRadius.circular(12)),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                      decoration: BoxDecoration(color: const Color(0xFF7F1D1D), borderRadius: BorderRadius.circular(6)),
-                      child: Text('${e.statusCode}', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
-                    ),
-                    Text(_dateFormat.format(e.createdAt.toLocal()), style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: ResponsiveBreakpoints.maxContentWidth),
+          child: _entries.isEmpty
+              ? ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  children: const [
+                    SizedBox(height: 96),
+                    Icon(Icons.verified_outlined, size: 48, color: AppColors.success),
+                    SizedBox(height: 12),
+                    Center(child: Text('No errors recorded — good sign', style: AppTypography.bodySecondary)),
                   ],
+                )
+              : ListView.builder(
+                  padding: EdgeInsets.all(context.responsive(mobile: 16.0, desktop: 24.0)),
+                  itemCount: _entries.length,
+                  itemBuilder: (context, index) {
+                    final e = _entries[index];
+                    return Container(
+                      key: Key('platform_error_entry_${e.id}'),
+                      margin: const EdgeInsets.only(bottom: 10),
+                      padding: const EdgeInsets.all(16),
+                      decoration: AppDecorations.card(border: Border.all(color: AppColors.dangerContainer)),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                                decoration: BoxDecoration(color: AppColors.dangerContainer, borderRadius: AppDecorations.borderRadiusFull),
+                                child: Text('${e.statusCode}', style: AppTypography.caption.copyWith(color: AppColors.onDangerContainer, fontWeight: FontWeight.bold)),
+                              ),
+                              Text(_dateFormat.format(e.createdAt.toLocal()), style: AppTypography.caption),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          Text(e.message, style: AppTypography.body),
+                          if (e.requestId != null) ...[
+                            const SizedBox(height: 8),
+                            InkWell(
+                              onTap: () {
+                                Clipboard.setData(ClipboardData(text: e.requestId!));
+                                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Request ID copied'), duration: Duration(seconds: 1)));
+                              },
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.copy_rounded, size: 12, color: AppColors.textTertiary),
+                                  const SizedBox(width: 4),
+                                  Text('Request: ${e.requestId}', style: AppTypography.caption),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    );
+                  },
                 ),
-                const SizedBox(height: 6),
-                Text(e.message, style: const TextStyle(color: Colors.white, fontSize: 13)),
-                if (e.requestId != null) ...[
-                  const SizedBox(height: 6),
-                  InkWell(
-                    onTap: () {
-                      Clipboard.setData(ClipboardData(text: e.requestId!));
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Request ID copied'), duration: Duration(seconds: 1)));
-                    },
-                    child: Text('Request: ${e.requestId} (tap to copy)', style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
-                  ),
-                ],
-              ],
-            ),
-          );
-        },
+        ),
       ),
     );
   }

@@ -3,6 +3,10 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/api_error.dart';
+import '../../core/responsive.dart';
+import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_decorations.dart';
+import '../../core/theme/app_typography.dart';
 import 'platform_api.dart';
 import 'platform_api_client.dart';
 
@@ -53,47 +57,95 @@ class _PlatformAuditLogScreenState extends State<PlatformAuditLogScreen> {
     }
   }
 
+  IconData _actionIcon(String actionCode) {
+    final code = actionCode.toUpperCase();
+    if (code.contains('SUSPEND')) return Icons.pause_circle_outline_rounded;
+    if (code.contains('CREATE') || code.contains('REGISTER')) return Icons.add_circle_outline_rounded;
+    if (code.contains('DELETE') || code.contains('REVOKE')) return Icons.remove_circle_outline_rounded;
+    if (code.contains('DEVICE')) return Icons.smartphone_rounded;
+    if (code.contains('UPDATE') || code.contains('EDIT')) return Icons.edit_outlined;
+    return Icons.circle_notifications_outlined;
+  }
+
   @override
   Widget build(BuildContext context) {
-    if (_loading) return const Center(child: CircularProgressIndicator(color: Colors.white));
-    if (_error != null) return Center(child: Text(_error!, style: const TextStyle(color: Colors.white)));
-    if (_entries.isEmpty) return const Center(child: Text('No audit entries yet', style: TextStyle(color: Color(0xFF94A3B8))));
+    if (_loading) return const Center(child: CircularProgressIndicator(color: AppColors.primary));
+    if (_error != null) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(_error!, style: AppTypography.body),
+            const SizedBox(height: 12),
+            FilledButton(onPressed: _load, child: const Text('Retry')),
+          ],
+        ),
+      );
+    }
 
     return RefreshIndicator(
       onRefresh: _load,
-      child: ListView.builder(
-        padding: const EdgeInsets.all(16),
-        itemCount: _entries.length,
-        itemBuilder: (context, index) {
-          final e = _entries[index];
-          return Container(
-            key: Key('platform_audit_entry_${e.id}'),
-            margin: const EdgeInsets.only(bottom: 8),
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(color: const Color(0xFF1E293B), borderRadius: BorderRadius.circular(12)),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(child: Text(e.actionCode, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13))),
-                    Text(_dateFormat.format(e.createdAt.toLocal()), style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: ResponsiveBreakpoints.maxContentWidth),
+          child: _entries.isEmpty
+              ? ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  children: const [
+                    SizedBox(height: 96),
+                    Icon(Icons.history_rounded, size: 48, color: AppColors.textTertiary),
+                    SizedBox(height: 12),
+                    Center(child: Text('No audit entries yet', style: AppTypography.bodySecondary)),
                   ],
+                )
+              : ListView.builder(
+                  padding: EdgeInsets.all(context.responsive(mobile: 16.0, desktop: 24.0)),
+                  itemCount: _entries.length,
+                  itemBuilder: (context, index) {
+                    final e = _entries[index];
+                    return Container(
+                      key: Key('platform_audit_entry_${e.id}'),
+                      margin: const EdgeInsets.only(bottom: 10),
+                      padding: const EdgeInsets.all(16),
+                      decoration: AppDecorations.card(),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(color: AppColors.secondaryContainer, borderRadius: AppDecorations.borderRadiusSm),
+                            child: Icon(_actionIcon(e.actionCode), color: AppColors.secondary, size: 18),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Expanded(child: Text(e.actionCode, style: AppTypography.title.copyWith(fontSize: 14))),
+                                    Text(_dateFormat.format(e.createdAt.toLocal()), style: AppTypography.caption),
+                                  ],
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  '${e.tenantName ?? 'Platform'} · ${e.entityType}${e.actorName != null ? ' · by ${e.actorName}' : ''}',
+                                  style: AppTypography.bodySecondary,
+                                ),
+                                if (e.reason != null) ...[
+                                  const SizedBox(height: 4),
+                                  Text(e.reason!, style: AppTypography.bodySecondary.copyWith(fontStyle: FontStyle.italic)),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  '${e.tenantName ?? 'Platform'} · ${e.entityType}${e.actorName != null ? ' · by ${e.actorName}' : ''}',
-                  style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
-                ),
-                if (e.reason != null) ...[
-                  const SizedBox(height: 4),
-                  Text(e.reason!, style: const TextStyle(color: Colors.white70, fontSize: 12, fontStyle: FontStyle.italic)),
-                ],
-              ],
-            ),
-          );
-        },
+        ),
       ),
     );
   }

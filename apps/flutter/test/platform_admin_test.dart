@@ -78,7 +78,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(PlatformShell), findsOneWidget);
-    expect(find.textContaining('Super Admin'), findsWidgets);
+    expect(find.byType(TenantListScreen), findsOneWidget);
+    expect(find.text('Tenants'), findsWidgets);
   });
 
   testWidgets('platform login shows the server error message on bad credentials', (tester) async {
@@ -259,8 +260,14 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(planBody!['plan_code'], 'PRO');
-    expect(find.textContaining('Plan: PRO'), findsOneWidget);
+    expect(find.text('PRO'), findsOneWidget);
 
+    await tester.dragUntilVisible(
+      find.byKey(const Key('tenant_feature_switch_advanced_reports')),
+      find.byType(Scrollable).first,
+      const Offset(0, -300),
+    );
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('tenant_feature_switch_advanced_reports')));
     await tester.pumpAndSettle();
 

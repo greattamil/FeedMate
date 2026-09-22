@@ -197,6 +197,186 @@ class _CartPanelState extends State<CartPanel> {
     }
   }
 
+  /// A stray tap on Checkout finalizes a real invoice immediately — this
+  /// interstitial gives the cashier one last itemized look (and a Cancel
+  /// escape hatch back to the same cart, nothing charged) before that
+  /// happens, so an accidental tap can't silently create a sale.
+  Future<void> _confirmAndCheckout() async {
+    final cart = context.read<CartModel>();
+    if (cart.isEmpty) return;
+    // Mirrors _checkout's own guard clauses — a validation failure should
+    // surface immediately, exactly as it did before this confirmation step
+    // existed, rather than opening a summary sheet for a sale that can't
+    // actually go through yet.
+    if (_selectedLocationId == null) {
+      setState(() => _error = 'Select a location before checkout');
+      return;
+    }
+    if (_splitPayment) {
+      final sum = _splitTenderSum();
+      if (sum == null) {
+        setState(() => _error = 'Enter a valid amount for every tender line');
+        return;
+      }
+      if (_quote == null || sum != _quote!.grandTotal) {
+        setState(() => _error = 'Split tender amounts must add up to exactly the invoice total');
+        return;
+      }
+    }
+    if (_anyCreditTender && _selectedCustomer == null) {
+      setState(() => _error = 'Select a customer for a credit sale');
+      return;
+    }
+    final confirmed = await _showCheckoutConfirmationSheet(cart);
+    if (confirmed == true && mounted) {
+      await _checkout();
+    }
+  }
+
+  Future<bool?> _showCheckoutConfirmationSheet(CartModel cart) {
+    final quote = _quote;
+    final estimate = _offline ? _estimatedOfflineTotal(cart) : null;
+    final tenderSummary = _splitPayment
+        ? _tenderRows
+            .map((r) => '${r.method} ${money(Decimal.tryParse(r.amountController.text.trim()) ?? Decimal.zero)}')
+            .join(' + ')
+        : (_offline ? 'CASH (offline — queued for sync)' : _tenderMethod);
+
+    Decimal? lineTotalFor(String productId) {
+      if (quote == null) return null;
+      for (final l in quote.lines) {
+        if (l.productId == productId) return l.lineTotal;
+      }
+      return null;
+    }
+
+    return showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        return DraggableScrollableSheet(
+          initialChildSize: 0.7,
+          maxChildSize: 0.92,
+          minChildSize: 0.4,
+          expand: false,
+          builder: (context, scrollController) {
+            return Container(
+              key: const Key('checkout_confirm_sheet'),
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+              ),
+              child: Column(
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(20, 16, 20, 8),
+                    child: Row(
+                      children: [
+                        Icon(Icons.receipt_long_rounded, color: AppColors.primary),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text('Confirm Sale', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Divider(height: 1),
+                  Expanded(
+                    child: ListView(
+                      key: const Key('checkout_confirm_lines_list'),
+                      controller: scrollController,
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                      children: [
+                        for (final line in cart.lines)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(line.product.name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                                      Text('Qty ${qty(line.quantity)}', style: const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+                                    ],
+                                  ),
+                                ),
+                                Text(
+                                  lineTotalFor(line.product.id) != null ? money(lineTotalFor(line.product.id)) : '—',
+                                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+                                ),
+                              ],
+                            ),
+                          ),
+                        const Divider(height: 24),
+                        if (quote != null) ...[
+                          _summaryRow('Taxable total', money(quote.taxableTotal)),
+                          if (quote.taxTotal > Decimal.zero) _summaryRow('GST tax', money(quote.taxTotal)),
+                          const SizedBox(height: 4),
+                        ],
+                        _summaryRow(
+                          'Grand Total',
+                          quote != null ? money(quote.grandTotal) : (estimate != null ? '${money(estimate)} (estimated)' : '—'),
+                          emphasize: true,
+                        ),
+                        const SizedBox(height: 12),
+                        _summaryRow('Payment', tenderSummary),
+                        if (_selectedCustomer != null) _summaryRow('Customer', _selectedCustomer!.name),
+                      ],
+                    ),
+                  ),
+                  const Divider(height: 1),
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            key: const Key('checkout_confirm_cancel'),
+                            onPressed: () => Navigator.of(context).pop(false),
+                            style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14)),
+                            child: const Text('Cancel'),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: FilledButton(
+                            key: const Key('checkout_confirm_submit'),
+                            onPressed: () => Navigator.of(context).pop(true),
+                            style: FilledButton.styleFrom(
+                              backgroundColor: AppColors.primary,
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                            ),
+                            child: const Text('Confirm Sale', style: TextStyle(fontWeight: FontWeight.bold)),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _summaryRow(String label, String value, {bool emphasize = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: TextStyle(fontSize: emphasize ? 16 : 13, fontWeight: emphasize ? FontWeight.w700 : FontWeight.w500, color: emphasize ? Colors.black : const Color(0xFF64748B))),
+          Text(value, style: TextStyle(fontSize: emphasize ? 16 : 13, fontWeight: FontWeight.w700, color: emphasize ? AppColors.primary : Colors.black)),
+        ],
+      ),
+    );
+  }
+
   Future<void> _checkout({bool overrideCreditLimit = false, String? overrideReason}) async {
     final cart = context.read<CartModel>();
     if (cart.isEmpty) return;
@@ -834,7 +1014,7 @@ class _CartPanelState extends State<CartPanel> {
                               : (_tenderMethod == 'CREDIT' ? AppColors.secondary : AppColors.primary))
                           .withValues(alpha: 0.5),
                     ),
-                    onPressed: canCheckout ? () => _checkout() : null,
+                    onPressed: canCheckout ? _confirmAndCheckout : null,
                     child: _checkingOut
                         ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                         : Text(

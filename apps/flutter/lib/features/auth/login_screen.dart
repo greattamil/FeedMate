@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/auth_session.dart';
-import '../../core/secure_storage.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_decorations.dart';
 import '../shell/app_shell.dart';
@@ -17,18 +15,9 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _usernameController = TextEditingController(text: 'owner');
+  final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _submitting = false;
-  String? _deviceUuid;
-
-  @override
-  void initState() {
-    super.initState();
-    context.read<SecureStorage>().getOrCreateDeviceUuid().then((uuid) {
-      if (mounted) setState(() => _deviceUuid = uuid);
-    });
-  }
 
   Future<void> _submit() async {
     setState(() => _submitting = true);
@@ -150,60 +139,24 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ),
 
-                if (_deviceUuid != null) ...[
-                  const SizedBox(height: 20),
-                  // Device Identity & Pairing Card
-                  InkWell(
-                    key: const Key('device_uuid_row'),
-                    onTap: () {
-                      Clipboard.setData(ClipboardData(text: _deviceUuid!));
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Device ID copied'), duration: Duration(seconds: 1)),
+                const SizedBox(height: 20),
+                TextButton.icon(
+                  key: const Key('register_device_link'),
+                  icon: const Icon(Icons.qr_code_2_rounded, size: 18),
+                  label: const Text('Register this device with a pairing code', style: TextStyle(fontWeight: FontWeight.w600)),
+                  onPressed: () async {
+                    final registered = await Navigator.of(context).push<bool>(
+                      MaterialPageRoute(builder: (_) => const PairDeviceScreen()),
+                    );
+                    if (!mounted) return;
+                    final messenger = ScaffoldMessenger.of(context);
+                    if (registered == true) {
+                      messenger.showSnackBar(
+                        const SnackBar(content: Text('Device registered — you can log in now')),
                       );
-                    },
-                    borderRadius: BorderRadius.circular(12),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                      decoration: BoxDecoration(
-                        color: AppColors.surfaceSecondary,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: AppColors.border),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(Icons.smartphone_rounded, size: 16, color: AppColors.textSecondary),
-                          const SizedBox(width: 8),
-                          Flexible(
-                            child: Text(
-                              'Device: $_deviceUuid  (tap to copy)',
-                              style: const TextStyle(fontSize: 11, color: AppColors.textSecondary, fontWeight: FontWeight.w500),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextButton.icon(
-                    key: const Key('register_device_link'),
-                    icon: const Icon(Icons.qr_code_2_rounded, size: 18),
-                    label: const Text('Register this device with a pairing code', style: TextStyle(fontWeight: FontWeight.w600)),
-                    onPressed: () async {
-                      final registered = await Navigator.of(context).push<bool>(
-                        MaterialPageRoute(builder: (_) => const PairDeviceScreen()),
-                      );
-                      if (!mounted) return;
-                      final messenger = ScaffoldMessenger.of(context);
-                      if (registered == true) {
-                        messenger.showSnackBar(
-                          const SnackBar(content: Text('Device registered — you can log in now')),
-                        );
-                      }
-                    },
-                  ),
-                ],
+                    }
+                  },
+                ),
               ],
             ),
           ),

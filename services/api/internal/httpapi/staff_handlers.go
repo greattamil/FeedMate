@@ -196,6 +196,86 @@ func (h *StaffHandlers) SetUserStatus(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+type updateUserRequest struct {
+	DisplayName string `json:"display_name"`
+	Phone       string `json:"phone,omitempty"`
+	Email       string `json:"email,omitempty"`
+}
+
+// UpdateUser changes a staff member's profile fields (never username or
+// password — see ResetUserPassword for the latter).
+func (h *StaffHandlers) UpdateUser(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	claims, ok := reqctx.Claims(r.Context())
+	if !ok {
+		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid user id")
+		return
+	}
+	var req updateUserRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid request body")
+		return
+	}
+	if err := h.Identity.UpdateUser(r.Context(), claims.TenantID, id, identity.UpdateUserInput{
+		DisplayName: req.DisplayName, Phone: req.Phone, Email: req.Email,
+	}); err != nil {
+		switch {
+		case errors.Is(err, identity.ErrValidation):
+			WriteError(w, reqID, CodeValidation, err.Error())
+		case errors.Is(err, identity.ErrNotFound):
+			WriteError(w, reqID, CodeNotFound, "user not found")
+		default:
+			WriteError(w, reqID, CodeInternal, "failed to update user: "+err.Error())
+		}
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+type resetUserPasswordRequest struct {
+	NewPassword string `json:"new_password"`
+}
+
+// ResetUserPassword lets an admin set a new password for a staff account
+// directly — there is no email/SMS self-service reset flow in this app, so
+// a manager sets it and hands the new password to the staff member out of
+// band.
+func (h *StaffHandlers) ResetUserPassword(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	claims, ok := reqctx.Claims(r.Context())
+	if !ok {
+		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid user id")
+		return
+	}
+	var req resetUserPasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid request body")
+		return
+	}
+	if err := h.Identity.SetPassword(r.Context(), claims.TenantID, id, req.NewPassword); err != nil {
+		switch {
+		case errors.Is(err, identity.ErrValidation):
+			WriteError(w, reqID, CodeValidation, err.Error())
+		case errors.Is(err, identity.ErrNotFound):
+			WriteError(w, reqID, CodeNotFound, "user not found")
+		default:
+			WriteError(w, reqID, CodeInternal, "failed to reset password: "+err.Error())
+		}
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // ListRoles returns every assignable role for the tenant (system defaults
 // plus any tenant-defined custom roles), for the staff form's role picker.
 func (h *StaffHandlers) ListRoles(w http.ResponseWriter, r *http.Request) {

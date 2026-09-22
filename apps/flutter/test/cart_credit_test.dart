@@ -171,6 +171,8 @@ void main() {
 
     await tester.tap(find.byKey(const Key('checkout_button')));
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('checkout_confirm_submit')));
+    await tester.pumpAndSettle();
 
     expect(find.text('Credit Limit Exceeded'), findsOneWidget);
     await tester.enterText(find.byKey(const Key('override_reason_field')), 'Regular customer, approved by owner');
@@ -274,6 +276,8 @@ void main() {
 
     await tester.tap(find.byKey(const Key('checkout_button')));
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('checkout_confirm_submit')));
+    await tester.pumpAndSettle();
 
     expect(find.text('INV-0002'), findsWidgets);
     expect(find.byKey(const Key('invoice_detail_grand_total')), findsOneWidget);
@@ -375,6 +379,8 @@ void main() {
 
     await tester.tap(find.byKey(const Key('checkout_button')));
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('checkout_confirm_submit')));
+    await tester.pumpAndSettle();
 
     expect(postedBody, isNotNull);
     expect(postedBody!.containsKey('customer_id'), isFalse);
@@ -433,9 +439,65 @@ void main() {
 
     await tester.tap(find.byKey(const Key('checkout_button')));
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('checkout_confirm_submit')));
+    await tester.pumpAndSettle();
 
     expect(postedBody, isNotNull);
     expect(postedBody!['customer_id'], 'cust-1');
+  });
+
+  testWidgets('checkout opens a confirmation summary first, and Cancel returns to the cart without charging', (tester) async {
+    final cart = CartModel()..addProduct(_testProduct(), quantity: Decimal.parse('2'));
+    var invoiceCallCount = 0;
+
+    final client = MockClient((request) async {
+      if (request.url.path == '/api/v1/locations') {
+        return _jsonOk({
+          'locations': [
+            {'id': 'loc-1', 'name': 'Main Store'}
+          ]
+        });
+      }
+      if (request.url.path == '/api/v1/pos/quote') {
+        return _jsonOk({
+          'lines': [
+            {'product_id': 'p1', 'product_name': 'Cattle Feed 50kg', 'line_total': '2400.00'}
+          ],
+          'taxable_total': '2400.00',
+          'tax_total': '120.00',
+          'grand_total': '2520.00',
+        });
+      }
+      if (request.url.path == '/api/v1/pos/invoices') {
+        invoiceCallCount++;
+        return _jsonOk({'invoice_id': 'x', 'invoice_number': 'X', 'grand_total': '2520.00', 'duplicate': false});
+      }
+      return http.Response('not found', 404);
+    });
+
+    await tester.pumpWidget(_wrapCartScreen(httpClient: client, cart: cart));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('checkout_button')));
+    await tester.pumpAndSettle();
+
+    // A stray tap must not have charged anything yet — the summary sheet
+    // shows the full itemized breakdown first.
+    expect(invoiceCallCount, 0);
+    expect(find.byKey(const Key('checkout_confirm_sheet')), findsOneWidget);
+    final sheetFinder = find.byKey(const Key('checkout_confirm_lines_list'));
+    expect(find.descendant(of: sheetFinder, matching: find.text('Cattle Feed 50kg')), findsOneWidget);
+    expect(find.descendant(of: sheetFinder, matching: find.text('Qty 2')), findsOneWidget);
+    expect(find.text('₹2,520.00'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('checkout_confirm_cancel')));
+    await tester.pumpAndSettle();
+
+    // Cancel closes the sheet, charges nothing, and leaves the cart intact.
+    expect(invoiceCallCount, 0);
+    expect(find.byKey(const Key('checkout_confirm_sheet')), findsNothing);
+    expect(cart.isEmpty, isFalse);
+    expect(find.byKey(const Key('checkout_button')), findsOneWidget);
   });
 
   testWidgets('an empty cart hides the tender bar entirely, not just disables it', (tester) async {

@@ -332,6 +332,39 @@ func (s *Service) SetUserStatus(ctx context.Context, tenantID, userID uuid.UUID,
 	})
 }
 
+type UpdateUserInput struct {
+	DisplayName string
+	Phone       string
+	Email       string
+}
+
+// UpdateUser changes a staff member's profile fields — display name, phone,
+// email. Username and password are never touched here (see SetPassword).
+func (s *Service) UpdateUser(ctx context.Context, tenantID, userID uuid.UUID, in UpdateUserInput) error {
+	if in.DisplayName == "" {
+		return fmt.Errorf("%w: display_name is required", ErrValidation)
+	}
+	return s.db.WithTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
+		return UpdateUser(ctx, tx, userID, in.DisplayName, in.Phone, in.Email)
+	})
+}
+
+// SetPassword overwrites a staff account's password (admin-initiated
+// reset — see repository.SetPasswordHash's doc comment). Same minimum
+// length rule as CreateUser.
+func (s *Service) SetPassword(ctx context.Context, tenantID, userID uuid.UUID, newPassword string) error {
+	if len(newPassword) < 8 {
+		return fmt.Errorf("%w: password must be at least 8 characters", ErrValidation)
+	}
+	hash, err := auth.HashPassword(newPassword, s.bcryptCost)
+	if err != nil {
+		return fmt.Errorf("hash password: %w", err)
+	}
+	return s.db.WithTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
+		return SetPasswordHash(ctx, tx, userID, hash)
+	})
+}
+
 func (s *Service) ListRoles(ctx context.Context, tenantID uuid.UUID) ([]Role, error) {
 	var roles []Role
 	err := s.db.WithTenantReadTx(ctx, tenantID, func(tx pgx.Tx) error {

@@ -119,8 +119,23 @@ class StaffApi {
     return StaffDetail.fromJson(response);
   }
 
+  Future<void> update(String userId, {required String displayName, String? phone, String? email}) async {
+    await client.putAuthed('/api/v1/users/$userId', {
+      'display_name': displayName,
+      if (phone != null && phone.isNotEmpty) 'phone': phone,
+      if (email != null && email.isNotEmpty) 'email': email,
+    });
+  }
+
   Future<void> setActive(String userId, bool active) async {
     await client.postAuthed('/api/v1/users/$userId/status', {'active': active});
+  }
+
+  /// Admin-initiated reset — there is no email/SMS self-service flow here,
+  /// so a manager sets a new password directly and hands it to the staff
+  /// member out of band.
+  Future<void> resetPassword(String userId, String newPassword) async {
+    await client.postAuthed('/api/v1/users/$userId/reset-password', {'new_password': newPassword});
   }
 
   Future<void> setRoles(String userId, List<String> roleIds) async {

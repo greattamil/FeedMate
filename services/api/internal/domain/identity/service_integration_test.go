@@ -161,6 +161,84 @@ func TestCreateUser_ListsAndAssignsRolesAndRejectsDuplicateUsername(t *testing.T
 	}
 }
 
+func TestUpdateUser_ChangesProfileNeverUsernameOrPassword(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	tenantID, _, _ := seedFixture(t, db, "IntegrationTest123!")
+	svc := identity.NewService(db, "test_signing_key", 15*time.Minute, 30*24*time.Hour, 4)
+
+	newUsername := "cashier_" + uuid.NewString()[:8]
+	userID, err := svc.CreateUser(context.Background(), tenantID, identity.CreateUserInput{
+		Username: newUsername, Password: "a-strong-password", DisplayName: "Original Name", Phone: "1111111111",
+	})
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	if err := svc.UpdateUser(context.Background(), tenantID, userID, identity.UpdateUserInput{
+		DisplayName: "Renamed Cashier", Phone: "2222222222", Email: "cashier@example.com",
+	}); err != nil {
+		t.Fatalf("update user: %v", err)
+	}
+
+	detail, err := svc.GetUserDetail(context.Background(), tenantID, userID)
+	if err != nil {
+		t.Fatalf("get user detail: %v", err)
+	}
+	if detail.User.DisplayName != "Renamed Cashier" {
+		t.Fatalf("expected renamed display name, got %q", detail.User.DisplayName)
+	}
+	if detail.User.Phone == nil || *detail.User.Phone != "2222222222" {
+		t.Fatalf("expected updated phone, got %+v", detail.User.Phone)
+	}
+	if detail.User.Email == nil || *detail.User.Email != "cashier@example.com" {
+		t.Fatalf("expected updated email, got %+v", detail.User.Email)
+	}
+	if detail.User.Username != newUsername {
+		t.Fatalf("username must never change via UpdateUser, got %q", detail.User.Username)
+	}
+
+	if err := svc.UpdateUser(context.Background(), tenantID, userID, identity.UpdateUserInput{DisplayName: ""}); !errors.Is(err, identity.ErrValidation) {
+		t.Fatalf("expected ErrValidation for an empty display name, got: %v", err)
+	}
+
+	if err := svc.UpdateUser(context.Background(), tenantID, uuid.New(), identity.UpdateUserInput{DisplayName: "X"}); !errors.Is(err, identity.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for a nonexistent user, got: %v", err)
+	}
+}
+
+func TestSetPassword_ResetsPasswordAndAllowsLoginWithNewOne(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	tenantID, deviceUUID, username := seedFixture(t, db, "OriginalPassword123!")
+	svc := identity.NewService(db, "test_signing_key", 15*time.Minute, 30*24*time.Hour, 4)
+
+	// The old password must stop working, and the new one must work, after
+	// an admin-initiated reset (see repository.SetPasswordHash's doc
+	// comment — there is no self-service email/SMS reset flow here).
+	page, err := svc.ListUsers(context.Background(), tenantID, username, 10, 0)
+	if err != nil || len(page.Users) != 1 {
+		t.Fatalf("list users for fixture: %v (%+v)", err, page)
+	}
+	userID := page.Users[0].ID
+
+	if err := svc.SetPassword(context.Background(), tenantID, userID, "BrandNewPassword456!"); err != nil {
+		t.Fatalf("set password: %v", err)
+	}
+
+	if _, err := svc.Login(context.Background(), deviceUUID, username, "OriginalPassword123!"); err == nil {
+		t.Fatalf("expected login with the old password to fail after reset")
+	}
+
+	if _, err := svc.Login(context.Background(), deviceUUID, username, "BrandNewPassword456!"); err != nil {
+		t.Fatalf("expected login with the new password to succeed, got: %v", err)
+	}
+
+	if err := svc.SetPassword(context.Background(), tenantID, userID, "short"); !errors.Is(err, identity.ErrValidation) {
+		t.Fatalf("expected ErrValidation for a too-short password, got: %v", err)
+	}
+}
+
 func TestSetUserStatus_DeactivatedUserCannotLogIn(t *testing.T) {
 	db := connectTest(t)
 	defer db.Close()

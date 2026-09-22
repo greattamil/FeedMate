@@ -283,6 +283,37 @@ func SetUserStatus(ctx context.Context, tx pgx.Tx, id uuid.UUID, status string) 
 	return nil
 }
 
+// UpdateUser changes a staff member's contact/profile fields — never their
+// username (that's the login identifier other rows may reference by
+// convention in reports) and never their password (see SetPasswordHash).
+func UpdateUser(ctx context.Context, tx pgx.Tx, id uuid.UUID, displayName, phone, email string) error {
+	tag, err := tx.Exec(ctx, `
+		UPDATE users SET display_name = $2, phone = $3, email = $4 WHERE id = $1
+	`, id, displayName, nullIfEmptyStr(phone), nullIfEmptyStr(email))
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetPasswordHash overwrites a staff account's password — used for an
+// admin-initiated reset (this shop has no email/SMS flow for self-service
+// reset, so a manager sets a new password directly and hands it to the
+// staff member out of band).
+func SetPasswordHash(ctx context.Context, tx pgx.Tx, id uuid.UUID, passwordHash string) error {
+	tag, err := tx.Exec(ctx, `UPDATE users SET password_hash = $2, failed_login_count = 0, locked_until = NULL WHERE id = $1`, id, passwordHash)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // Role is one assignable role — either a system default (is_system_role,
 // seeded once per tenant at provisioning) or a tenant-defined custom role.
 type Role struct {

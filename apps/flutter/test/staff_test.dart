@@ -186,4 +186,87 @@ void main() {
 
     expect(roleIds.toSet(), {'role-owner', 'role-cashier'});
   });
+
+  testWidgets('Staff detail edits the profile (never username/password) via the Edit button', (tester) async {
+    var displayName = 'Cashier One';
+    String? phone;
+    Map<String, dynamic>? putBody;
+
+    final client = MockClient((request) async {
+      if (request.method == 'PUT' && request.url.path == '/api/v1/users/u1') {
+        putBody = jsonDecode(request.body) as Map<String, dynamic>;
+        displayName = putBody!['display_name'] as String;
+        phone = putBody!['phone'] as String?;
+        return http.Response('', 204);
+      }
+      if (request.url.path == '/api/v1/users/u1') {
+        return _jsonOk({
+          'id': 'u1', 'username': 'cashier1', 'display_name': displayName,
+          if (phone != null) 'phone': phone, 'status': 'ACTIVE', 'role_ids': <String>[],
+        });
+      }
+      if (request.url.path == '/api/v1/roles') {
+        return _jsonOk({'roles': [_ownerRole(), _cashierRole()]});
+      }
+      return http.Response('not found', 404);
+    });
+
+    await tester.pumpWidget(_wrapWithProviders(httpClient: client, child: const StaffDetailScreen(userId: 'u1')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('edit_staff_button')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('staff_edit_display_name_field')), findsOneWidget);
+    await tester.enterText(find.byKey(const Key('staff_edit_display_name_field')), 'Cashier One Renamed');
+    await tester.enterText(find.byKey(const Key('staff_edit_phone_field')), '9998887770');
+    await tester.tap(find.byKey(const Key('staff_edit_submit')));
+    await tester.pumpAndSettle();
+
+    expect(putBody, isNotNull);
+    expect(putBody!['display_name'], 'Cashier One Renamed');
+    expect(putBody!['phone'], '9998887770');
+    expect(putBody!.containsKey('username'), isFalse);
+    expect(putBody!.containsKey('password'), isFalse);
+    expect(find.text('Cashier One Renamed'), findsWidgets);
+  });
+
+  testWidgets('Staff detail resets a password via the Reset Password button', (tester) async {
+    Map<String, dynamic>? resetBody;
+
+    final client = MockClient((request) async {
+      if (request.method == 'POST' && request.url.path == '/api/v1/users/u1/reset-password') {
+        resetBody = jsonDecode(request.body) as Map<String, dynamic>;
+        return http.Response('', 204);
+      }
+      if (request.url.path == '/api/v1/users/u1') {
+        return _jsonOk({'id': 'u1', 'username': 'cashier1', 'display_name': 'Cashier One', 'status': 'ACTIVE', 'role_ids': <String>[]});
+      }
+      if (request.url.path == '/api/v1/roles') {
+        return _jsonOk({'roles': [_ownerRole(), _cashierRole()]});
+      }
+      return http.Response('not found', 404);
+    });
+
+    await tester.pumpWidget(_wrapWithProviders(httpClient: client, child: const StaffDetailScreen(userId: 'u1')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('reset_staff_password_button')));
+    await tester.pumpAndSettle();
+
+    // Too short — rejected client-side, nothing sent yet.
+    await tester.enterText(find.byKey(const Key('reset_password_field')), 'short');
+    await tester.tap(find.byKey(const Key('reset_password_submit')));
+    await tester.pumpAndSettle();
+    expect(find.text('At least 8 characters'), findsOneWidget);
+    expect(resetBody, isNull);
+
+    await tester.enterText(find.byKey(const Key('reset_password_field')), 'a-strong-new-password');
+    await tester.tap(find.byKey(const Key('reset_password_submit')));
+    await tester.pumpAndSettle();
+
+    expect(resetBody, isNotNull);
+    expect(resetBody!['new_password'], 'a-strong-new-password');
+    expect(find.textContaining('Password reset'), findsOneWidget);
+  });
 }

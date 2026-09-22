@@ -176,7 +176,9 @@ func main() {
 			r.With(appmw.RequirePermission("user.manage")).Post("/users", staffHandlers.CreateUser)
 			r.With(appmw.RequirePermission("user.manage")).Get("/users", staffHandlers.ListUsers)
 			r.With(appmw.RequirePermission("user.manage")).Get("/users/{id}", staffHandlers.GetUser)
+			r.With(appmw.RequirePermission("user.manage")).Put("/users/{id}", staffHandlers.UpdateUser)
 			r.With(appmw.RequirePermission("user.manage")).Post("/users/{id}/status", staffHandlers.SetUserStatus)
+			r.With(appmw.RequirePermission("user.manage")).Post("/users/{id}/reset-password", staffHandlers.ResetUserPassword)
 			r.With(appmw.RequirePermission("user.manage")).Put("/users/{id}/roles", staffHandlers.SetUserRoles)
 			r.With(appmw.RequirePermission("user.manage")).Get("/roles", staffHandlers.ListRoles)
 

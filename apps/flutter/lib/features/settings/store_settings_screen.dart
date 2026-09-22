@@ -114,39 +114,57 @@ class _StoreSettingsScreenState extends State<StoreSettingsScreen> {
   }
 
   Future<void> _pickLogo() async {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.image,
-      withData: true,
-    );
-    final files = result?.files;
-    if (files == null || files.isEmpty) return;
-    final picked = files.first;
-    if (picked.bytes == null) return;
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.image,
+        withData: true,
+      );
+      final files = result?.files;
+      if (files == null || files.isEmpty) return;
+      final picked = files.first;
+      if (picked.bytes == null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not read that file — please try a different image')),
+        );
+        return;
+      }
 
-    if (picked.bytes!.length > _maxLogoBytes) {
+      if (picked.bytes!.length > _maxLogoBytes) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Logo image is too large — please use one under ~800KB')),
+        );
+        return;
+      }
+
+      final ext = (picked.extension ?? '').toLowerCase();
+      final mimeType = switch (ext) {
+        'png' => 'image/png',
+        'jpg' || 'jpeg' => 'image/jpeg',
+        'webp' => 'image/webp',
+        _ => null,
+      };
+      if (mimeType == null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please choose a PNG, JPEG, or WEBP image')),
+        );
+        return;
+      }
+
+      setState(() => _pendingLogoDataUri = 'data:$mimeType;base64,${base64Encode(picked.bytes!)}');
+    } catch (e, st) {
+      // FilePicker's web implementation touches the DOM directly (creates
+      // and clicks a hidden <input type=file>) — on some browsers/extension
+      // combinations that can throw instead of just returning null. Never
+      // let that vanish as a silent, unreported failure.
+      debugPrint('StoreSettingsScreen._pickLogo failed: $e\n$st');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Logo image is too large — please use one under ~800KB')),
+        SnackBar(content: Text('Could not open the file picker: $e')),
       );
-      return;
     }
-
-    final ext = (picked.extension ?? '').toLowerCase();
-    final mimeType = switch (ext) {
-      'png' => 'image/png',
-      'jpg' || 'jpeg' => 'image/jpeg',
-      'webp' => 'image/webp',
-      _ => null,
-    };
-    if (mimeType == null) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please choose a PNG, JPEG, or WEBP image')),
-      );
-      return;
-    }
-
-    setState(() => _pendingLogoDataUri = 'data:$mimeType;base64,${base64Encode(picked.bytes!)}');
   }
 
   void _removeLogo() {
@@ -168,6 +186,18 @@ class _StoreSettingsScreenState extends State<StoreSettingsScreen> {
       if (!mounted) return;
       setState(() {
         _error = e.message;
+        _loading = false;
+      });
+    } catch (e, st) {
+      // Anything other than ApiError (a bad response shape, a rendering
+      // bug in _fillControllers, etc.) must still surface — silently
+      // leaving _loading true forever renders as an unexplained frozen
+      // spinner with only a console error, which is exactly what's
+      // impossible for a user to report back usefully.
+      debugPrint('StoreSettingsScreen._load failed: $e\n$st');
+      if (!mounted) return;
+      setState(() {
+        _error = 'Unexpected error loading store settings: $e';
         _loading = false;
       });
     }
@@ -207,6 +237,11 @@ class _StoreSettingsScreenState extends State<StoreSettingsScreen> {
       if (!mounted) return;
       setState(() => _saving = false);
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    } catch (e, st) {
+      debugPrint('StoreSettingsScreen._save failed: $e\n$st');
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Save failed: $e')));
     }
   }
 

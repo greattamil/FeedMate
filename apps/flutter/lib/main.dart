@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show PlatformDispatcher;
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform, kIsWeb;
@@ -42,8 +43,42 @@ String _defaultApiBaseUrl() {
   return 'http://127.0.0.1:8081';
 }
 
+/// Lets any part of the app show a SnackBar without needing a screen-local
+/// BuildContext — used by the global error handlers below, which by
+/// definition may fire from code that isn't inside any particular screen's
+/// widget tree.
+final rootScaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
+
+/// Before this, an uncaught exception anywhere in the app (outside a
+/// screen's own try/catch) vanished into the browser/native console with
+/// zero on-screen indication — a user just saw "nothing happened" and had
+/// no way to report anything more specific than that. Both Flutter's own
+/// framework errors (build/layout/paint) and plain Dart async errors are
+/// now guaranteed to at least show a red SnackBar with the real message,
+/// on top of the console log every framework still also prints.
+void _showGlobalError(String message) {
+  rootScaffoldMessengerKey.currentState?.showSnackBar(
+    SnackBar(
+      content: Text('Unexpected error: $message'),
+      backgroundColor: Colors.red.shade700,
+      duration: const Duration(seconds: 8),
+    ),
+  );
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);
+    _showGlobalError(details.exceptionAsString());
+  };
+  PlatformDispatcher.instance.onError = (error, stack) {
+    debugPrint('Uncaught error: $error\n$stack');
+    _showGlobalError(error.toString());
+    return true;
+  };
+
   final storage = SecureStorage();
   final localDb = _supportsEncryptedLocalDb ? await openEncryptedLocalDatabase(storage) : InMemoryLocalDatabase();
   runApp(FeedMateApp(apiBaseUrl: _defaultApiBaseUrl(), storageOverride: storage, localDbOverride: localDb));
@@ -93,6 +128,7 @@ class FeedMateApp extends StatelessWidget {
         ],
       ],
       child: MaterialApp(
+        scaffoldMessengerKey: rootScaffoldMessengerKey,
         onGenerateTitle: (context) => context.watch<BrandingProvider>().appName,
         theme: AppTheme.lightTheme,
         home: localDb != null ? const _ConnectivitySyncGate(child: _SessionGate()) : const _SessionGate(),

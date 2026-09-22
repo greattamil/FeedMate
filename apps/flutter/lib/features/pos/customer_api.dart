@@ -95,6 +95,7 @@ class LedgerEntry {
   final String id;
   final DateTime entryDate;
   final String documentType;
+  final String documentId;
   final Decimal debit;
   final Decimal credit;
   final String? description;
@@ -103,6 +104,7 @@ class LedgerEntry {
     required this.id,
     required this.entryDate,
     required this.documentType,
+    required this.documentId,
     required this.debit,
     required this.credit,
     required this.description,
@@ -113,6 +115,7 @@ class LedgerEntry {
       id: json['id'] as String,
       entryDate: DateTime.parse(json['entry_date'] as String),
       documentType: json['document_type'] as String,
+      documentId: json['document_id'] as String? ?? '',
       debit: Decimal.parse(json['debit'] as String),
       credit: Decimal.parse(json['credit'] as String),
       description: json['description'] as String?,

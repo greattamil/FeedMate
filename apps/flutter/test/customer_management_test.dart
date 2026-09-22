@@ -17,6 +17,7 @@ import 'package:feedmate_app/core/auth_session.dart';
 import 'package:feedmate_app/core/secure_storage.dart';
 import 'package:feedmate_app/features/customers/customer_ledger_screen.dart';
 import 'package:feedmate_app/features/customers/customer_list_screen.dart';
+import 'package:feedmate_app/features/pos/invoice_detail_screen.dart';
 
 http.Response _jsonOk(Map<String, dynamic> body) => http.Response(jsonEncode(body), 200);
 
@@ -95,10 +96,60 @@ void main() {
     expect(find.text('-₹1,200.00'), findsOneWidget);
     expect(find.text('Over credit limit'), findsOneWidget);
 
+    // Invoices tab (default): shows the invoice, not the receipt.
+    expect(find.text('Credit sale INV-0002'), findsOneWidget);
+    expect(find.text('Cash received'), findsNothing);
+
+    // Payments tab: shows the receipt, not the invoice.
+    await tester.tap(find.textContaining('Payments'));
+    await tester.pumpAndSettle();
+    expect(find.text('Cash received'), findsOneWidget);
+    expect(find.text('-₹500.00'), findsOneWidget);
+    expect(find.text('Credit sale INV-0002'), findsNothing);
+
+    // Transactions tab: the complete combined history, both entries.
+    await tester.tap(find.textContaining('Transactions'));
+    await tester.pumpAndSettle();
     expect(find.text('Credit sale INV-0002'), findsOneWidget);
     expect(find.text('Cash received'), findsOneWidget);
     expect(find.text('+₹1,200.00'), findsOneWidget);
     expect(find.text('-₹500.00'), findsOneWidget);
+  });
+
+  testWidgets('Tapping an invoice in the Invoices tab opens its full detail screen', (tester) async {
+    final client = MockClient((request) async {
+      if (request.url.path == '/api/v1/customers/cust-11') {
+        return _jsonOk({
+          'id': 'cust-11', 'customer_code': 'FARM011', 'name': 'Invoice Nav Farmer',
+          'customer_type': 'FARMER', 'phone': null, 'status': 'ACTIVE',
+          'credit_limit': '5000.00', 'outstanding_balance': '1200.00',
+          'available_credit': '3800.00', 'risk_status': 'NORMAL',
+        });
+      }
+      if (request.url.path == '/api/v1/customers/cust-11/ledger') {
+        return _jsonOk({
+          'entries': [
+            {
+              'id': 'e2', 'entry_date': '2026-09-12T12:00:00+05:30', 'document_type': 'INVOICE',
+              'document_id': 'inv-2', 'debit': '1200.00', 'credit': '0.00', 'description': 'Credit sale INV-0002',
+            },
+          ]
+        });
+      }
+      return http.Response('not found', 404);
+    });
+
+    await tester.pumpWidget(_wrapWithProviders(
+      httpClient: client,
+      child: const CustomerLedgerScreen(customerId: 'cust-11'),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('customer_ledger_invoice_inv-2')));
+    await tester.pumpAndSettle();
+
+    final detailScreen = tester.widget<InvoiceDetailScreen>(find.byType(InvoiceDetailScreen));
+    expect(detailScreen.invoiceId, 'inv-2');
   });
 
   testWidgets('Customer list shows a Clear badge for a zero balance, not a Due amount', (tester) async {
@@ -146,8 +197,12 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    expect(find.text('No ledger entries yet'), findsOneWidget);
+    expect(find.text('No invoices for this customer yet'), findsOneWidget);
     expect(find.text('Over credit limit'), findsNothing);
+
+    await tester.tap(find.textContaining('Transactions'));
+    await tester.pumpAndSettle();
+    expect(find.text('No ledger entries yet'), findsOneWidget);
   });
 
   testWidgets('Record Receipt posts a manual receipt and refreshes the balance', (tester) async {
@@ -412,7 +467,7 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    expect(find.text('Original Farmer'), findsOneWidget);
+    expect(find.text('Original Farmer'), findsWidgets);
 
     await tester.tap(find.byKey(const Key('edit_customer_button')));
     await tester.pumpAndSettle();
@@ -433,7 +488,7 @@ void main() {
     expect(putBody!['customer_type'], 'FARMER');
 
     expect(find.text('Customer updated'), findsOneWidget);
-    expect(find.text('Renamed Farmer'), findsOneWidget);
+    expect(find.text('Renamed Farmer'), findsWidgets);
   });
 
   testWidgets('Deactivate/reactivate toggle requires confirmation and posts the status change', (tester) async {

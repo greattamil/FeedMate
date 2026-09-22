@@ -6,17 +6,22 @@ import 'package:provider/provider.dart';
 import '../../core/api_client.dart';
 import '../../core/api_error.dart';
 import '../../core/auth_session.dart';
+import '../../core/responsive.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_decorations.dart';
 import '../../core/theme/app_typography.dart';
 import '../pos/customer_api.dart';
+import '../pos/invoice_detail_screen.dart';
 import 'customer_form_dialog.dart';
 import 'receipt_api.dart';
 import '../../core/number_format.dart';
 
 /// A customer's ledger: current credit position plus the itemized history
 /// behind it, and the full CRUD actions for their master record (edit,
-/// deactivate/reactivate).
+/// deactivate/reactivate). Presented as three tabs — Invoices, Payments,
+/// Transactions — over one shared load of the same ledger feed, so every
+/// view is guaranteed consistent with the others (no separate queries that
+/// could drift apart).
 class CustomerLedgerScreen extends StatefulWidget {
   final String customerId;
   const CustomerLedgerScreen({super.key, required this.customerId});
@@ -25,18 +30,41 @@ class CustomerLedgerScreen extends StatefulWidget {
   State<CustomerLedgerScreen> createState() => _CustomerLedgerScreenState();
 }
 
-class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
+class _CustomerLedgerScreenState extends State<CustomerLedgerScreen>
+    with SingleTickerProviderStateMixin {
   CustomerDetail? _detail;
   List<LedgerEntry> _entries = [];
   bool _loading = true;
   String? _error;
+  late final TabController _tabController;
 
   static final _dateFormat = DateFormat('dd MMM yyyy, h:mm a');
+
+  /// The invoice itself, as a debit against the customer — one row per
+  /// invoice regardless of how it was paid.
+  List<LedgerEntry> get _invoiceEntries =>
+      _entries.where((e) => e.documentType == 'INVOICE' && e.debit > Decimal.zero).toList();
+
+  /// Actual money received from the customer: standalone receipts, plus the
+  /// paid-at-sale portion of an invoice (a real payment, just posted as
+  /// part of the same document as the sale). Excludes credit notes/contra/
+  /// adjustment entries, which reduce the balance without cash changing
+  /// hands.
+  List<LedgerEntry> get _paymentEntries => _entries
+      .where((e) => e.credit > Decimal.zero && (e.documentType == 'RECEIPT' || e.documentType == 'INVOICE'))
+      .toList();
 
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 3, vsync: this);
     _load();
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -264,65 +292,235 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
                 backgroundColor: AppColors.primary,
               ),
             ),
-      body: RefreshIndicator(
-        onRefresh: _load,
-        child: _loading
-            ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
-            : _error != null
-                ? ListView(children: [
-                    Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: AppColors.dangerContainer,
+      body: _loading
+          ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+          : _error != null
+              ? ListView(children: [
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: AppColors.dangerContainer,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(_error!, style: const TextStyle(color: AppColors.onDangerContainer)),
+                    ),
+                  ),
+                ])
+              : Column(
+                  children: [
+                    if (detail != null)
+                      ResponsiveContainer(
+                        maxWidth: ResponsiveBreakpoints.maxContentWidth,
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                        child: _buildSummaryCard(detail),
+                      ),
+                    Container(
+                      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                      decoration: BoxDecoration(
+                        color: AppColors.surface,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: AppColors.border),
+                      ),
+                      child: TabBar(
+                        key: const Key('customer_ledger_tabs'),
+                        controller: _tabController,
+                        indicator: BoxDecoration(
+                          gradient: AppColors.gradientIndigo,
                           borderRadius: BorderRadius.circular(10),
                         ),
-                        child: Text(_error!, style: const TextStyle(color: AppColors.onDangerContainer)),
+                        indicatorSize: TabBarIndicatorSize.tab,
+                        indicatorPadding: const EdgeInsets.all(4),
+                        dividerColor: Colors.transparent,
+                        labelColor: Colors.white,
+                        unselectedLabelColor: AppColors.textSecondary,
+                        labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                        unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                        tabs: [
+                          Tab(text: 'Invoices (${_invoiceEntries.length})'),
+                          Tab(text: 'Payments (${_paymentEntries.length})'),
+                          Tab(text: 'Transactions (${_entries.length})'),
+                        ],
                       ),
                     ),
-                  ])
-                : ListView(
-                    padding: const EdgeInsets.only(bottom: 96),
-                    children: [
-                      if (detail != null) _buildSummaryCard(detail),
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.history_rounded, size: 16, color: AppColors.textSecondary),
-                            const SizedBox(width: 6),
-                            Text(
-                              'LEDGER TRANSACTIONS (${_entries.length})',
-                              style: const TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: 0.8,
-                                color: AppColors.textSecondary,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      if (_entries.isEmpty)
-                        Padding(
-                          padding: const EdgeInsets.all(32),
-                          child: Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: const [
-                                Icon(Icons.receipt_outlined, size: 48, color: AppColors.textTertiary),
-                                SizedBox(height: 12),
-                                Text('No ledger entries yet', style: AppTypography.bodySecondary),
+                    Expanded(
+                      child: RefreshIndicator(
+                        onRefresh: _load,
+                        child: Center(
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: ResponsiveBreakpoints.maxContentWidth),
+                            child: TabBarView(
+                              controller: _tabController,
+                              children: [
+                                _buildInvoicesTab(),
+                                _buildPaymentsTab(),
+                                _buildTransactionsTab(),
                               ],
                             ),
                           ),
-                        )
-                      else
-                        ..._entries.map(_buildLedgerTile),
-                    ],
-                  ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+    );
+  }
+
+  Widget _buildEmptyState(IconData icon, String message) {
+    return ListView(
+      padding: const EdgeInsets.all(32),
+      children: [
+        Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 48, color: AppColors.textTertiary),
+              const SizedBox(height: 12),
+              Text(message, style: AppTypography.bodySecondary),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildInvoicesTab() {
+    final invoices = _invoiceEntries;
+    if (invoices.isEmpty) {
+      return _buildEmptyState(Icons.receipt_long_outlined, 'No invoices for this customer yet');
+    }
+    return ListView.builder(
+      key: const Key('customer_ledger_invoices_list'),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
+      itemCount: invoices.length,
+      itemBuilder: (context, index) => _buildInvoiceTile(invoices[index]),
+    );
+  }
+
+  Widget _buildInvoiceTile(LedgerEntry e) {
+    return Container(
+      key: Key('customer_ledger_invoice_${e.documentId}'),
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.border),
+        boxShadow: AppDecorations.cardShadow,
       ),
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        leading: Container(
+          width: 42,
+          height: 42,
+          decoration: BoxDecoration(
+            gradient: AppColors.gradientIndigo,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: const Icon(Icons.receipt_rounded, color: Colors.white, size: 20),
+        ),
+        title: Text(
+          e.description ?? 'Invoice',
+          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+        ),
+        subtitle: Text(
+          _dateFormat.format(e.entryDate.toLocal()),
+          style: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              money(e.debit),
+              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: AppColors.primary),
+            ),
+            const SizedBox(width: 4),
+            const Icon(Icons.chevron_right_rounded, color: AppColors.textTertiary),
+          ],
+        ),
+        onTap: e.documentId.isEmpty
+            ? null
+            : () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => InvoiceDetailScreen(invoiceId: e.documentId)),
+                );
+              },
+      ),
+    );
+  }
+
+  Widget _buildPaymentsTab() {
+    final payments = _paymentEntries;
+    if (payments.isEmpty) {
+      return _buildEmptyState(Icons.payments_outlined, 'No payments received from this customer yet');
+    }
+    return ListView.builder(
+      key: const Key('customer_ledger_payments_list'),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
+      itemCount: payments.length,
+      itemBuilder: (context, index) => _buildPaymentTile(payments[index]),
+    );
+  }
+
+  Widget _buildPaymentTile(LedgerEntry e) {
+    return Container(
+      key: Key('customer_ledger_payment_${e.id}'),
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.border),
+        boxShadow: AppDecorations.cardShadow,
+      ),
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        leading: Container(
+          width: 42,
+          height: 42,
+          decoration: BoxDecoration(
+            color: AppColors.successContainer,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: const Icon(Icons.arrow_downward_rounded, color: AppColors.success, size: 20),
+        ),
+        title: Text(
+          e.description ?? 'Payment received',
+          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+        ),
+        subtitle: Text(
+          _dateFormat.format(e.entryDate.toLocal()),
+          style: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
+        ),
+        trailing: Text(
+          '-${money(e.credit)}',
+          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: AppColors.success),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTransactionsTab() {
+    return ListView(
+      key: const Key('customer_ledger_transactions_list'),
+      padding: const EdgeInsets.fromLTRB(0, 12, 0, 96),
+      children: [
+        if (_entries.isEmpty)
+          Padding(
+            padding: const EdgeInsets.all(32),
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: const [
+                  Icon(Icons.receipt_outlined, size: 48, color: AppColors.textTertiary),
+                  SizedBox(height: 12),
+                  Text('No ledger entries yet', style: AppTypography.bodySecondary),
+                ],
+              ),
+            ),
+          )
+        else
+          ..._entries.map(_buildLedgerTile),
+      ],
     );
   }
 
@@ -331,53 +529,62 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
     final limit = detail.creditLimit > Decimal.zero ? detail.creditLimit : Decimal.one;
     final ratio = (detail.outstandingBalance / limit).toDouble().clamp(0.0, 1.0);
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-      child: Container(
-        decoration: BoxDecoration(
-          gradient: overLimit ? AppColors.gradientRose : AppColors.gradientIndigo,
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: overLimit ? AppDecorations.roseGlow : AppDecorations.indigoGlow,
-        ),
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Container(
-                  key: const Key('customer_status_badge'),
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.18),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.white.withValues(alpha: 0.25)),
-                  ),
-                  child: Text(
-                    '${detail.customerCode} · ${detail.customerType}${detail.active ? '' : ' · INACTIVE'}',
-                    style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700),
-                  ),
+    final contactChips = <Widget>[
+      if (detail.phone != null) _contactChip(Icons.phone_rounded, detail.phone!),
+      if (detail.whatsAppPhone != null && detail.whatsAppPhone != detail.phone)
+        _contactChip(Icons.chat_rounded, detail.whatsAppPhone!),
+      if (detail.email != null) _contactChip(Icons.email_rounded, detail.email!),
+      if (detail.gstin != null) _contactChip(Icons.badge_rounded, 'GSTIN ${detail.gstin}'),
+    ];
+
+    return Container(
+      decoration: BoxDecoration(
+        gradient: overLimit ? AppColors.gradientRose : AppColors.gradientIndigo,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: overLimit ? AppDecorations.roseGlow : AppDecorations.indigoGlow,
+      ),
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      detail.localName != null && detail.localName!.isNotEmpty
+                          ? '${detail.name} (${detail.localName})'
+                          : detail.name,
+                      style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w900),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      key: const Key('customer_status_badge'),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.18),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.white.withValues(alpha: 0.25)),
+                      ),
+                      child: Text(
+                        '${detail.customerCode} · ${detail.customerType}${detail.active ? '' : ' · INACTIVE'}',
+                        style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ],
                 ),
-                if (detail.phone != null)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.phone_rounded, size: 12, color: Colors.white),
-                        const SizedBox(width: 4),
-                        Text(detail.phone!, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500)),
-                      ],
-                    ),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 18),
+              ),
+            ],
+          ),
+          if (contactChips.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Wrap(spacing: 8, runSpacing: 8, children: contactChips),
+          ],
+          const SizedBox(height: 18),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -429,6 +636,23 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
               ),
           ],
         ),
+    );
+  }
+
+  Widget _contactChip(IconData icon, String label) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: Colors.white),
+          const SizedBox(width: 4),
+          Text(label, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500)),
+        ],
       ),
     );
   }

@@ -38,7 +38,7 @@ type Config struct {
 func Load() (Config, error) {
 	cfg := Config{
 		AppEnv:               getEnv("APP_ENV", "development"),
-		HTTPAddr:             getEnv("HTTP_ADDR", ":8080"),
+		HTTPAddr:             resolveHTTPAddr(),
 		DatabaseURL:          os.Getenv("DATABASE_URL"),
 		DatabaseAdminURL:     os.Getenv("DATABASE_ADMIN_URL"),
 		RedisURL:             os.Getenv("REDIS_URL"),
@@ -71,6 +71,18 @@ func Load() (Config, error) {
 		cfg.SandboxWebhookSecret = "dev_only_change_me"
 	}
 	return cfg, nil
+}
+
+// resolveHTTPAddr prefers Cloud Run's PORT convention (the platform injects
+// this at runtime and requires the container to bind to it, regardless of
+// anything baked into the image) over HTTP_ADDR, which stays the way to
+// configure the port for every other deployment target (docker-compose,
+// local dev) where PORT is never set.
+func resolveHTTPAddr() string {
+	if port := os.Getenv("PORT"); port != "" {
+		return ":" + port
+	}
+	return getEnv("HTTP_ADDR", ":8080")
 }
 
 func getEnv(key, def string) string {

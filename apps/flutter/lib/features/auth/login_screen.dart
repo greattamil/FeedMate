@@ -158,15 +158,21 @@ class _LoginScreenState extends State<LoginScreen> {
                     }
                   },
                 ),
-                const SizedBox(height: 4),
-                TextButton(
+                const SizedBox(height: 8),
+                TextButton.icon(
                   key: const Key('platform_admin_link'),
                   onPressed: () => Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => const PlatformLoginScreen()),
                   ),
-                  child: const Text(
-                    'Platform Admin',
-                    style: TextStyle(fontSize: 11, color: AppColors.textSecondary, fontWeight: FontWeight.w500),
+                  icon: const Icon(Icons.admin_panel_settings_outlined, size: 16, color: AppColors.textSecondary),
+                  label: const Text(
+                    'Platform Admin Login',
+                    style: TextStyle(fontSize: 13, color: AppColors.textSecondary, fontWeight: FontWeight.w600),
+                  ),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    backgroundColor: AppColors.surfaceSecondary,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                   ),
                 ),
               ],

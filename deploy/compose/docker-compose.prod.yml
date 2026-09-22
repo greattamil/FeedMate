@@ -65,6 +65,7 @@ services:
       DATABASE_URL: postgres://app_user:${APP_USER_PASSWORD}@postgres:5432/feedmate?sslmode=disable
       DATABASE_ADMIN_URL: postgres://app_admin:${APP_ADMIN_PASSWORD}@postgres:5432/feedmate?sslmode=disable
       JWT_SIGNING_KEY: ${JWT_SIGNING_KEY}
+      SANDBOX_WEBHOOK_SECRET: ${SANDBOX_WEBHOOK_SECRET}
       LOG_LEVEL: info
     networks:
       - feedmate_internal

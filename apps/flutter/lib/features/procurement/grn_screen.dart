@@ -3,12 +3,17 @@ import 'package:provider/provider.dart';
 
 import '../../core/api_client.dart';
 import '../../core/api_error.dart';
+import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_decorations.dart';
+import '../../core/theme/app_typography.dart';
 import '../pos/pos_api.dart';
 import '../supplier/supplier_api.dart';
 import 'grn_line_form_screen.dart';
 import 'procurement_api.dart';
 import 'product_picker_screen.dart';
 import 'supplier_picker_screen.dart';
+import '../../core/number_format.dart';
+import '../products/location_screen.dart';
 
 /// Receive physical stock from a supplier (PRD 7.4): pick the supplier and
 /// receiving location, add one or more lines (product, batch, quantity,
@@ -64,6 +69,15 @@ class _GrnScreenState extends State<GrnScreen> {
         _loadingLocations = false;
       });
     }
+  }
+
+  Future<void> _manageLocations() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const LocationScreen()),
+    );
+    if (!mounted) return;
+    setState(() => _loadingLocations = true);
+    await _loadLocations();
   }
 
   Future<void> _pickSupplier() async {
@@ -160,115 +174,207 @@ class _GrnScreenState extends State<GrnScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
+      backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: const Text('Receive Stock (GRN)', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        title: const Text('Receive Stock (GRN)', style: AppTypography.headline),
       ),
       body: _loadingLocations
-          ? const Center(child: CircularProgressIndicator(color: Color(0xFF0F766E)))
+          ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
           : ListView(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(12),
               children: [
-                if (_error != null) ...[
-                  Container(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFFE4E6),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Text(_error!, style: const TextStyle(color: Color(0xFFE11D48), fontSize: 13)),
-                  ),
-                ],
-                // Supplier Selection Card
+                // Compact Teal Hero Bar
                 Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.only(bottom: 10),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                   decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: const Color(0xFFE2E8F0)),
-                    boxShadow: const [BoxShadow(color: Color(0x060F172A), blurRadius: 10, offset: Offset(0, 2))],
-                  ),
-                  child: ListTile(
-                    key: const Key('grn_supplier_tile'),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-                    leading: Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFE0F2FE),
-                        borderRadius: BorderRadius.circular(10),
+                    gradient: AppColors.gradientTealCyan,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppColors.primary.withOpacity(0.2),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
                       ),
-                      child: const Center(
-                        child: Icon(Icons.local_shipping_rounded, color: Color(0xFF0284C7), size: 20),
-                      ),
-                    ),
-                    title: Text(
-                      _supplier == null ? 'Select supplier' : _supplier!.name,
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-                    ),
-                    subtitle: Text(
-                      _supplier == null ? 'Required to create intake note' : _supplier!.supplierCode,
-                      style: const TextStyle(color: Color(0xFF64748B), fontSize: 12),
-                    ),
-                    trailing: const Icon(Icons.chevron_right_rounded, color: Color(0xFF64748B)),
-                    onTap: _pickSupplier,
+                    ],
                   ),
-                ),
-                const SizedBox(height: 12),
-                // Shipment Details Card
-                Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: const Color(0xFFE2E8F0)),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  child: Row(
                     children: [
-                      DropdownButtonFormField<String>(
-                        key: const Key('grn_location_dropdown'),
-                        initialValue: _selectedLocationId,
-                        decoration: const InputDecoration(
-                          labelText: 'Receiving warehouse / location',
-                          prefixIcon: Icon(Icons.warehouse_rounded, size: 18),
-                        ),
-                        items: _locations.map((l) => DropdownMenuItem(value: l.id, child: Text(l.name))).toList(),
-                        onChanged: (v) => setState(() => _selectedLocationId = v),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        key: const Key('grn_supplier_doc_field'),
-                        controller: _supplierDocController,
-                        decoration: const InputDecoration(
-                          labelText: 'Supplier document / invoice no. (optional)',
-                          prefixIcon: Icon(Icons.receipt_long_rounded, size: 18),
+                      const Icon(Icons.input_rounded, color: Colors.white, size: 20),
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: Text(
+                          'Goods Received Note (GRN)',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w800,
+                          ),
                         ),
                       ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        key: const Key('grn_vehicle_no_field'),
-                        controller: _vehicleNoController,
-                        decoration: const InputDecoration(
-                          labelText: 'Delivery vehicle no. (optional)',
-                          prefixIcon: Icon(Icons.local_shipping_rounded, size: 18),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          '${_lines.length} lines',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(height: 20),
+                if (_error != null) ...[
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: AppColors.dangerContainer,
+                      borderRadius: AppDecorations.borderRadiusSm,
+                    ),
+                    child: Text(_error!, style: const TextStyle(color: AppColors.onDangerContainer, fontSize: 12)),
+                  ),
+                ],
+                // Supplier Selection Card
+                Container(
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppColors.border),
+                    boxShadow: AppDecorations.cardShadow,
+                  ),
+                  child: ListTile(
+                    key: const Key('grn_supplier_tile'),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                    leading: Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        gradient: AppColors.gradientAmber,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Center(
+                        child: Icon(Icons.local_shipping_rounded, color: Colors.white, size: 18),
+                      ),
+                    ),
+                    title: Text(
+                      _supplier == null ? 'Select supplier' : _supplier!.name,
+                      style: AppTypography.title.copyWith(fontSize: 14, fontWeight: FontWeight.w700),
+                    ),
+                    subtitle: Text(
+                      _supplier == null ? 'Required to create intake note' : _supplier!.supplierCode,
+                      style: AppTypography.caption,
+                    ),
+                    trailing: const Icon(Icons.chevron_right_rounded, color: AppColors.textSecondary),
+                    onTap: _pickSupplier,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                // Shipment Details Card
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppColors.border),
+                    boxShadow: AppDecorations.cardShadow,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (!_loadingLocations && _locations.isEmpty)
+                        Container(
+                          key: const Key('grn_no_locations_prompt'),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: AppColors.dangerContainer,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.warehouse_rounded, color: AppColors.onDangerContainer),
+                              const SizedBox(width: 10),
+                              const Expanded(
+                                child: Text(
+                                  'No receiving warehouse/location set up yet.',
+                                  style: TextStyle(color: AppColors.onDangerContainer, fontSize: 13),
+                                ),
+                              ),
+                              TextButton(
+                                key: const Key('grn_add_location_button'),
+                                onPressed: _manageLocations,
+                                child: const Text('Add one'),
+                              ),
+                            ],
+                          ),
+                        )
+                      else
+                        DropdownButtonFormField<String>(
+                          key: const Key('grn_location_dropdown'),
+                          initialValue: _selectedLocationId,
+                          decoration: InputDecoration(
+                            labelText: 'Receiving warehouse / location',
+                            prefixIcon: const Icon(Icons.warehouse_rounded, size: 18, color: AppColors.primary),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            suffixIcon: IconButton(
+                              key: const Key('grn_manage_locations_button'),
+                              icon: const Icon(Icons.settings_outlined, size: 18, color: AppColors.textSecondary),
+                              tooltip: 'Manage locations',
+                              onPressed: _manageLocations,
+                            ),
+                          ),
+                          items: _locations.map((l) => DropdownMenuItem(value: l.id, child: Text(l.name))).toList(),
+                          onChanged: (v) => setState(() => _selectedLocationId = v),
+                        ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        key: const Key('grn_supplier_doc_field'),
+                        controller: _supplierDocController,
+                        decoration: InputDecoration(
+                          labelText: 'Supplier document / invoice no. (optional)',
+                          prefixIcon: const Icon(Icons.receipt_long_rounded, size: 18, color: AppColors.textSecondary),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        key: const Key('grn_vehicle_no_field'),
+                        controller: _vehicleNoController,
+                        decoration: InputDecoration(
+                          labelText: 'Delivery vehicle no. (optional)',
+                          prefixIcon: const Icon(Icons.local_shipping_rounded, size: 18, color: AppColors.textSecondary),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
                 // Received Feed Items Header
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('Received Items (${_lines.length})', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                    Text(
+                      'Received Items (${_lines.length})',
+                      style: AppTypography.headline.copyWith(fontSize: 15, fontWeight: FontWeight.w800),
+                    ),
                     FilledButton.icon(
                       key: const Key('grn_add_line_button'),
                       style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFF0F766E),
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                       ),
                       onPressed: _addLine,
                       icon: const Icon(Icons.add_rounded, size: 16),
@@ -276,21 +382,21 @@ class _GrnScreenState extends State<GrnScreen> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 8),
                 if (_lines.isEmpty)
                   Container(
-                    padding: const EdgeInsets.symmetric(vertical: 32),
+                    padding: const EdgeInsets.symmetric(vertical: 24),
                     decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                      color: AppColors.surface,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppColors.border),
                     ),
                     child: Center(
                       child: Column(
                         children: const [
-                          Icon(Icons.move_to_inbox_outlined, size: 42, color: Color(0xFF94A3B8)),
-                          SizedBox(height: 8),
-                          Text('No lines added yet.', style: TextStyle(color: Color(0xFF64748B), fontSize: 13)),
+                          Icon(Icons.move_to_inbox_outlined, size: 36, color: Color(0xFF94A3B8)),
+                          SizedBox(height: 6),
+                          Text('No lines added yet.', style: AppTypography.bodySecondary),
                         ],
                       ),
                     ),
@@ -301,47 +407,56 @@ class _GrnScreenState extends State<GrnScreen> {
                     key: Key('grn_line_card_$index'),
                     margin: const EdgeInsets.only(bottom: 8),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: AppColors.surface,
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: const Color(0xFFE2E8F0)),
-                      boxShadow: const [BoxShadow(color: Color(0x060F172A), blurRadius: 6, offset: Offset(0, 1))],
+                      border: Border.all(color: AppColors.border),
+                      boxShadow: AppDecorations.cardShadow,
                     ),
                     child: ListTile(
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                       leading: Container(
-                        padding: const EdgeInsets.all(8),
+                        width: 36,
+                        height: 36,
                         decoration: BoxDecoration(
-                          color: const Color(0xFFE6F4EA),
+                          gradient: AppColors.gradientEmerald,
                           borderRadius: BorderRadius.circular(8),
                         ),
-                        child: const Icon(Icons.inventory_2_rounded, color: Color(0xFF0F766E), size: 20),
+                        child: const Icon(Icons.inventory_2_rounded, color: Colors.white, size: 18),
                       ),
-                      title: Text(line.product.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                      title: Text(line.product.name, style: AppTypography.title.copyWith(fontSize: 14, fontWeight: FontWeight.w700)),
                       subtitle: Text(
-                        'Batch ${line.batchCode} · Qty ${line.receivedQty.toStringAsFixed(2)} · ₹${line.unitCost.toStringAsFixed(2)}/unit',
-                        style: const TextStyle(color: Color(0xFF64748B), fontSize: 12),
+                        'Batch ${line.batchCode} · Qty ${line.receivedQty.toStringAsFixed(2)} · ${money(line.unitCost)}/unit',
+                        style: AppTypography.caption,
                       ),
                       onTap: () => _editLine(index),
                       trailing: IconButton(
                         key: Key('grn_line_delete_$index'),
-                        icon: const Icon(Icons.delete_outline, size: 20, color: Color(0xFFE11D48)),
+                        icon: const Icon(Icons.delete_outline_rounded, size: 20, color: AppColors.danger),
                         onPressed: () => setState(() => _lines.removeAt(index)),
                       ),
                     ),
                   );
                 }),
                 const SizedBox(height: 24),
-                FilledButton(
-                  key: const Key('grn_post_button'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFF0F766E),
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(14),
+                    boxShadow: _canPost ? AppDecorations.emeraldGlow : null,
                   ),
-                  onPressed: _canPost ? _post : null,
-                  child: _posting
-                      ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                      : const Text('Post Inward GRN', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                  child: FilledButton(
+                    key: const Key('grn_post_button'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      disabledBackgroundColor: AppColors.border,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    ),
+                    onPressed: _canPost ? _post : null,
+                    child: _posting
+                        ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                        : const Text('Post Inward GRN', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
+                  ),
                 ),
                 const SizedBox(height: 20),
               ],
@@ -371,18 +486,42 @@ class _TareOverrideDialogState extends State<_TareOverrideDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Tare Exceeds Threshold'),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      title: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              gradient: AppColors.gradientAmber,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(Icons.warning_amber_rounded, color: Colors.white, size: 20),
+          ),
+          const SizedBox(width: 12),
+          const Expanded(child: Text('Tare Exceeds Threshold', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
+        ],
+      ),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(widget.serverMessage, style: const TextStyle(color: Colors.orange)),
-          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: AppColors.warningContainer,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(widget.serverMessage, style: const TextStyle(color: AppColors.onWarningContainer, fontSize: 13)),
+          ),
+          const SizedBox(height: 14),
           TextField(
             key: const Key('grn_tare_override_reason_field'),
             controller: _controller,
             autofocus: true,
-            decoration: const InputDecoration(labelText: 'Reason for override'),
+            decoration: InputDecoration(
+              labelText: 'Reason for override',
+              border: OutlineInputBorder(borderRadius: AppDecorations.borderRadiusMd),
+            ),
           ),
         ],
       ),
@@ -390,8 +529,12 @@ class _TareOverrideDialogState extends State<_TareOverrideDialog> {
         TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
         FilledButton(
           key: const Key('grn_tare_override_submit'),
+          style: FilledButton.styleFrom(
+            backgroundColor: AppColors.warning,
+            foregroundColor: Colors.white,
+          ),
           onPressed: () => Navigator.of(context).pop(_controller.text.trim()),
-          child: const Text('Override & Post'),
+          child: const Text('Override & Post', style: TextStyle(fontWeight: FontWeight.bold)),
         ),
       ],
     );

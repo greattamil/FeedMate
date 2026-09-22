@@ -121,11 +121,11 @@ void main() {
 
     // KPI row
     expect(find.byKey(const Key('kpi_today_net_sales')), findsOneWidget);
-    expect(find.text('₹4000.00'), findsOneWidget);
+    expect(find.text('₹4,000.00'), findsOneWidget);
     expect(find.text('5'), findsOneWidget); // today's invoice count
-    expect(find.text('₹18500.00'), findsOneWidget); // total receivables
-    expect(find.text('₹25000.00'), findsOneWidget); // total payables
-    expect(find.text('₹512340.00'), findsOneWidget); // stock value
+    expect(find.text('₹18,500.00'), findsOneWidget); // total receivables
+    expect(find.text('₹25,000.00'), findsOneWidget); // total payables
+    expect(find.text('₹5,12,340.00'), findsOneWidget); // stock value
     expect(find.textContaining('33%'), findsOneWidget); // (4000-3000)/3000 = +33%
 
     // Sections present — scroll each into view since the body is a lazy

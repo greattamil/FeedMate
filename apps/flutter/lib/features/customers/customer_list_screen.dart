@@ -13,11 +13,10 @@ import '../../core/theme/app_typography.dart';
 import '../pos/customer_api.dart';
 import 'customer_form_dialog.dart';
 import 'customer_ledger_screen.dart';
+import '../../core/number_format.dart';
 
 /// The customer master-data directory: search, add, and jump into a
-/// customer's ledger (which itself links to edit/deactivate) — the same
-/// structure as ProductListScreen/SupplierListScreen, so CRUD works the
-/// same way everywhere in this app.
+/// customer's ledger (which itself links to edit/deactivate).
 class CustomerListScreen extends StatefulWidget {
   const CustomerListScreen({super.key});
 
@@ -82,7 +81,6 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
     try {
       final api = CustomerApi(context.read<ApiClient>());
       await api.create(
-        customerCode: draft.customerCode!,
         name: draft.name,
         localName: draft.localName,
         phone: draft.phone,
@@ -102,67 +100,200 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
     }
   }
 
+  LinearGradient _avatarGradient(String name) {
+    final colors = [
+      AppColors.gradientIndigo,
+      AppColors.gradientCyan,
+      AppColors.gradientEmerald,
+      AppColors.gradientPurple,
+      AppColors.gradientAmber,
+    ];
+    final idx = name.codeUnits.fold(0, (a, b) => a + b) % colors.length;
+    return colors[idx];
+  }
+
+  String _getInitials(String name) {
+    final parts = name.trim().split(RegExp(r'\s+'));
+    if (parts.isEmpty) return 'C';
+    if (parts.length == 1) return parts[0].substring(0, parts[0].length >= 2 ? 2 : 1).toUpperCase();
+    return (parts[0][0] + parts[1][0]).toUpperCase();
+  }
+
   @override
   Widget build(BuildContext context) {
     final session = context.watch<AuthSession>();
     final canManage = session.hasPermission('credit.configure');
+
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: const Text('Customers', style: AppTypography.headline),
+        title: const Text('Customer Directory', style: AppTypography.headline),
+        actions: [
+          IconButton(
+            tooltip: 'Refresh',
+            icon: const Icon(Icons.refresh_rounded),
+            onPressed: () => _search(_controller.text),
+          ),
+        ],
       ),
       floatingActionButton: canManage
-          ? FloatingActionButton.extended(
-              heroTag: null,
-              key: const Key('add_customer_fab'),
-              onPressed: _addCustomer,
-              icon: const Icon(Icons.person_add_alt_1_rounded),
-              label: const Text('Add Customer'),
-              backgroundColor: AppColors.primary,
+          ? Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: AppDecorations.indigoGlow,
+              ),
+              child: FloatingActionButton.extended(
+                heroTag: null,
+                key: const Key('add_customer_fab'),
+                onPressed: _addCustomer,
+                icon: const Icon(Icons.person_add_alt_1_rounded, color: Colors.white),
+                label: const Text('Add Customer', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                backgroundColor: AppColors.secondary,
+              ),
             )
           : null,
       body: Column(
         children: [
+          // Hero Header Banner
           Container(
-            padding: const EdgeInsets.all(16),
-            color: AppColors.surface,
-            child: TextField(
-              key: const Key('customer_search_field'),
-              controller: _controller,
-              decoration: InputDecoration(
-                labelText: 'Search customer by name, code, or phone',
-                prefixIcon: const Icon(Icons.search_rounded, color: AppColors.primary),
-                suffixIcon: _controller.text.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.clear_rounded, size: 18),
-                        onPressed: () {
-                          _controller.clear();
-                          _onQueryChanged('');
-                        },
-                      )
-                    : null,
-              ),
-              onChanged: _onQueryChanged,
+            margin: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+            decoration: BoxDecoration(
+              gradient: AppColors.gradientIndigo,
+              borderRadius: AppDecorations.borderRadiusLg,
+              boxShadow: AppDecorations.indigoGlow,
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.18),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.3)),
+                  ),
+                  child: const Icon(Icons.people_alt_rounded, color: Colors.white, size: 24),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Customer Ledgers & Credit',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.2,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Manage credit accounts, ledger history & payment receipts',
+                        style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
-          if (_loading) const LinearProgressIndicator(color: AppColors.primary, minHeight: 2),
-          if (_error != null)
-            Container(
-              margin: const EdgeInsets.all(12),
-              padding: const EdgeInsets.all(12),
+
+          // Search Input
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+            child: Container(
               decoration: BoxDecoration(
-                color: AppColors.dangerContainer,
-                borderRadius: AppDecorations.borderRadiusSm,
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.border),
+                boxShadow: AppDecorations.cardShadow,
               ),
-              child: Text(_error!, style: const TextStyle(color: AppColors.onDangerContainer)),
+              child: TextField(
+                key: const Key('customer_search_field'),
+                controller: _controller,
+                decoration: InputDecoration(
+                  labelText: 'Search customer by name, code, or phone',
+                  prefixIcon: const Icon(Icons.search_rounded, color: AppColors.secondary),
+                  suffixIcon: _controller.text.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(Icons.clear_rounded, size: 18),
+                          onPressed: () {
+                            _controller.clear();
+                            _onQueryChanged('');
+                          },
+                        )
+                      : null,
+                  filled: true,
+                  fillColor: Colors.transparent,
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                ),
+                onChanged: _onQueryChanged,
+              ),
             ),
+          ),
+
+          // Status & Count Pill
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceSecondary,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.person_outline_rounded, size: 14, color: AppColors.secondary),
+                      const SizedBox(width: 6),
+                      Text(
+                        '${_results.length} customer${_results.length == 1 ? '' : 's'}',
+                        style: AppTypography.bodySecondary.copyWith(fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          if (_loading) const LinearProgressIndicator(color: AppColors.secondary, minHeight: 2),
+
+          if (_error != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppColors.dangerContainer,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.danger.withValues(alpha: 0.3)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.error_outline_rounded, color: AppColors.danger, size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(child: Text(_error!, style: const TextStyle(color: AppColors.onDangerContainer))),
+                  ],
+                ),
+              ),
+            ),
+
           Expanded(
             child: _results.isEmpty && !_loading
                 ? Center(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: const [
-                        Icon(Icons.people_outline_rounded, size: 56, color: Color(0xFF94A3B8)),
+                        Icon(Icons.people_outline_rounded, size: 56, color: AppColors.textTertiary),
                         SizedBox(height: 12),
                         Text('No customers found', style: AppTypography.bodySecondary),
                       ],
@@ -170,75 +301,120 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                   )
                 : ListView.builder(
                     key: const Key('customer_results_list'),
-                    padding: const EdgeInsets.all(12),
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 96),
                     itemCount: _results.length,
                     itemBuilder: (context, index) {
                       final c = _results[index];
+                      final avatarGrad = _avatarGradient(c.name);
+                      final initials = _getInitials(c.name);
+
                       return Container(
-                        margin: const EdgeInsets.only(bottom: 8),
+                        key: Key('customer_row_${c.id}'),
+                        margin: const EdgeInsets.only(bottom: 10),
                         decoration: BoxDecoration(
                           color: AppColors.surface,
-                          borderRadius: AppDecorations.borderRadiusMd,
+                          borderRadius: BorderRadius.circular(14),
                           border: Border.all(color: AppColors.border),
                           boxShadow: AppDecorations.cardShadow,
                         ),
-                        child: ListTile(
-                          key: Key('customer_row_${c.id}'),
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                          leading: Container(
-                            width: 44,
-                            height: 44,
-                            decoration: BoxDecoration(
-                              gradient: AppColors.gradientIndigo,
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Center(
-                              child: Text(
-                                c.name.isNotEmpty ? c.name.substring(0, 1).toUpperCase() : 'C',
-                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
-                              ),
-                            ),
-                          ),
-                          title: Text(c.name, style: AppTypography.title),
-                          subtitle: Row(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: AppColors.surfaceSecondary,
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: Text(c.customerCode, style: AppTypography.caption),
-                              ),
-                              if (c.phone != null) ...[
-                                const SizedBox(width: 8),
-                                const Icon(Icons.phone_outlined, size: 12, color: AppColors.textSecondary),
-                                const SizedBox(width: 4),
-                                // Flexible + ellipsis: the trailing balance
-                                // badge (e.g. "₹103000.00 Due") can be wide
-                                // enough to squeeze this row below the
-                                // phone number's natural width, which would
-                                // otherwise overflow the tile on the right
-                                // (caught live on the emulator).
-                                Flexible(
-                                  child: Text(c.phone!, style: AppTypography.caption, overflow: TextOverflow.ellipsis),
-                                ),
-                              ],
-                            ],
-                          ),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              _balanceBadge(c.balance),
-                              const SizedBox(width: 4),
-                              const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppColors.textSecondary),
-                            ],
-                          ),
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(14),
                           onTap: () {
                             Navigator.of(context).push(
                               MaterialPageRoute(builder: (_) => CustomerLedgerScreen(customerId: c.id)),
                             );
                           },
+                          child: Padding(
+                            padding: const EdgeInsets.all(14),
+                            child: Row(
+                              children: [
+                                // Chromatic Avatar
+                                Container(
+                                  width: 46,
+                                  height: 46,
+                                  decoration: BoxDecoration(
+                                    gradient: avatarGrad,
+                                    borderRadius: BorderRadius.circular(12),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: avatarGrad.colors.first.withValues(alpha: 0.25),
+                                        blurRadius: 8,
+                                        offset: const Offset(0, 3),
+                                      ),
+                                    ],
+                                  ),
+                                  child: Center(
+                                    child: Text(
+                                      initials,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 16,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 14),
+
+                                // Customer Info
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        c.name,
+                                        style: AppTypography.title.copyWith(fontSize: 15, fontWeight: FontWeight.w700),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Row(
+                                        children: [
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                            decoration: BoxDecoration(
+                                              color: AppColors.surfaceSecondary,
+                                              borderRadius: BorderRadius.circular(6),
+                                              border: Border.all(color: AppColors.border),
+                                            ),
+                                            child: Text(
+                                              c.customerCode,
+                                              style: AppTypography.caption.copyWith(
+                                                fontWeight: FontWeight.w600,
+                                                color: AppColors.textSecondary,
+                                              ),
+                                            ),
+                                          ),
+                                          if (c.phone != null) ...[
+                                            const SizedBox(width: 8),
+                                            const Icon(Icons.phone_rounded, size: 12, color: AppColors.textSecondary),
+                                            const SizedBox(width: 4),
+                                            Flexible(
+                                              child: Text(
+                                                c.phone!,
+                                                style: AppTypography.caption.copyWith(color: AppColors.textSecondary),
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ),
+
+                                // Trailing Balance & Arrow
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    _balanceBadge(c.balance),
+                                    const SizedBox(width: 6),
+                                    const Icon(Icons.chevron_right_rounded, size: 20, color: AppColors.textTertiary),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
                       );
                     },
@@ -249,25 +425,34 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
     );
   }
 
-  /// A shopkeeper browsing this directory wants to see who owes money
-  /// without opening each customer individually — a red "Due" pill for an
-  /// outstanding balance, a neutral "Clear" pill otherwise. Never a
-  /// client-side computation: c.balance already came straight from the
-  /// server's ledger aggregate (see customer.List's SQL).
+  /// Outstanding balance badge: red Due pill if balance > 0, green Clear pill if 0.
   Widget _balanceBadge(Decimal balance) {
     final isDue = balance > Decimal.zero;
+    final fg = isDue ? AppColors.onDangerContainer : AppColors.onSuccessContainer;
+    final bg = isDue ? AppColors.dangerContainer : AppColors.successContainer;
+    final icon = isDue ? Icons.error_outline_rounded : Icons.check_circle_rounded;
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
       decoration: BoxDecoration(
-        color: isDue ? AppColors.dangerContainer : AppColors.successContainer,
+        color: bg,
         borderRadius: BorderRadius.circular(AppDecorations.radiusFull),
+        border: Border.all(color: (isDue ? AppColors.danger : AppColors.success).withValues(alpha: 0.3)),
       ),
-      child: Text(
-        isDue ? '₹${balance.toStringAsFixed(2)} Due' : 'Clear',
-        style: AppTypography.caption.copyWith(
-          fontWeight: FontWeight.bold,
-          color: isDue ? AppColors.onDangerContainer : AppColors.onSuccessContainer,
-        ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: fg),
+          const SizedBox(width: 4),
+          Text(
+            isDue ? '${money(balance)} Due' : 'Clear',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              color: fg,
+            ),
+          ),
+        ],
       ),
     );
   }

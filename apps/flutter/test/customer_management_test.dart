@@ -84,20 +84,20 @@ void main() {
 
     expect(find.text('Test Farmer'), findsOneWidget);
     expect(find.textContaining('FARM001'), findsOneWidget);
-    expect(find.text('₹6200.00 Due'), findsOneWidget);
+    expect(find.text('₹6,200.00 Due'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('customer_row_cust-1')));
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('customer_outstanding_balance')), findsOneWidget);
-    expect(find.text('₹6200.00'), findsOneWidget);
-    expect(find.text('₹5000.00'), findsOneWidget);
-    expect(find.text('₹-1200.00'), findsOneWidget);
+    expect(find.text('₹6,200.00'), findsOneWidget);
+    expect(find.text('₹5,000.00'), findsOneWidget);
+    expect(find.text('-₹1,200.00'), findsOneWidget);
     expect(find.text('Over credit limit'), findsOneWidget);
 
     expect(find.text('Credit sale INV-0002'), findsOneWidget);
     expect(find.text('Cash received'), findsOneWidget);
-    expect(find.text('+₹1200.00'), findsOneWidget);
+    expect(find.text('+₹1,200.00'), findsOneWidget);
     expect(find.text('-₹500.00'), findsOneWidget);
   });
 
@@ -190,7 +190,7 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    expect(find.text('₹5000.00'), findsWidgets);
+    expect(find.text('₹5,000.00'), findsWidgets);
 
     await tester.tap(find.byKey(const Key('record_receipt_fab')));
     await tester.pumpAndSettle();
@@ -205,7 +205,7 @@ void main() {
     // The balance shown must come from a fresh fetch after recording, not a
     // client-side subtraction — asserted by the mock returning a different
     // balance on the second GET and that new value actually appearing.
-    expect(find.text('₹4200.00'), findsOneWidget);
+    expect(find.text('₹4,200.00'), findsOneWidget);
   });
 
   testWidgets('Record Receipt rejects a zero amount client-side before calling the server', (tester) async {
@@ -270,7 +270,7 @@ void main() {
       if (request.method == 'POST' && request.url.path == '/api/v1/customers') {
         createdBody = jsonDecode(request.body) as Map<String, dynamic>;
         return http.Response(jsonEncode({
-          'id': 'cust-new', 'customer_code': createdBody!['customer_code'], 'name': createdBody!['name'],
+          'id': 'cust-new', 'customer_code': 'CUST-0001', 'name': createdBody!['name'],
           'customer_type': createdBody!['customer_type'],
         }), 201);
       }
@@ -305,7 +305,6 @@ void main() {
     await tester.tap(find.byKey(const Key('add_customer_fab')));
     await tester.pumpAndSettle();
 
-    await tester.enterText(find.byKey(const Key('customer_code_field')), 'FARM010');
     await tester.enterText(find.byKey(const Key('customer_name_field')), 'New Farmer');
     await tester.enterText(find.byKey(const Key('customer_phone_field')), '9000000000');
     await tester.enterText(find.byKey(const Key('customer_credit_limit_field')), '3000.00');
@@ -313,7 +312,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(createdBody, isNotNull);
-    expect(createdBody!['customer_code'], 'FARM010');
+    expect(createdBody!.containsKey('customer_code'), isFalse, reason: 'customer_code is server-generated and must never be sent by the client');
     expect(createdBody!['name'], 'New Farmer');
     expect(createdBody!['phone'], '9000000000');
     // Regression check for a real live bug: the dropdown's default must be
@@ -540,7 +539,7 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    expect(find.text('₹5000.00'), findsOneWidget);
+    expect(find.text('₹5,000.00'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('edit_credit_limit_button')));
     await tester.pumpAndSettle();
@@ -551,8 +550,8 @@ void main() {
 
     expect(putBody, isNotNull);
     expect(Decimal.parse(putBody!['credit_limit'] as String), Decimal.parse('8000.00'));
-    expect(find.textContaining('Credit limit updated to ₹8000.00'), findsOneWidget);
-    expect(find.text('₹8000.00'), findsOneWidget);
+    expect(find.textContaining('Credit limit updated to ₹8,000.00'), findsOneWidget);
+    expect(find.text('₹8,000.00'), findsOneWidget);
   });
 
   testWidgets('Edit Credit Limit rejects a negative amount client-side', (tester) async {

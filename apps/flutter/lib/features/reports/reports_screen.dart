@@ -8,13 +8,13 @@ import '../../core/api_error.dart';
 import '../../core/csv_export.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_decorations.dart';
+import '../../core/theme/app_typography.dart';
 import 'reports_api.dart';
+import '../../core/number_format.dart';
 
 /// Reports/dashboard — a real Flutter view on top of the four reporting
-/// endpoints that have existed, tested, since Phase 10 but never had a
-/// client. All computation (totals, balances, expiry windows) happens
-/// server-side; every number here is exactly what the server returned, not
-/// a client-side recomputation.
+/// endpoints. All computation happens server-side; every number rendered
+/// is exactly what the server returned.
 class ReportsScreen extends StatelessWidget {
   const ReportsScreen({super.key});
 
@@ -25,19 +25,83 @@ class ReportsScreen extends StatelessWidget {
       child: Scaffold(
         backgroundColor: AppColors.background,
         appBar: AppBar(
-          title: const Text('Reports & Analytics'),
-          bottom: TabBar(
-            isScrollable: true,
-            labelColor: AppColors.primary,
-            unselectedLabelColor: AppColors.textSecondary,
-            indicatorColor: AppColors.primary,
-            indicatorWeight: 3,
-            tabs: const [
-              Tab(text: 'Sales', key: Key('tab_sales')),
-              Tab(text: 'Stock', key: Key('tab_stock')),
-              Tab(text: 'Balances', key: Key('tab_balances')),
-              Tab(text: 'EOD History', key: Key('tab_eod')),
-            ],
+          title: const Text('Reports & Analytics', style: AppTypography.headline),
+          bottom: PreferredSize(
+            preferredSize: const Size.fromHeight(48),
+            child: Container(
+              margin: const EdgeInsets.symmetric(horizontal: 16),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceSecondary,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: TabBar(
+                isScrollable: true,
+                tabAlignment: TabAlignment.start,
+                labelColor: Colors.white,
+                unselectedLabelColor: AppColors.textSecondary,
+                indicatorSize: TabBarIndicatorSize.tab,
+                indicator: BoxDecoration(
+                  gradient: AppColors.gradientRose,
+                  borderRadius: BorderRadius.circular(10),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppColors.danger.withValues(alpha: 0.3),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                dividerColor: Colors.transparent,
+                labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                tabs: const [
+                  Tab(
+                    key: Key('tab_sales'),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.trending_up_rounded, size: 16),
+                        SizedBox(width: 6),
+                        Text('Sales'),
+                      ],
+                    ),
+                  ),
+                  Tab(
+                    key: Key('tab_stock'),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.inventory_2_rounded, size: 16),
+                        SizedBox(width: 6),
+                        Text('Stock'),
+                      ],
+                    ),
+                  ),
+                  Tab(
+                    key: Key('tab_balances'),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.account_balance_wallet_rounded, size: 16),
+                        SizedBox(width: 6),
+                        Text('Balances'),
+                      ],
+                    ),
+                  ),
+                  Tab(
+                    key: Key('tab_eod'),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.point_of_sale_rounded, size: 16),
+                        SizedBox(width: 6),
+                        Text('EOD History'),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
         body: const TabBarView(
@@ -140,58 +204,125 @@ class _SalesSummaryTabState extends State<_SalesSummaryTab> {
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 96),
         children: [
-          // Date Filter Pill Button
-          InkWell(
-            key: const Key('sales_date_range_tile'),
-            onTap: _pickDateRange,
-            borderRadius: BorderRadius.circular(14),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: AppDecorations.card(color: AppColors.surface),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: AppColors.primaryContainer,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: const Icon(Icons.date_range_rounded, color: AppColors.primary, size: 20),
+          // Hero Header Banner
+          Container(
+            margin: const EdgeInsets.only(bottom: 14),
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+            decoration: BoxDecoration(
+              gradient: AppColors.gradientRose,
+              borderRadius: AppDecorations.borderRadiusLg,
+              boxShadow: AppDecorations.roseGlow,
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.18),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.3)),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('Date Range', style: TextStyle(color: AppColors.textSecondary, fontSize: 11)),
-                        Text(
-                          '${_dateFormat.format(_dateFrom)} – ${_dateFormat.format(_dateTo)}',
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppColors.textPrimary),
+                  child: const Icon(Icons.analytics_rounded, color: Colors.white, size: 24),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Sales & Revenue Intelligence',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.2,
                         ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Total turnover, tax collections and tender breakdown',
+                        style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // Date Filter Pill Button & Export Row
+          Row(
+            children: [
+              Expanded(
+                child: InkWell(
+                  key: const Key('sales_date_range_tile'),
+                  onTap: _pickDateRange,
+                  borderRadius: BorderRadius.circular(14),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: AppColors.surface,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: AppColors.border),
+                      boxShadow: AppDecorations.cardShadow,
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: AppColors.primaryContainer,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Icon(Icons.date_range_rounded, color: AppColors.primary, size: 18),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('Period Range', style: TextStyle(color: AppColors.textSecondary, fontSize: 10, fontWeight: FontWeight.bold)),
+                              Text(
+                                '${_dateFormat.format(_dateFrom)} – ${_dateFormat.format(_dateTo)}',
+                                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppColors.textPrimary),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const Icon(Icons.edit_calendar_rounded, size: 16, color: AppColors.primary),
                       ],
                     ),
                   ),
-                  const Icon(Icons.edit_calendar_rounded, size: 18, color: AppColors.primary),
-                ],
+                ),
               ),
-            ),
+              if (summary != null) ...[
+                const SizedBox(width: 10),
+                Container(
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: AppColors.border),
+                    boxShadow: AppDecorations.cardShadow,
+                  ),
+                  child: IconButton(
+                    key: const Key('sales_export_csv_button'),
+                    tooltip: 'Export CSV',
+                    icon: const Icon(Icons.ios_share_rounded, size: 20, color: AppColors.primary),
+                    onPressed: _export,
+                  ),
+                ),
+              ],
+            ],
           ),
-          const SizedBox(height: 12),
-          if (summary != null)
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton.icon(
-                key: const Key('sales_export_csv_button'),
-                onPressed: _export,
-                icon: const Icon(Icons.ios_share_rounded, size: 16),
-                label: const Text('Export CSV'),
-              ),
-            ),
-          if (_loading) const Center(child: CircularProgressIndicator()),
+          const SizedBox(height: 14),
+
+          if (_loading) const Center(child: Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator())),
+
           if (_error != null)
             Container(
+              margin: const EdgeInsets.only(bottom: 12),
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: AppColors.dangerContainer,
@@ -199,39 +330,81 @@ class _SalesSummaryTabState extends State<_SalesSummaryTab> {
               ),
               child: Text(_error!, style: const TextStyle(color: AppColors.onDangerContainer)),
             ),
+
           if (summary != null) ...[
-            // Sales Metrics Detailed Card
+            // Summary Breakdown Card
             Container(
-              padding: const EdgeInsets.all(16),
-              decoration: AppDecorations.card(color: AppColors.surface),
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: AppColors.border),
+                boxShadow: AppDecorations.cardShadow,
+              ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'Summary Breakdown',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppColors.textPrimary),
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          gradient: AppColors.gradientEmerald,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Icon(Icons.receipt_long_rounded, color: Colors.white, size: 18),
+                      ),
+                      const SizedBox(width: 10),
+                      const Text(
+                        'Financial Breakdown',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppColors.textPrimary),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 12),
-                  _statRow('Invoices', summary.invoiceCount.toString(), key: 'sales_invoice_count'),
-                  _statRow('Gross Sales', '₹${summary.grossSales.toStringAsFixed(2)}', key: 'sales_gross'),
-                  _statRow('Discounts', '₹${summary.discountTotal.toStringAsFixed(2)}'),
-                  _statRow('Tax', '₹${summary.taxTotal.toStringAsFixed(2)}'),
-                  const Divider(height: 20),
-                  _statRow('Net Sales', '₹${summary.netSales.toStringAsFixed(2)}', key: 'sales_net', bold: true),
+                  const SizedBox(height: 16),
+                  _statRow('Invoices', summary.invoiceCount.toString(), key: 'sales_invoice_count', icon: Icons.description_outlined),
+                  _statRow('Gross Sales', money(summary.grossSales), icon: Icons.add_circle_outline_rounded),
+                  _statRow('Discounts', money(summary.discountTotal), icon: Icons.discount_outlined),
+                  _statRow('Tax', money(summary.taxTotal), icon: Icons.percent_rounded),
+                  const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Divider(height: 1, color: AppColors.border)),
+                  _statRow('Net Sales', money(summary.netSales), bold: true, icon: Icons.verified_rounded),
                 ],
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 14),
+
+            // By Tender Card
             if (summary.byTender.isNotEmpty)
               Container(
-                padding: const EdgeInsets.all(16),
-                decoration: AppDecorations.card(color: AppColors.surface),
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppColors.border),
+                  boxShadow: AppDecorations.cardShadow,
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('By Tender', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppColors.textPrimary)),
-                    const SizedBox(height: 12),
-                    ...summary.byTender.map((t) => _statRow(t.method, '₹${t.total.toStringAsFixed(2)}')),
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            gradient: AppColors.gradientIndigo,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Icon(Icons.account_balance_wallet_rounded, color: Colors.white, size: 18),
+                        ),
+                        const SizedBox(width: 10),
+                        const Text(
+                          'Payment Tenders Received',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppColors.textPrimary),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    ...summary.byTender.map((t) => _tenderRow(t)),
                   ],
                 ),
               ),
@@ -241,21 +414,79 @@ class _SalesSummaryTabState extends State<_SalesSummaryTab> {
     );
   }
 
-  Widget _statRow(String label, String value, {String? key, bool bold = false}) {
+  Widget _statRow(String label, String value, {String? key, bool bold = false, IconData? icon}) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 5),
+      padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: TextStyle(color: AppColors.textSecondary, fontWeight: bold ? FontWeight.bold : FontWeight.normal)),
+          Row(
+            children: [
+              if (icon != null) ...[
+                Icon(icon, size: 16, color: bold ? AppColors.primary : AppColors.textSecondary),
+                const SizedBox(width: 8),
+              ],
+              Text(
+                label,
+                style: TextStyle(
+                  color: bold ? AppColors.textPrimary : AppColors.textSecondary,
+                  fontWeight: bold ? FontWeight.w800 : FontWeight.w500,
+                  fontSize: bold ? 15 : 13,
+                ),
+              ),
+            ],
+          ),
           Text(
             value,
             key: key != null ? Key(key) : null,
             style: TextStyle(
-              fontWeight: bold ? FontWeight.bold : FontWeight.w600,
-              fontSize: bold ? 15 : 14,
+              fontWeight: bold ? FontWeight.w900 : FontWeight.w700,
+              fontSize: bold ? 16 : 14,
               color: bold ? AppColors.primary : AppColors.textPrimary,
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _tenderRow(TenderTotal t) {
+    final isCash = t.method.toUpperCase() == 'CASH';
+    final isCredit = t.method.toUpperCase() == 'CREDIT';
+    final badgeColor = isCash ? AppColors.primary : (isCredit ? AppColors.secondary : AppColors.accent);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceSecondary,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: badgeColor.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(
+                  isCash ? Icons.money_rounded : (isCredit ? Icons.credit_score_rounded : Icons.credit_card_rounded),
+                  size: 16,
+                  color: badgeColor,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text(t.method, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+            ],
+          ),
+          Text(
+            money(t.total),
+            style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14, color: badgeColor),
           ),
         ],
       ),
@@ -320,9 +551,21 @@ class _StockOnHandTabState extends State<_StockOnHandTab> {
     );
   }
 
+  LinearGradient _avatarGrad(String name) {
+    final colors = [
+      AppColors.gradientCyan,
+      AppColors.gradientEmerald,
+      AppColors.gradientIndigo,
+      AppColors.gradientAmber,
+      AppColors.gradientPurple,
+    ];
+    final idx = name.codeUnits.fold(0, (a, b) => a + b) % colors.length;
+    return colors[idx];
+  }
+
   @override
   Widget build(BuildContext context) {
-    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_loading) return const Center(child: CircularProgressIndicator(color: AppColors.primary));
     if (_error != null) {
       return Center(child: Text(_error!, style: const TextStyle(color: Colors.red)));
     }
@@ -330,21 +573,38 @@ class _StockOnHandTabState extends State<_StockOnHandTab> {
       onRefresh: _load,
       child: _lines.isEmpty
           ? ListView(children: const [
-              Padding(padding: EdgeInsets.all(24), child: Center(child: Text('No stock on hand'))),
+              Padding(padding: EdgeInsets.all(32), child: Center(child: Text('No stock on hand', style: AppTypography.bodySecondary))),
             ])
           : ListView.builder(
               key: const Key('stock_list'),
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
               itemCount: _lines.length + 1,
               itemBuilder: (context, index) {
                 if (index == 0) {
-                  return Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton.icon(
-                      key: const Key('stock_export_csv_button'),
-                      onPressed: _export,
-                      icon: const Icon(Icons.ios_share_rounded, size: 16),
-                      label: const Text('Export CSV'),
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: AppColors.surfaceSecondary,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: AppColors.border),
+                          ),
+                          child: Text(
+                            '${_lines.length} items in stock',
+                            style: AppTypography.caption.copyWith(fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                        TextButton.icon(
+                          key: const Key('stock_export_csv_button'),
+                          onPressed: _export,
+                          icon: const Icon(Icons.ios_share_rounded, size: 16),
+                          label: const Text('Export CSV'),
+                        ),
+                      ],
                     ),
                   );
                 }
@@ -352,29 +612,55 @@ class _StockOnHandTabState extends State<_StockOnHandTab> {
                 final l = _lines[index];
                 return Container(
                   key: Key('stock_${l.productId}'),
-                  margin: const EdgeInsets.only(bottom: 12),
-                  decoration: AppDecorations.card(color: AppColors.surface),
+                  margin: const EdgeInsets.only(bottom: 10),
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: l.expiringWithin30Days ? AppColors.warning.withValues(alpha: 0.4) : AppColors.border),
+                    boxShadow: AppDecorations.cardShadow,
+                  ),
                   child: ListTile(
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                     leading: Container(
-                      padding: const EdgeInsets.all(10),
+                      width: 44,
+                      height: 44,
                       decoration: BoxDecoration(
-                        color: l.expiringWithin30Days ? AppColors.warningContainer : AppColors.primaryContainer,
+                        gradient: _avatarGrad(l.name),
                         borderRadius: BorderRadius.circular(12),
                       ),
-                      child: Icon(
-                        Icons.inventory_2_rounded,
-                        color: l.expiringWithin30Days ? AppColors.warning : AppColors.primary,
-                        size: 22,
+                      child: const Center(
+                        child: Icon(Icons.inventory_2_rounded, color: Colors.white, size: 20),
                       ),
                     ),
-                    title: Text(l.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                    title: Text(l.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                     subtitle: Padding(
                       padding: const EdgeInsets.only(top: 4),
-                      child: Text(
-                        '${l.sku} · ${l.batchCount} batch(es)'
-                        '${l.nearestExpiry != null ? ' · nearest expiry ${DateFormat('dd MMM yyyy').format(l.nearestExpiry!)}' : ''}',
-                        style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                      child: Wrap(
+                        spacing: 6,
+                        runSpacing: 4,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: AppColors.surfaceSecondary,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(l.sku, style: AppTypography.caption.copyWith(fontWeight: FontWeight.w600)),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: AppColors.surfaceSecondary,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text('${l.batchCount} batch(es)', style: AppTypography.caption),
+                          ),
+                          if (l.nearestExpiry != null)
+                            Text(
+                              'nearest expiry ${DateFormat('dd MMM yyyy').format(l.nearestExpiry!)}',
+                              style: const TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                            ),
+                        ],
                       ),
                     ),
                     trailing: Column(
@@ -383,7 +669,7 @@ class _StockOnHandTabState extends State<_StockOnHandTab> {
                       children: [
                         Text(
                           l.totalAvailable.toString(),
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppColors.textPrimary),
+                          style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16, color: AppColors.primary),
                         ),
                         if (l.expiringWithin30Days)
                           Container(
@@ -455,9 +741,21 @@ class _CustomerBalancesTabState extends State<_CustomerBalancesTab> {
     );
   }
 
+  LinearGradient _avatarGrad(String name) {
+    final colors = [
+      AppColors.gradientIndigo,
+      AppColors.gradientCyan,
+      AppColors.gradientEmerald,
+      AppColors.gradientPurple,
+      AppColors.gradientAmber,
+    ];
+    final idx = name.codeUnits.fold(0, (a, b) => a + b) % colors.length;
+    return colors[idx];
+  }
+
   @override
   Widget build(BuildContext context) {
-    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_loading) return const Center(child: CircularProgressIndicator(color: AppColors.primary));
     if (_error != null) {
       return Center(child: Text(_error!, style: const TextStyle(color: Colors.red)));
     }
@@ -465,21 +763,38 @@ class _CustomerBalancesTabState extends State<_CustomerBalancesTab> {
       onRefresh: _load,
       child: _balances.isEmpty
           ? ListView(children: const [
-              Padding(padding: EdgeInsets.all(24), child: Center(child: Text('No outstanding balances'))),
+              Padding(padding: EdgeInsets.all(32), child: Center(child: Text('No outstanding balances', style: AppTypography.bodySecondary))),
             ])
           : ListView.builder(
               key: const Key('balances_list'),
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
               itemCount: _balances.length + 1,
               itemBuilder: (context, index) {
                 if (index == 0) {
-                  return Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton.icon(
-                      key: const Key('balances_export_csv_button'),
-                      onPressed: _export,
-                      icon: const Icon(Icons.ios_share_rounded, size: 16),
-                      label: const Text('Export CSV'),
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: AppColors.surfaceSecondary,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: AppColors.border),
+                          ),
+                          child: Text(
+                            '${_balances.length} receivables accounts',
+                            style: AppTypography.caption.copyWith(fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                        TextButton.icon(
+                          key: const Key('balances_export_csv_button'),
+                          onPressed: _export,
+                          icon: const Icon(Icons.ios_share_rounded, size: 16),
+                          label: const Text('Export CSV'),
+                        ),
+                      ],
                     ),
                   );
                 }
@@ -488,18 +803,33 @@ class _CustomerBalancesTabState extends State<_CustomerBalancesTab> {
                 final overLimit = b.balance > b.creditLimit;
                 return Container(
                   key: Key('balance_${b.customerId}'),
-                  margin: const EdgeInsets.only(bottom: 12),
-                  decoration: AppDecorations.card(color: AppColors.surface),
+                  margin: const EdgeInsets.only(bottom: 10),
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: overLimit ? AppColors.danger.withValues(alpha: 0.4) : AppColors.border),
+                    boxShadow: AppDecorations.cardShadow,
+                  ),
                   child: ListTile(
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    leading: CircleAvatar(
-                      backgroundColor: overLimit ? AppColors.dangerContainer : AppColors.secondaryContainer,
-                      child: Icon(Icons.person_rounded, color: overLimit ? AppColors.danger : AppColors.secondary, size: 20),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    leading: Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        gradient: _avatarGrad(b.name),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Center(
+                        child: Text(
+                          b.name.isNotEmpty ? b.name[0].toUpperCase() : 'C',
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 17),
+                        ),
+                      ),
                     ),
-                    title: Text(b.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                    subtitle: Text('Limit: ₹${b.creditLimit.toStringAsFixed(2)}', style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+                    title: Text(b.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                    subtitle: Text('Limit: ${money(b.creditLimit)}', style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
                     trailing: Text(
-                      '₹${b.balance.toStringAsFixed(2)}',
+                      money(b.balance),
                       style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: overLimit ? Colors.red : AppColors.textPrimary),
                     ),
                   ),
@@ -574,7 +904,7 @@ class _EodHistoryTabState extends State<_EodHistoryTab> {
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_loading) return const Center(child: CircularProgressIndicator(color: AppColors.primary));
     if (_error != null) {
       return Center(child: Text(_error!, style: const TextStyle(color: Colors.red)));
     }
@@ -582,21 +912,38 @@ class _EodHistoryTabState extends State<_EodHistoryTab> {
       onRefresh: _load,
       child: _sessions.isEmpty
           ? ListView(children: const [
-              Padding(padding: EdgeInsets.all(24), child: Center(child: Text('No EOD sessions in this range'))),
+              Padding(padding: EdgeInsets.all(32), child: Center(child: Text('No EOD sessions in this range', style: AppTypography.bodySecondary))),
             ])
           : ListView.builder(
               key: const Key('eod_history_list'),
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
               itemCount: _sessions.length + 1,
               itemBuilder: (context, index) {
                 if (index == 0) {
-                  return Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton.icon(
-                      key: const Key('eod_export_csv_button'),
-                      onPressed: _export,
-                      icon: const Icon(Icons.ios_share_rounded, size: 16),
-                      label: const Text('Export CSV'),
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: AppColors.surfaceSecondary,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: AppColors.border),
+                          ),
+                          child: Text(
+                            '${_sessions.length} recorded cash sessions',
+                            style: AppTypography.caption.copyWith(fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                        TextButton.icon(
+                          key: const Key('eod_export_csv_button'),
+                          onPressed: _export,
+                          icon: const Icon(Icons.ios_share_rounded, size: 16),
+                          label: const Text('Export CSV'),
+                        ),
+                      ],
                     ),
                   );
                 }
@@ -604,25 +951,30 @@ class _EodHistoryTabState extends State<_EodHistoryTab> {
                 final s = _sessions[index];
                 return Container(
                   key: Key('eod_history_${_dateFormat.format(s.businessDate)}'),
-                  margin: const EdgeInsets.only(bottom: 12),
-                  decoration: AppDecorations.card(color: AppColors.surface),
+                  margin: const EdgeInsets.only(bottom: 10),
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: AppColors.border),
+                    boxShadow: AppDecorations.cardShadow,
+                  ),
                   child: ListTile(
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                     leading: Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: AppColors.secondaryContainer,
+                        gradient: AppColors.gradientPurple,
                         borderRadius: BorderRadius.circular(12),
                       ),
-                      child: const Icon(Icons.history_rounded, color: AppColors.secondary, size: 22),
+                      child: const Icon(Icons.point_of_sale_rounded, color: Colors.white, size: 20),
                     ),
-                    title: Text(_dateFormat.format(s.businessDate), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                    subtitle: Text('${s.status} · Expected ₹${s.expectedCash.toStringAsFixed(2)}', style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+                    title: Text(_dateFormat.format(s.businessDate), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                    subtitle: Text('${s.status} · Expected ${money(s.expectedCash)}', style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
                     trailing: s.variance != null
                         ? Text(
-                            '₹${s.variance!.toStringAsFixed(2)}',
+                            money(s.variance!),
                             style: TextStyle(
-                              fontWeight: FontWeight.bold,
+                              fontWeight: FontWeight.w900,
                               fontSize: 15,
                               color: s.variance == Decimal.zero
                                   ? Colors.green

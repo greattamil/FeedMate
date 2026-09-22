@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 
+import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
 import 'supplier_api.dart';
 
-/// The fields a supplier create/edit form collects. supplier_code is only
-/// present (and shown, read-only) when editing — see SupplierDetail server
-/// contract, where the business key is immutable once assigned.
+/// The fields a supplier create/edit form collects. supplier_code is
+/// server-generated and never part of this result — see the dialog's
+/// read-only display on edit for where it's shown instead.
 class SupplierFormResult {
-  final String? supplierCode;
   final String name;
   final String? tradeName;
   final String? gstin;
@@ -16,7 +16,6 @@ class SupplierFormResult {
   final int paymentTermsDays;
 
   SupplierFormResult({
-    this.supplierCode,
     required this.name,
     this.tradeName,
     this.gstin,
@@ -78,7 +77,6 @@ class _SupplierFormDialogState extends State<SupplierFormDialog> {
   void _submit() {
     if (!_formKey.currentState!.validate()) return;
     Navigator.of(context).pop(SupplierFormResult(
-      supplierCode: _isEdit ? null : _codeController.text.trim(),
       name: _nameController.text.trim(),
       tradeName: _tradeNameController.text.trim().isEmpty ? null : _tradeNameController.text.trim(),
       gstin: _gstinController.text.trim().isEmpty ? null : _gstinController.text.trim(),
@@ -91,65 +89,108 @@ class _SupplierFormDialogState extends State<SupplierFormDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(_isEdit ? 'Edit Supplier' : 'Add Supplier', style: AppTypography.headline),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      title: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              gradient: AppColors.gradientAmber,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(
+              _isEdit ? Icons.edit_note_rounded : Icons.add_business_rounded,
+              color: Colors.white,
+              size: 20,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Text(_isEdit ? 'Edit Supplier' : 'Add Supplier', style: AppTypography.headline.copyWith(fontSize: 18)),
+        ],
+      ),
       content: Form(
         key: _formKey,
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (!_isEdit)
-                TextFormField(
-                  key: const Key('supplier_code_field'),
-                  controller: _codeController,
-                  decoration: const InputDecoration(labelText: 'Supplier Code'),
-                  validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
-                )
-              else
+              if (_isEdit) ...[
                 TextFormField(
                   key: const Key('supplier_code_field_readonly'),
                   controller: _codeController,
                   enabled: false,
-                  decoration: const InputDecoration(labelText: 'Supplier Code (cannot be changed)'),
+                  decoration: const InputDecoration(
+                    labelText: 'Supplier Code (cannot be changed)',
+                    prefixIcon: Icon(Icons.lock_outline_rounded, size: 18),
+                  ),
                 ),
-              const SizedBox(height: 12),
+                const SizedBox(height: 12),
+              ] else
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 12),
+                  child: Row(
+                    children: [
+                      Icon(Icons.auto_awesome_rounded, size: 14, color: AppColors.textSecondary),
+                      SizedBox(width: 6),
+                      Text('Supplier code is generated automatically', style: AppTypography.caption),
+                    ],
+                  ),
+                ),
               TextFormField(
                 key: const Key('supplier_name_field'),
                 controller: _nameController,
-                decoration: const InputDecoration(labelText: 'Legal Name'),
+                decoration: const InputDecoration(
+                  labelText: 'Legal Name',
+                  prefixIcon: Icon(Icons.business_rounded, size: 18),
+                ),
                 validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
               ),
               const SizedBox(height: 12),
               TextFormField(
                 key: const Key('supplier_trade_name_field'),
                 controller: _tradeNameController,
-                decoration: const InputDecoration(labelText: 'Trade Name (optional)'),
+                decoration: const InputDecoration(
+                  labelText: 'Trade Name (optional)',
+                  prefixIcon: Icon(Icons.storefront_rounded, size: 18),
+                ),
               ),
               const SizedBox(height: 12),
               TextFormField(
                 key: const Key('supplier_gstin_field'),
                 controller: _gstinController,
-                decoration: const InputDecoration(labelText: 'GSTIN (optional)'),
+                decoration: const InputDecoration(
+                  labelText: 'GSTIN (optional)',
+                  prefixIcon: Icon(Icons.verified_user_rounded, size: 18),
+                ),
               ),
               const SizedBox(height: 12),
               TextFormField(
                 key: const Key('supplier_phone_field'),
                 controller: _phoneController,
-                decoration: const InputDecoration(labelText: 'Phone (optional)'),
+                decoration: const InputDecoration(
+                  labelText: 'Phone (optional)',
+                  prefixIcon: Icon(Icons.phone_rounded, size: 18),
+                ),
                 keyboardType: TextInputType.phone,
               ),
               const SizedBox(height: 12),
               TextFormField(
                 key: const Key('supplier_email_field'),
                 controller: _emailController,
-                decoration: const InputDecoration(labelText: 'Email (optional)'),
+                decoration: const InputDecoration(
+                  labelText: 'Email (optional)',
+                  prefixIcon: Icon(Icons.email_rounded, size: 18),
+                ),
                 keyboardType: TextInputType.emailAddress,
               ),
               const SizedBox(height: 12),
               TextFormField(
                 key: const Key('supplier_payment_terms_field'),
                 controller: _paymentTermsController,
-                decoration: const InputDecoration(labelText: 'Payment Terms (days)'),
+                decoration: const InputDecoration(
+                  labelText: 'Payment Terms (days)',
+                  prefixIcon: Icon(Icons.schedule_rounded, size: 18),
+                ),
                 keyboardType: TextInputType.number,
                 validator: (v) {
                   final n = int.tryParse((v ?? '').trim());
@@ -165,8 +206,12 @@ class _SupplierFormDialogState extends State<SupplierFormDialog> {
         TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
         FilledButton(
           key: const Key('supplier_form_submit'),
+          style: FilledButton.styleFrom(
+            backgroundColor: AppColors.warning,
+            foregroundColor: Colors.white,
+          ),
           onPressed: _submit,
-          child: Text(_isEdit ? 'Save' : 'Add'),
+          child: Text(_isEdit ? 'Save' : 'Add', style: const TextStyle(fontWeight: FontWeight.w700)),
         ),
       ],
     );

@@ -9,11 +9,13 @@ import 'package:uuid/uuid.dart';
 import '../../core/api_client.dart';
 import '../../core/api_error.dart';
 import '../../core/local_db.dart';
+import '../../core/theme/app_colors.dart';
 import 'cart_model.dart';
 import 'customer_api.dart';
 import 'customer_picker_screen.dart';
 import 'invoice_detail_screen.dart';
 import 'pos_api.dart';
+import '../../core/number_format.dart';
 
 /// The cart/checkout body: shows the cart, fetches a live server-computed
 /// quote whenever it changes (never computes tax/totals itself — see
@@ -266,7 +268,7 @@ class _CartPanelState extends State<CartPanel> {
         _selectedCustomer = null;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Sale complete — Invoice ${result.invoiceNumber} for ₹${result.grandTotal.toStringAsFixed(2)}')),
+        SnackBar(content: Text('Sale complete — Invoice ${result.invoiceNumber} for ${money(result.grandTotal)}')),
       );
       // A completed sale is not really "done" until the cashier can see (and
       // hand over/share) the finalized invoice — auto-navigate straight to
@@ -331,7 +333,7 @@ class _CartPanelState extends State<CartPanel> {
         content: Text(
           'No connection — this sale will be priced and sent to the server '
           'automatically once online.\n\n'
-          '${estimate != null ? "Estimated total: ₹${estimate.toStringAsFixed(2)}\n\n" : ""}'
+          '${estimate != null ? "Estimated total: ${money(estimate)}\n\n" : ""}'
           'Use the sync button to sync manually.',
         ),
         actions: [
@@ -510,14 +512,21 @@ class _CartPanelState extends State<CartPanel> {
                       child: Row(
                         children: [
                           Container(
-                            width: 40,
-                            height: 40,
+                            width: 42,
+                            height: 42,
                             decoration: BoxDecoration(
-                              color: const Color(0xFFE6F4EA),
+                              gradient: AppColors.gradientEmerald,
                               borderRadius: BorderRadius.circular(10),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: AppColors.primary.withValues(alpha: 0.25),
+                                  blurRadius: 8,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
                             ),
                             child: const Center(
-                              child: Icon(Icons.grain_rounded, color: Color(0xFF0F766E), size: 20),
+                              child: Icon(Icons.grain_rounded, color: Colors.white, size: 20),
                             ),
                           ),
                           const SizedBox(width: 12),
@@ -531,8 +540,8 @@ class _CartPanelState extends State<CartPanel> {
                                 if (line.product.sellingPrice != null) ...[
                                   const SizedBox(height: 2),
                                   Text(
-                                    '₹${line.product.sellingPrice!.toStringAsFixed(2)} each',
-                                    style: const TextStyle(color: Color(0xFF0F766E), fontWeight: FontWeight.w600, fontSize: 12),
+                                    '${money(line.product.sellingPrice!)} each',
+                                    style: const TextStyle(color: Color(0xFF0F766E), fontWeight: FontWeight.bold, fontSize: 12),
                                   ),
                                 ],
                               ],
@@ -543,6 +552,7 @@ class _CartPanelState extends State<CartPanel> {
                             decoration: BoxDecoration(
                               color: const Color(0xFFF1F5F9),
                               borderRadius: BorderRadius.circular(30),
+                              border: Border.all(color: const Color(0xFFE2E8F0)),
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
@@ -577,7 +587,7 @@ class _CartPanelState extends State<CartPanel> {
                           ),
                           const SizedBox(width: 4),
                           IconButton(
-                            icon: const Icon(Icons.delete_outline, size: 20, color: Color(0xFFE11D48)),
+                            icon: const Icon(Icons.delete_outline_rounded, size: 20, color: Color(0xFFE11D48)),
                             onPressed: () {
                               cart.removeLine(line.product.id);
                             },
@@ -588,10 +598,7 @@ class _CartPanelState extends State<CartPanel> {
                   },
                 ),
         ),
-        // Location & Tender Controls Container — hidden entirely on an
-        // empty cart rather than shown disabled: an empty-cart tender bar
-        // (payment toggle, customer picker, a "Charge Cash" that can never
-        // be tapped) is pure visual clutter with nothing to configure yet.
+        // Location & Tender Controls Container
         if (!cart.isEmpty)
         Container(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
@@ -724,7 +731,7 @@ class _CartPanelState extends State<CartPanel> {
                   if (remaining == null) return const SizedBox.shrink();
                   final settled = remaining == Decimal.zero;
                   return Text(
-                    settled ? 'Fully allocated' : 'Remaining: ₹${remaining.toStringAsFixed(2)}',
+                    settled ? 'Fully allocated' : 'Remaining: ${money(remaining)}',
                     key: const Key('split_tender_remaining'),
                     style: TextStyle(
                       fontSize: 12,
@@ -748,10 +755,17 @@ class _CartPanelState extends State<CartPanel> {
                     leading: Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFEEF2FF),
-                        borderRadius: BorderRadius.circular(8),
+                        gradient: AppColors.gradientIndigo,
+                        borderRadius: BorderRadius.circular(10),
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppColors.secondary.withValues(alpha: 0.3),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
                       ),
-                      child: const Icon(Icons.person_rounded, color: Color(0xFF4F46E5), size: 20),
+                      child: const Icon(Icons.person_rounded, color: Colors.white, size: 20),
                     ),
                     title: Text(_selectedCustomer?.name ?? 'Select customer', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                     subtitle: _selectedCustomer != null
@@ -790,16 +804,16 @@ class _CartPanelState extends State<CartPanel> {
                           _quoting
                               ? 'Calculating…'
                               : _quote != null
-                                  ? 'Total: ₹${_quote!.grandTotal.toStringAsFixed(2)}'
+                                  ? 'Total: ${money(_quote!.grandTotal)}'
                                   : (estimate != null
-                                      ? 'Estimated: ₹${estimate.toStringAsFixed(2)}'
+                                      ? 'Estimated: ${money(estimate)}'
                                       : 'Total: —'),
                           style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: Color(0xFF0F766E)),
                           key: const Key('cart_total'),
                         ),
                         if (_quote != null && _quote!.taxTotal > Decimal.zero)
                           Text(
-                            'Includes ₹${_quote!.taxTotal.toStringAsFixed(2)} GST tax',
+                            'Includes ${money(_quote!.taxTotal)} GST tax',
                             style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
                           ),
                       ],
@@ -808,9 +822,17 @@ class _CartPanelState extends State<CartPanel> {
                   FilledButton(
                     key: const Key('checkout_button'),
                     style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xFF0F766E),
+                      backgroundColor: _offline
+                          ? AppColors.warning
+                          : (_tenderMethod == 'CREDIT' ? AppColors.secondary : AppColors.primary),
+                      foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      elevation: 4,
+                      shadowColor: (_offline
+                              ? AppColors.warning
+                              : (_tenderMethod == 'CREDIT' ? AppColors.secondary : AppColors.primary))
+                          .withValues(alpha: 0.5),
                     ),
                     onPressed: canCheckout ? () => _checkout() : null,
                     child: _checkingOut

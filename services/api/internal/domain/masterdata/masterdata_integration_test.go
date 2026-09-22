@@ -1,7 +1,9 @@
 //go:build integration
 
 // Integration tests against a real, migrated PostgreSQL database. Run with:
-//   go test -tags=integration ./internal/domain/masterdata/...
+//
+//	go test -tags=integration ./internal/domain/masterdata/...
+//
 // Requires DATABASE_URL (app_user) and DATABASE_ADMIN_URL (app_admin).
 package masterdata_test
 
@@ -186,6 +188,52 @@ func TestCreateCategory_AndDeactivate(t *testing.T) {
 	}
 }
 
+// TestUpdateCategory_RenamesInPlace covers the "full CRUD" gap: previously
+// the only way to fix a typo in a category name was deactivate-and-recreate,
+// losing the original id every existing product still points to.
+func TestUpdateCategory_RenamesInPlace(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	tenantID := seedTenant(t, db)
+	svc := masterdata.NewService(db)
+
+	created, err := svc.CreateCategory(context.Background(), tenantID, "Catle Feed", "")
+	if err != nil {
+		t.Fatalf("create category: %v", err)
+	}
+
+	if err := svc.UpdateCategory(context.Background(), tenantID, created.ID, "Cattle Feed", "மாட்டு தீவனம்"); err != nil {
+		t.Fatalf("update category: %v", err)
+	}
+
+	categories, err := svc.ListAllCategories(context.Background(), tenantID)
+	if err != nil {
+		t.Fatalf("list categories: %v", err)
+	}
+	if len(categories) != 1 || categories[0].ID != created.ID || categories[0].Name != "Cattle Feed" || categories[0].LocalName != "மாட்டு தீவனம்" {
+		t.Fatalf("expected the renamed category with the same id, got %+v", categories)
+	}
+
+	if err := svc.UpdateCategory(context.Background(), tenantID, created.ID, "", ""); !errors.Is(err, masterdata.ErrValidation) {
+		t.Fatalf("expected ErrValidation for an empty name, got: %v", err)
+	}
+	if err := svc.UpdateCategory(context.Background(), tenantID, uuid.New(), "X", ""); !errors.Is(err, masterdata.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for a nonexistent category, got: %v", err)
+	}
+
+	// ListAllCategories must include a since-deactivated row too.
+	if err := svc.SetCategoryActive(context.Background(), tenantID, created.ID, false); err != nil {
+		t.Fatalf("deactivate category: %v", err)
+	}
+	all, err := svc.ListAllCategories(context.Background(), tenantID)
+	if err != nil {
+		t.Fatalf("list all categories: %v", err)
+	}
+	if len(all) != 1 || all[0].Active {
+		t.Fatalf("expected ListAllCategories to still include the deactivated category, got %+v", all)
+	}
+}
+
 func TestCreateBrand_AndDeactivate(t *testing.T) {
 	db := connectTest(t)
 	defer db.Close()
@@ -214,6 +262,35 @@ func TestCreateBrand_AndDeactivate(t *testing.T) {
 	}
 	if len(afterDeactivate) != 0 {
 		t.Fatalf("expected the deactivated brand to be excluded from the active-only list, got %+v", afterDeactivate)
+	}
+}
+
+// TestUpdateBrand_RenamesInPlace mirrors TestUpdateCategory_RenamesInPlace.
+func TestUpdateBrand_RenamesInPlace(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	tenantID := seedTenant(t, db)
+	svc := masterdata.NewService(db)
+
+	created, err := svc.CreateBrand(context.Background(), tenantID, "Godrej Agro", "")
+	if err != nil {
+		t.Fatalf("create brand: %v", err)
+	}
+
+	if err := svc.UpdateBrand(context.Background(), tenantID, created.ID, "Godrej Agrovet", ""); err != nil {
+		t.Fatalf("update brand: %v", err)
+	}
+
+	brands, err := svc.ListBrands(context.Background(), tenantID)
+	if err != nil {
+		t.Fatalf("list brands: %v", err)
+	}
+	if len(brands) != 1 || brands[0].ID != created.ID || brands[0].Name != "Godrej Agrovet" {
+		t.Fatalf("expected the renamed brand with the same id, got %+v", brands)
+	}
+
+	if err := svc.UpdateBrand(context.Background(), tenantID, uuid.New(), "X", ""); !errors.Is(err, masterdata.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for a nonexistent brand, got: %v", err)
 	}
 }
 

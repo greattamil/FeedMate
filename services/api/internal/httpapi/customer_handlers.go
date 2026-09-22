@@ -20,7 +20,6 @@ type CustomerHandlers struct {
 }
 
 type createCustomerRequest struct {
-	CustomerCode  string `json:"customer_code"`
 	Name          string `json:"name"`
 	LocalName     string `json:"local_name,omitempty"`
 	Phone         string `json:"phone,omitempty"`
@@ -71,7 +70,7 @@ func (h *CustomerHandlers) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	in := customer.CreateInput{
-		CustomerCode: req.CustomerCode, Name: req.Name, LocalName: req.LocalName,
+		Name: req.Name, LocalName: req.LocalName,
 		Phone: req.Phone, WhatsAppPhone: req.WhatsAppPhone, Email: req.Email, GSTIN: req.GSTIN,
 		CustomerType: req.CustomerType,
 	}

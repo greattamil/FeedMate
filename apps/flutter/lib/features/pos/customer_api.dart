@@ -157,7 +157,6 @@ class CustomerApi {
   /// customer.validCustomerTypes server-side); anything else is rejected
   /// with a clear validation error rather than an opaque 500.
   Future<CustomerDetail> create({
-    required String customerCode,
     required String name,
     String? localName,
     String? phone,
@@ -168,7 +167,6 @@ class CustomerApi {
     Decimal? creditLimit,
   }) async {
     final body = {
-      'customer_code': customerCode,
       'name': name,
       if (localName != null && localName.isNotEmpty) 'local_name': localName,
       if (phone != null && phone.isNotEmpty) 'phone': phone,

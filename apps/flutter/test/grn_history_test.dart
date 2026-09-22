@@ -70,7 +70,7 @@ void main() {
     expect(find.textContaining('Batch B-100'), findsOneWidget);
     expect(find.textContaining('Vehicle: TN01AB1234'), findsOneWidget);
     expect(find.textContaining('Net weight: 2545.00 kg'), findsOneWidget);
-    expect(find.text('₹18000.00'), findsOneWidget);
+    expect(find.text('₹18,000.00'), findsOneWidget);
   });
 
   testWidgets('GRN history shows an empty state with no results', (tester) async {

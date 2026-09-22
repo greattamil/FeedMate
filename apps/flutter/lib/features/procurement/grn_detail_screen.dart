@@ -4,12 +4,14 @@ import 'package:provider/provider.dart';
 
 import '../../core/api_client.dart';
 import '../../core/api_error.dart';
+import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_decorations.dart';
+import '../../core/theme/app_typography.dart';
 import 'grn_history_api.dart';
+import '../../core/number_format.dart';
 
 /// Read-only detail view of one posted GRN: what was received, from whom,
-/// and at what cost per line. A posted GRN is never editable from here —
-/// see procurement.Service.PostGRN's own doc comments on why receipts are
-/// append-only.
+/// and at what cost per line. A posted GRN is never editable from here.
 class GrnDetailScreen extends StatefulWidget {
   final String grnId;
   const GrnDetailScreen({super.key, required this.grnId});
@@ -57,9 +59,10 @@ class _GrnDetailScreenState extends State<GrnDetailScreen> {
   Widget build(BuildContext context) {
     final detail = _detail;
     return Scaffold(
-      appBar: AppBar(title: Text(detail?.grnNumber ?? 'GRN')),
+      backgroundColor: AppColors.background,
+      appBar: AppBar(title: Text(detail?.grnNumber ?? 'GRN', style: AppTypography.headline)),
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
           : _error != null
               ? Center(child: Padding(padding: const EdgeInsets.all(16), child: Text(_error!, style: const TextStyle(color: Colors.red))))
               : detail == null
@@ -67,41 +70,119 @@ class _GrnDetailScreenState extends State<GrnDetailScreen> {
                   : ListView(
                       padding: const EdgeInsets.all(16),
                       children: [
+                        // Hero Summary Card
                         Container(
-                          padding: const EdgeInsets.all(16),
+                          padding: const EdgeInsets.all(18),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFF8FAFC),
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(color: const Color(0xFFE2E8F0)),
+                            color: AppColors.surface,
+                            borderRadius: AppDecorations.borderRadiusLg,
+                            border: Border.all(color: AppColors.border),
+                            boxShadow: AppDecorations.cardShadow,
                           ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(detail.grnNumber, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                              if (detail.postedAt != null)
-                                Text(_dateFormat.format(detail.postedAt!.toLocal()), style: const TextStyle(color: Color(0xFF64748B), fontSize: 12)),
-                              const SizedBox(height: 4),
-                              Text('Supplier: ${detail.supplierName}', style: const TextStyle(fontSize: 13)),
-                              if (detail.supplierDocumentNo != null)
-                                Text('Supplier doc: ${detail.supplierDocumentNo}', style: const TextStyle(fontSize: 13)),
-                              if (detail.vehicleNo != null)
-                                Text('Vehicle: ${detail.vehicleNo}', style: const TextStyle(fontSize: 13)),
-                              if (detail.netWeightKg != null)
-                                Text('Net weight: ${detail.netWeightKg!.toStringAsFixed(2)} kg', style: const TextStyle(fontSize: 13)),
+                              Row(
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(10),
+                                    decoration: BoxDecoration(
+                                      gradient: AppColors.gradientTealCyan,
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: const Icon(Icons.receipt_long_rounded, color: Colors.white, size: 22),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          detail.grnNumber,
+                                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.textPrimary),
+                                        ),
+                                        if (detail.postedAt != null)
+                                          Text(
+                                            _dateFormat.format(detail.postedAt!.toLocal()),
+                                            style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 14),
+                              const Divider(height: 1),
+                              const SizedBox(height: 14),
+                              Row(
+                                children: [
+                                  const Icon(Icons.business_rounded, size: 16, color: AppColors.warning),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      'Supplier: ${detail.supplierName}',
+                                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              if (detail.supplierDocumentNo != null) ...[
+                                const SizedBox(height: 8),
+                                Row(
+                                  children: [
+                                    const Icon(Icons.description_outlined, size: 16, color: AppColors.textSecondary),
+                                    const SizedBox(width: 8),
+                                    Text('Supplier doc: ${detail.supplierDocumentNo}', style: const TextStyle(fontSize: 13)),
+                                  ],
+                                ),
+                              ],
+                              if (detail.vehicleNo != null) ...[
+                                const SizedBox(height: 8),
+                                Row(
+                                  children: [
+                                    const Icon(Icons.local_shipping_outlined, size: 16, color: AppColors.textSecondary),
+                                    const SizedBox(width: 8),
+                                    Text('Vehicle: ${detail.vehicleNo}', style: const TextStyle(fontSize: 13)),
+                                  ],
+                                ),
+                              ],
+                              if (detail.netWeightKg != null) ...[
+                                const SizedBox(height: 8),
+                                Row(
+                                  children: [
+                                    const Icon(Icons.scale_rounded, size: 16, color: AppColors.primary),
+                                    const SizedBox(width: 8),
+                                    Text('Net weight: ${detail.netWeightKg!.toStringAsFixed(2)} kg', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                                  ],
+                                ),
+                              ],
                             ],
                           ),
                         ),
-                        const SizedBox(height: 16),
-                        const Text('Items Received', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                        const SizedBox(height: 8),
+                        const SizedBox(height: 20),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.inventory_2_rounded, size: 18, color: AppColors.primary),
+                              const SizedBox(width: 8),
+                              Text(
+                                'Items Received (${detail.lines.length})',
+                                style: AppTypography.headline.copyWith(fontSize: 15, fontWeight: FontWeight.w800),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 10),
                         ...detail.lines.map((l) => Container(
                               key: Key('grn_detail_line_${l.batchCode}'),
-                              margin: const EdgeInsets.only(bottom: 6),
-                              padding: const EdgeInsets.all(12),
+                              margin: const EdgeInsets.only(bottom: 8),
+                              padding: const EdgeInsets.all(14),
                               decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(10),
-                                border: Border.all(color: const Color(0xFFE2E8F0)),
+                                color: AppColors.surface,
+                                borderRadius: AppDecorations.borderRadiusMd,
+                                border: Border.all(color: AppColors.border),
+                                boxShadow: AppDecorations.cardShadow,
                               ),
                               child: Row(
                                 children: [
@@ -109,17 +190,19 @@ class _GrnDetailScreenState extends State<GrnDetailScreen> {
                                     child: Column(
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
-                                        Text(l.productName, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                                        Text(l.productName, style: AppTypography.title.copyWith(fontSize: 14, fontWeight: FontWeight.w700)),
+                                        const SizedBox(height: 4),
                                         Text(
-                                          'Batch ${l.batchCode} · ${l.receivedQty.toString()} ${l.uomCode} × ₹${l.unitCost.toStringAsFixed(2)} · ${l.qualityStatus}',
-                                          style: const TextStyle(color: Color(0xFF64748B), fontSize: 12),
+                                          'Batch ${l.batchCode} · ${l.receivedQty.toString()} ${l.uomCode} × ${money(l.unitCost)} · ${l.qualityStatus}',
+                                          style: AppTypography.caption,
                                         ),
                                       ],
                                     ),
                                   ),
+                                  const SizedBox(width: 8),
                                   Text(
-                                    '₹${(l.receivedQty * l.unitCost).toStringAsFixed(2)}',
-                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                    money((l.receivedQty * l.unitCost)),
+                                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: AppColors.success),
                                   ),
                                 ],
                               ),

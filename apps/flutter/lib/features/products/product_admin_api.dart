@@ -206,6 +206,48 @@ class MasterDataOption {
   MasterDataOption({required this.id, required this.label});
 }
 
+/// A full category record for the dedicated management screen — unlike
+/// [MasterDataOption], carries local_name and active status so the screen
+/// can offer real edit and reactivate affordances, not just add/deactivate.
+class CategoryDetail {
+  final String id;
+  final String name;
+  final String? localName;
+  final bool active;
+
+  CategoryDetail({required this.id, required this.name, this.localName, required this.active});
+
+  factory CategoryDetail.fromJson(Map<String, dynamic> json) {
+    final local = json['local_name'] as String?;
+    return CategoryDetail(
+      id: json['id'] as String,
+      name: json['name'] as String,
+      localName: (local == null || local.isEmpty) ? null : local,
+      active: json['active'] as bool,
+    );
+  }
+}
+
+/// A full brand record — see CategoryDetail's doc comment.
+class BrandDetail {
+  final String id;
+  final String name;
+  final String? localName;
+  final bool active;
+
+  BrandDetail({required this.id, required this.name, this.localName, required this.active});
+
+  factory BrandDetail.fromJson(Map<String, dynamic> json) {
+    final local = json['local_name'] as String?;
+    return BrandDetail(
+      id: json['id'] as String,
+      name: json['name'] as String,
+      localName: (local == null || local.isEmpty) ? null : local,
+      active: json['active'] as bool,
+    );
+  }
+}
+
 /// A full tax profile record — the shop owner's central, per-product
 /// control over GST treatment. Mirrors
 /// services/api/internal/httpapi/masterdata_handlers.go's taxProfileJSON.
@@ -337,6 +379,15 @@ class ProductAdminApi {
         .toList();
   }
 
+  /// Includes inactive categories too — the dedicated management screen,
+  /// unlike [listCategories]'s active-only picker list.
+  Future<List<CategoryDetail>> listAllCategories() async {
+    final response = await client.getAuthed('/api/v1/categories/all');
+    return (response['categories'] as List<dynamic>)
+        .map((c) => CategoryDetail.fromJson(c as Map<String, dynamic>))
+        .toList();
+  }
+
   Future<MasterDataOption> createCategory({required String name, String? localName}) async {
     final response = await client.postAuthed('/api/v1/categories', {
       'name': name,
@@ -345,8 +396,23 @@ class ProductAdminApi {
     return MasterDataOption(id: response['id'] as String, label: response['name'] as String);
   }
 
+  Future<void> updateCategory(String categoryId, {required String name, String? localName}) async {
+    await client.putAuthed('/api/v1/categories/$categoryId', {
+      'name': name,
+      if (localName != null && localName.isNotEmpty) 'local_name': localName,
+    });
+  }
+
   Future<void> setCategoryActive(String categoryId, bool active) async {
     await client.postAuthed('/api/v1/categories/$categoryId/status', {'active': active});
+  }
+
+  /// Includes inactive brands too — see listAllCategories's doc comment.
+  Future<List<BrandDetail>> listAllBrands() async {
+    final response = await client.getAuthed('/api/v1/brands/all');
+    return (response['brands'] as List<dynamic>)
+        .map((b) => BrandDetail.fromJson(b as Map<String, dynamic>))
+        .toList();
   }
 
   Future<MasterDataOption> createBrand({required String name, String? localName}) async {
@@ -355,6 +421,13 @@ class ProductAdminApi {
       if (localName != null && localName.isNotEmpty) 'local_name': localName,
     });
     return MasterDataOption(id: response['id'] as String, label: response['name'] as String);
+  }
+
+  Future<void> updateBrand(String brandId, {required String name, String? localName}) async {
+    await client.putAuthed('/api/v1/brands/$brandId', {
+      'name': name,
+      if (localName != null && localName.isNotEmpty) 'local_name': localName,
+    });
   }
 
   Future<void> setBrandActive(String brandId, bool active) async {

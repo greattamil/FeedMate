@@ -79,13 +79,87 @@ class _GrnHistoryScreenState extends State<GrnHistoryScreen> {
       ),
       body: Column(
         children: [
+          // Teal Hero Banner
           Container(
-            padding: const EdgeInsets.all(16),
-            color: AppColors.surface,
+            width: double.infinity,
+            margin: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+            decoration: BoxDecoration(
+              gradient: AppColors.gradientTealCyan,
+              borderRadius: AppDecorations.borderRadiusLg,
+              boxShadow: [
+                BoxShadow(
+                  color: AppColors.primary.withOpacity(0.25),
+                  blurRadius: 16,
+                  offset: const Offset(0, 6),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: Colors.white.withOpacity(0.3)),
+                  ),
+                  child: const Icon(Icons.history_rounded, color: Colors.white, size: 28),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'GRN Intake Register',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.3,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Chronological goods receipt history & receiving logs',
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.9),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Colors.white.withOpacity(0.2)),
+                  ),
+                  child: Text(
+                    '${_results.length} logged',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // Search Field
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
             child: TextField(
               key: const Key('grn_history_search_field'),
               controller: _controller,
               decoration: InputDecoration(
+                filled: true,
+                fillColor: AppColors.surface,
                 labelText: 'Search by GRN no. or supplier name',
                 prefixIcon: const Icon(Icons.search_rounded, color: AppColors.primary),
                 suffixIcon: _controller.text.isNotEmpty
@@ -97,6 +171,19 @@ class _GrnHistoryScreenState extends State<GrnHistoryScreen> {
                         },
                       )
                     : null,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                border: OutlineInputBorder(
+                  borderRadius: AppDecorations.borderRadiusMd,
+                  borderSide: const BorderSide(color: AppColors.border),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: AppDecorations.borderRadiusMd,
+                  borderSide: const BorderSide(color: AppColors.border),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: AppDecorations.borderRadiusMd,
+                  borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
+                ),
               ),
               onChanged: _onQueryChanged,
             ),
@@ -126,12 +213,12 @@ class _GrnHistoryScreenState extends State<GrnHistoryScreen> {
                   )
                 : ListView.builder(
                     key: const Key('grn_history_results_list'),
-                    padding: const EdgeInsets.all(12),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     itemCount: _results.length,
                     itemBuilder: (context, index) {
                       final g = _results[index];
                       return Container(
-                        margin: const EdgeInsets.only(bottom: 8),
+                        margin: const EdgeInsets.only(bottom: 10),
                         decoration: BoxDecoration(
                           color: AppColors.surface,
                           borderRadius: AppDecorations.borderRadiusMd,
@@ -145,14 +232,14 @@ class _GrnHistoryScreenState extends State<GrnHistoryScreen> {
                             width: 42,
                             height: 42,
                             decoration: BoxDecoration(
-                              color: AppColors.surfaceSecondary,
+                              gradient: AppColors.gradientTealCyan,
                               borderRadius: BorderRadius.circular(10),
                             ),
                             child: const Center(
-                              child: Icon(Icons.move_to_inbox_rounded, color: AppColors.primary, size: 20),
+                              child: Icon(Icons.receipt_long_rounded, color: Colors.white, size: 20),
                             ),
                           ),
-                          title: Text(g.grnNumber, style: AppTypography.title),
+                          title: Text(g.grnNumber, style: AppTypography.title.copyWith(fontSize: 15, fontWeight: FontWeight.w700)),
                           subtitle: Text(
                             [
                               g.supplierName,

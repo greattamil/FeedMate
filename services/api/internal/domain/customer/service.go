@@ -9,6 +9,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/andipatti/feedmate/services/api/internal/dbctx"
+	"github.com/andipatti/feedmate/services/api/internal/entitycode"
 )
 
 var ErrValidation = fmt.Errorf("validation error")
@@ -36,7 +37,6 @@ var validCustomerTypes = map[string]bool{
 }
 
 type CreateInput struct {
-	CustomerCode  string
 	Name          string
 	LocalName     string
 	Phone         string
@@ -51,9 +51,6 @@ func (s *Service) Create(ctx context.Context, tenantID uuid.UUID, in CreateInput
 	if in.Name == "" {
 		return nil, fmt.Errorf("%w: name is required", ErrValidation)
 	}
-	if in.CustomerCode == "" {
-		return nil, fmt.Errorf("%w: customer_code is required", ErrValidation)
-	}
 	if in.CustomerType == "" {
 		in.CustomerType = "OTHER"
 	} else if !validCustomerTypes[in.CustomerType] {
@@ -63,7 +60,7 @@ func (s *Service) Create(ctx context.Context, tenantID uuid.UUID, in CreateInput
 		return nil, fmt.Errorf("%w: credit_limit cannot be negative", ErrValidation)
 	}
 
-	c := &Customer{CustomerCode: in.CustomerCode, Name: in.Name, CustomerType: in.CustomerType}
+	c := &Customer{Name: in.Name, CustomerType: in.CustomerType}
 	if in.LocalName != "" {
 		c.LocalName = &in.LocalName
 	}
@@ -81,6 +78,11 @@ func (s *Service) Create(ctx context.Context, tenantID uuid.UUID, in CreateInput
 	}
 
 	err := s.db.WithTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
+		code, err := entitycode.Generate(ctx, tx, tenantID, "customer", "CUST", 4)
+		if err != nil {
+			return err
+		}
+		c.CustomerCode = code
 		return Create(ctx, tx, tenantID, c, in.CreditLimit)
 	})
 	if err != nil {

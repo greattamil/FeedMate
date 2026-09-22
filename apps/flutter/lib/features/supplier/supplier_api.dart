@@ -157,7 +157,6 @@ class SupplierApi {
   /// because the Create response (supplierToJSON) omits outstanding_payable,
   /// which is only ever computed live from the ledger.
   Future<SupplierDetail> create({
-    required String supplierCode,
     required String name,
     String? tradeName,
     String? gstin,
@@ -166,7 +165,6 @@ class SupplierApi {
     int paymentTermsDays = 0,
   }) async {
     final body = {
-      'supplier_code': supplierCode,
       'name': name,
       if (tradeName != null && tradeName.isNotEmpty) 'trade_name': tradeName,
       if (gstin != null && gstin.isNotEmpty) 'gstin': gstin,

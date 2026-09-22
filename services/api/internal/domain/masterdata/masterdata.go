@@ -33,13 +33,17 @@ func NewService(db *dbctx.DB) *Service {
 }
 
 type Category struct {
-	ID   uuid.UUID
-	Name string
+	ID        uuid.UUID
+	Name      string
+	LocalName string
+	Active    bool
 }
 
 type Brand struct {
-	ID   uuid.UUID
-	Name string
+	ID        uuid.UUID
+	Name      string
+	LocalName string
+	Active    bool
 }
 
 type UOM struct {
@@ -128,6 +132,53 @@ func (s *Service) CreateCategory(ctx context.Context, tenantID uuid.UUID, name, 
 	return &c, nil
 }
 
+// ListAllCategories includes inactive categories too, for the dedicated
+// management screen — a shop owner needs to see (and potentially
+// reactivate) everything ever created, not just what's currently
+// assignable to a product.
+func (s *Service) ListAllCategories(ctx context.Context, tenantID uuid.UUID) ([]Category, error) {
+	var out []Category
+	err := s.db.WithTenantReadTx(ctx, tenantID, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT id, name, COALESCE(local_name, ''), active FROM categories ORDER BY name`)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var c Category
+			if err := rows.Scan(&c.ID, &c.Name, &c.LocalName, &c.Active); err != nil {
+				return err
+			}
+			out = append(out, c)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+// UpdateCategory renames a category (and/or its local-language name) in
+// place — the one edit operation that was previously missing, forcing a
+// shop owner to deactivate-and-recreate just to fix a typo.
+func (s *Service) UpdateCategory(ctx context.Context, tenantID, id uuid.UUID, name, localName string) error {
+	if name == "" {
+		return fmt.Errorf("%w: name is required", ErrValidation)
+	}
+	return s.db.WithTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
+		var localNamePtr *string
+		if localName != "" {
+			localNamePtr = &localName
+		}
+		tag, err := tx.Exec(ctx, `UPDATE categories SET name = $2, local_name = $3, updated_at = now() WHERE id = $1`, id, name, localNamePtr)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrNotFound
+		}
+		return nil
+	})
+}
+
 // SetCategoryActive activates or deactivates a category — never a hard
 // delete, since historical products may reference it by id.
 func (s *Service) SetCategoryActive(ctx context.Context, tenantID, id uuid.UUID, active bool) error {
@@ -184,6 +235,49 @@ func (s *Service) CreateBrand(ctx context.Context, tenantID uuid.UUID, name, loc
 		return nil, err
 	}
 	return &b, nil
+}
+
+// ListAllBrands includes inactive brands too — see ListAllCategories's doc
+// comment for why.
+func (s *Service) ListAllBrands(ctx context.Context, tenantID uuid.UUID) ([]Brand, error) {
+	var out []Brand
+	err := s.db.WithTenantReadTx(ctx, tenantID, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT id, name, COALESCE(local_name, ''), active FROM brands ORDER BY name`)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var b Brand
+			if err := rows.Scan(&b.ID, &b.Name, &b.LocalName, &b.Active); err != nil {
+				return err
+			}
+			out = append(out, b)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+// UpdateBrand renames a brand in place — see UpdateCategory's doc comment.
+func (s *Service) UpdateBrand(ctx context.Context, tenantID, id uuid.UUID, name, localName string) error {
+	if name == "" {
+		return fmt.Errorf("%w: name is required", ErrValidation)
+	}
+	return s.db.WithTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
+		var localNamePtr *string
+		if localName != "" {
+			localNamePtr = &localName
+		}
+		tag, err := tx.Exec(ctx, `UPDATE brands SET name = $2, local_name = $3, updated_at = now() WHERE id = $1`, id, name, localNamePtr)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrNotFound
+		}
+		return nil
+	})
 }
 
 func (s *Service) SetBrandActive(ctx context.Context, tenantID, id uuid.UUID, active bool) error {

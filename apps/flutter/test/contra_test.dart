@@ -128,7 +128,7 @@ void main() {
 
     expect(find.text('Contra Posted'), findsOneWidget);
     expect(find.textContaining('CN-0001'), findsOneWidget);
-    expect(find.textContaining('₹2000.00'), findsOneWidget);
+    expect(find.textContaining('₹2,000.00'), findsOneWidget);
 
     expect(postedBody, isNotNull);
     expect(postedBody!['customer_id'], 'cust-1');

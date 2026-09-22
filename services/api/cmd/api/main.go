@@ -141,10 +141,14 @@ func main() {
 			r.With(appmw.RequirePermission("product.manage")).Post("/products/{id}/status", productHandlers.SetStatus)
 
 			r.Get("/categories", masterDataHandlers.ListCategories)
+			r.With(appmw.RequirePermission("product.manage")).Get("/categories/all", masterDataHandlers.ListAllCategories)
 			r.With(appmw.RequirePermission("product.manage")).Post("/categories", masterDataHandlers.CreateCategory)
+			r.With(appmw.RequirePermission("product.manage")).Put("/categories/{id}", masterDataHandlers.UpdateCategory)
 			r.With(appmw.RequirePermission("product.manage")).Post("/categories/{id}/status", masterDataHandlers.SetCategoryActive)
 			r.Get("/brands", masterDataHandlers.ListBrands)
+			r.With(appmw.RequirePermission("product.manage")).Get("/brands/all", masterDataHandlers.ListAllBrands)
 			r.With(appmw.RequirePermission("product.manage")).Post("/brands", masterDataHandlers.CreateBrand)
+			r.With(appmw.RequirePermission("product.manage")).Put("/brands/{id}", masterDataHandlers.UpdateBrand)
 			r.With(appmw.RequirePermission("product.manage")).Post("/brands/{id}/status", masterDataHandlers.SetBrandActive)
 			r.Get("/uoms", masterDataHandlers.ListUOMs)
 			r.Get("/tax-profiles", masterDataHandlers.ListTaxProfiles)
@@ -160,6 +164,10 @@ func main() {
 			r.With(appmw.RequirePermission("pos.sell")).Get("/pos/invoices/{id}", posHandlers.GetInvoiceDetail)
 
 			r.With(appmw.RequirePermission("pos.sell")).Get("/locations", locationHandlers.List)
+			r.With(appmw.RequirePermission("product.manage")).Get("/locations/all", locationHandlers.ListAll)
+			r.With(appmw.RequirePermission("product.manage")).Post("/locations", locationHandlers.Create)
+			r.With(appmw.RequirePermission("product.manage")).Put("/locations/{id}", locationHandlers.Update)
+			r.With(appmw.RequirePermission("product.manage")).Post("/locations/{id}/status", locationHandlers.SetActive)
 
 			r.With(appmw.RequirePermission("device.manage")).Post("/devices/pairing-codes", deviceHandlers.GeneratePairingCode)
 			r.With(appmw.RequirePermission("device.manage")).Get("/devices", deviceHandlers.List)

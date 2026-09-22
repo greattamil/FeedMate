@@ -158,7 +158,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Cattle Feed 50kg'), findsOneWidget);
-    expect(find.textContaining('₹1200.00'), findsOneWidget);
+    expect(find.textContaining('₹1,200.00'), findsOneWidget);
   });
 
   testWidgets('tapping a search result adds it to the cart, shown as a badge', (tester) async {

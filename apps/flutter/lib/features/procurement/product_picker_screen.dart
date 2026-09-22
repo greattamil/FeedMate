@@ -3,14 +3,18 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/api_client.dart';
 import '../../core/api_error.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_decorations.dart';
 import '../../core/theme/app_typography.dart';
+import '../products/product_admin_api.dart';
 import '../pos/product.dart';
 import '../pos/product_repository.dart';
 
-/// Modernized Product Picker for GRN Inward.
+/// Product picker for GRN Inward — browses the full catalog immediately
+/// (matching POS's CatalogPanel) with category filter chips, rather than
+/// requiring the user to already know what to type before seeing anything.
 class ProductPickerScreen extends StatefulWidget {
   const ProductPickerScreen({super.key});
 
@@ -25,13 +29,42 @@ class _ProductPickerScreenState extends State<ProductPickerScreen> {
   bool _loading = false;
   String? _error;
 
+  List<MasterDataOption> _categories = [];
+  String? _selectedCategoryId;
+  bool _loadingCategories = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCategories();
+    // Show the full catalog immediately — a shop owner receiving stock
+    // needs to browse and pick, not already know the exact name to type.
+    _search('');
+  }
+
+  Future<void> _loadCategories() async {
+    try {
+      final api = ProductAdminApi(context.read<ApiClient>());
+      final categories = await api.listCategories();
+      if (!mounted) return;
+      setState(() {
+        _categories = categories;
+        _loadingCategories = false;
+      });
+    } on ApiError catch (_) {
+      if (!mounted) return;
+      setState(() => _loadingCategories = false);
+    }
+  }
+
   void _onQueryChanged(String query) {
     _debounce?.cancel();
-    if (query.trim().isEmpty) {
-      setState(() => _results = []);
-      return;
-    }
     _debounce = Timer(const Duration(milliseconds: 300), () => _search(query));
+  }
+
+  void _onCategorySelected(String? categoryId) {
+    setState(() => _selectedCategoryId = categoryId);
+    _search(_controller.text);
   }
 
   Future<void> _search(String query) async {
@@ -41,7 +74,7 @@ class _ProductPickerScreenState extends State<ProductPickerScreen> {
     });
     try {
       final repo = context.read<ProductRepository>();
-      final result = await repo.search(query);
+      final result = await repo.search(query, categoryId: _selectedCategoryId);
       if (!mounted) return;
       setState(() {
         _results = result.products;
@@ -71,26 +104,68 @@ class _ProductPickerScreenState extends State<ProductPickerScreen> {
       body: Column(
         children: [
           Container(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
             color: AppColors.surface,
-            child: TextField(
-              key: const Key('product_picker_search_field'),
-              controller: _controller,
-              autofocus: true,
-              decoration: InputDecoration(
-                labelText: 'Search by feed name, Tamil, or SKU',
-                prefixIcon: const Icon(Icons.search_rounded, color: AppColors.primary),
-                suffixIcon: _controller.text.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.clear_rounded, size: 18),
-                        onPressed: () {
-                          _controller.clear();
-                          _onQueryChanged('');
-                        },
-                      )
-                    : null,
-              ),
-              onChanged: _onQueryChanged,
+            child: Column(
+              children: [
+                TextField(
+                  key: const Key('product_picker_search_field'),
+                  controller: _controller,
+                  autofocus: true,
+                  decoration: InputDecoration(
+                    labelText: 'Search by feed name, Tamil, or SKU',
+                    prefixIcon: const Icon(Icons.search_rounded, color: AppColors.primary),
+                    suffixIcon: _controller.text.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear_rounded, size: 18),
+                            onPressed: () {
+                              _controller.clear();
+                              _onQueryChanged('');
+                            },
+                          )
+                        : null,
+                  ),
+                  onChanged: _onQueryChanged,
+                ),
+                if (!_loadingCategories && _categories.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    height: 32,
+                    child: ListView.builder(
+                      key: const Key('product_picker_category_chip_list'),
+                      scrollDirection: Axis.horizontal,
+                      itemCount: _categories.length + 1,
+                      itemBuilder: (context, index) {
+                        final categoryId = index == 0 ? null : _categories[index - 1].id;
+                        final label = index == 0 ? 'All' : _categories[index - 1].label;
+                        final isSelected = categoryId == _selectedCategoryId;
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: FilterChip(
+                            key: index == 0 ? const Key('product_picker_category_chip_all') : Key('product_picker_category_chip_$categoryId'),
+                            selected: isSelected,
+                            showCheckmark: false,
+                            label: Text(label),
+                            labelStyle: TextStyle(
+                              fontSize: 12,
+                              fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                              color: isSelected ? Colors.white : AppColors.textSecondary,
+                            ),
+                            backgroundColor: AppColors.surfaceSecondary,
+                            selectedColor: AppColors.primary,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(AppDecorations.radiusFull),
+                              side: BorderSide(color: isSelected ? AppColors.primary : AppColors.border),
+                            ),
+                            padding: const EdgeInsets.symmetric(horizontal: 10),
+                            onSelected: (selected) => _onCategorySelected(categoryId),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
           if (_loading) const LinearProgressIndicator(color: AppColors.primary, minHeight: 2),
@@ -112,7 +187,7 @@ class _ProductPickerScreenState extends State<ProductPickerScreen> {
                       children: const [
                         Icon(Icons.inventory_2_outlined, size: 56, color: Color(0xFF94A3B8)),
                         SizedBox(height: 12),
-                        Text('Search for a feed product to receive', style: AppTypography.bodySecondary),
+                        Text('No products found', style: AppTypography.bodySecondary),
                       ],
                     ),
                   )

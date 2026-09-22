@@ -87,7 +87,7 @@ void main() {
 
     expect(find.text('INV-0001'), findsOneWidget);
     expect(find.textContaining('Test Farmer'), findsOneWidget);
-    expect(find.text('₹3780.00'), findsOneWidget);
+    expect(find.text('₹3,780.00'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('invoice_history_item_inv-1')));
     await tester.pumpAndSettle();

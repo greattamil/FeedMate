@@ -19,7 +19,6 @@ type SupplierHandlers struct {
 }
 
 type createSupplierRequest struct {
-	SupplierCode     string `json:"supplier_code"`
 	Name             string `json:"name"`
 	TradeName        string `json:"trade_name,omitempty"`
 	GSTIN            string `json:"gstin,omitempty"`
@@ -65,7 +64,7 @@ func (h *SupplierHandlers) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	created, err := h.Supplier.Create(r.Context(), claims.TenantID, supplier.CreateInput{
-		SupplierCode: req.SupplierCode, Name: req.Name, TradeName: req.TradeName,
+		Name: req.Name, TradeName: req.TradeName,
 		GSTIN: req.GSTIN, Phone: req.Phone, Email: req.Email, PaymentTermsDays: req.PaymentTermsDays,
 	})
 	if err != nil {

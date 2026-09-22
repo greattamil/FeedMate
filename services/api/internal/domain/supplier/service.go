@@ -9,6 +9,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/andipatti/feedmate/services/api/internal/dbctx"
+	"github.com/andipatti/feedmate/services/api/internal/entitycode"
 )
 
 var ErrValidation = fmt.Errorf("validation error")
@@ -22,7 +23,6 @@ func NewService(db *dbctx.DB) *Service {
 }
 
 type CreateInput struct {
-	SupplierCode     string
 	Name             string
 	TradeName        string
 	GSTIN            string
@@ -35,14 +35,11 @@ func (s *Service) Create(ctx context.Context, tenantID uuid.UUID, in CreateInput
 	if in.Name == "" {
 		return nil, fmt.Errorf("%w: name is required", ErrValidation)
 	}
-	if in.SupplierCode == "" {
-		return nil, fmt.Errorf("%w: supplier_code is required", ErrValidation)
-	}
 	if in.PaymentTermsDays < 0 {
 		return nil, fmt.Errorf("%w: payment_terms_days cannot be negative", ErrValidation)
 	}
 
-	sup := &Supplier{SupplierCode: in.SupplierCode, Name: in.Name, PaymentTermsDays: in.PaymentTermsDays}
+	sup := &Supplier{Name: in.Name, PaymentTermsDays: in.PaymentTermsDays}
 	if in.TradeName != "" {
 		sup.TradeName = &in.TradeName
 	}
@@ -57,6 +54,11 @@ func (s *Service) Create(ctx context.Context, tenantID uuid.UUID, in CreateInput
 	}
 
 	err := s.db.WithTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
+		code, err := entitycode.Generate(ctx, tx, tenantID, "supplier", "SUPP", 4)
+		if err != nil {
+			return err
+		}
+		sup.SupplierCode = code
 		return Create(ctx, tx, tenantID, sup)
 	})
 	if err != nil {

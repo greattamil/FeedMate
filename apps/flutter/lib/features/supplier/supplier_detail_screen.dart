@@ -6,8 +6,12 @@ import 'package:provider/provider.dart';
 import '../../core/api_client.dart';
 import '../../core/api_error.dart';
 import '../../core/auth_session.dart';
+import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_decorations.dart';
+import '../../core/theme/app_typography.dart';
 import 'supplier_api.dart';
 import 'supplier_form_dialog.dart';
+import '../../core/number_format.dart';
 
 /// A supplier's payable statement — the mirror image of CustomerLedgerScreen:
 /// a credit here increases what the shop owes the supplier (e.g. a GRN), a
@@ -80,7 +84,7 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(paymentResult.duplicate
             ? 'This payment was already recorded'
-            : 'Payment of ₹${result.amount.toStringAsFixed(2)} recorded'),
+            : 'Payment of ${money(result.amount)} recorded'),
       ));
     } on ApiError catch (e) {
       if (!mounted) return;
@@ -183,12 +187,20 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
       ),
       floatingActionButton: detail == null
           ? null
-          : FloatingActionButton.extended(
-              heroTag: null,
-              key: const Key('record_payment_fab'),
-              onPressed: _recordPayment,
-              icon: const Icon(Icons.add),
-              label: const Text('Record Payment'),
+          : Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: AppDecorations.amberGlow,
+              ),
+              child: FloatingActionButton.extended(
+                heroTag: null,
+                key: const Key('record_payment_fab'),
+                onPressed: _recordPayment,
+                icon: const Icon(Icons.add_card_rounded),
+                label: const Text('Record Payment', style: TextStyle(fontWeight: FontWeight.w700)),
+                backgroundColor: AppColors.warning,
+                foregroundColor: Colors.white,
+              ),
             ),
       body: RefreshIndicator(
         onRefresh: _load,
@@ -202,17 +214,33 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
                     ),
                   ])
                 : ListView(
-                    // Bottom padding reserves room for the extended
-                    // "Record Payment" FAB, which otherwise floats over
-                    // the last ledger row and makes it hard to read.
                     padding: const EdgeInsets.only(bottom: 96),
                     children: [
                       if (detail != null) _buildSummaryCard(detail),
-                      const Divider(height: 1),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.receipt_long_rounded, size: 18, color: AppColors.textSecondary),
+                            const SizedBox(width: 8),
+                            Text('Ledger Statement', style: AppTypography.title.copyWith(fontSize: 15, fontWeight: FontWeight.w700)),
+                            const Spacer(),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: AppColors.surfaceSecondary,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: AppColors.border),
+                              ),
+                              child: Text('${_entries.length} entries', style: AppTypography.caption.copyWith(fontWeight: FontWeight.w600)),
+                            ),
+                          ],
+                        ),
+                      ),
                       if (_entries.isEmpty)
                         const Padding(
                           padding: EdgeInsets.all(24),
-                          child: Center(child: Text('No ledger entries yet')),
+                          child: Center(child: Text('No ledger entries yet', style: AppTypography.bodySecondary)),
                         )
                       else
                         ..._entries.map(_buildLedgerTile),
@@ -224,17 +252,17 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
 
   Widget _buildSummaryCard(SupplierDetail detail) {
     return Padding(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
       child: Container(
         decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            colors: [Color(0xFF0369A1), Color(0xFF0284C7)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
+          gradient: AppColors.gradientAmber,
           borderRadius: BorderRadius.circular(20),
-          boxShadow: const [
-            BoxShadow(color: Color(0x180F172A), blurRadius: 20, offset: Offset(0, 6)),
+          boxShadow: [
+            BoxShadow(
+              color: AppColors.warning.withOpacity(0.3),
+              blurRadius: 20,
+              offset: const Offset(0, 8),
+            ),
           ],
         ),
         padding: const EdgeInsets.all(20),
@@ -245,57 +273,78 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(6),
+                    color: Colors.black.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.white.withOpacity(0.25)),
                   ),
                   child: Text(
                     detail.supplierCode,
-                    style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+                    style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700),
                   ),
                 ),
                 if (detail.gstin != null)
-                  Text(
-                    'GSTIN: ${detail.gstin}',
-                    style: const TextStyle(color: Colors.white70, fontSize: 11),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      'GSTIN: ${detail.gstin}',
+                      style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
+                    ),
                   ),
               ],
             ),
             if (detail.phone != null) ...[
-              const SizedBox(height: 8),
+              const SizedBox(height: 10),
               Row(
                 children: [
-                  const Icon(Icons.phone_outlined, size: 14, color: Colors.white70),
-                  const SizedBox(width: 4),
-                  Text(detail.phone!, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                  const Icon(Icons.phone_rounded, size: 14, color: Colors.white),
+                  const SizedBox(width: 6),
+                  Text(detail.phone!, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500)),
                 ],
               ),
             ],
-            const SizedBox(height: 16),
+            const SizedBox(height: 18),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Outstanding Payable', style: TextStyle(fontSize: 11, color: Colors.white70, fontWeight: FontWeight.w500)),
-                    const SizedBox(height: 2),
                     Text(
-                      '₹${detail.outstandingPayable.toStringAsFixed(2)}',
+                      'Outstanding Payable',
+                      style: TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.85), fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      money(detail.outstandingPayable),
                       key: const Key('supplier_outstanding_payable'),
-                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 20, color: Colors.white),
+                      style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 24, color: Colors.white, letterSpacing: -0.5),
                     ),
                   ],
                 ),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    const Text('Payment Terms', style: TextStyle(fontSize: 11, color: Colors.white70, fontWeight: FontWeight.w500)),
-                    const SizedBox(height: 2),
                     Text(
-                      '${detail.paymentTermsDays} days',
-                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: Colors.white),
+                      'Payment Terms',
+                      style: TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.85), fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 3),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        '${detail.paymentTermsDays} days',
+                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: Colors.white),
+                      ),
                     ),
                   ],
                 ),
@@ -312,18 +361,19 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
     // payment) — the opposite convention from a customer ledger entry.
     final isCredit = e.credit > Decimal.zero;
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.border),
+        boxShadow: AppDecorations.cardShadow,
       ),
       child: ListTile(
         key: Key('supplier_ledger_entry_${e.id}'),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
         leading: Container(
-          width: 38,
-          height: 38,
+          width: 40,
+          height: 40,
           decoration: BoxDecoration(
             color: isCredit ? const Color(0xFFFFE4E6) : const Color(0xFFD1FAE5),
             shape: BoxShape.circle,
@@ -334,13 +384,27 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
             size: 20,
           ),
         ),
-        title: Text(e.description ?? e.documentType, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-        subtitle: Text(
-          '${e.documentType} · ${_dateFormat.format(e.entryDate.toLocal())}',
-          style: const TextStyle(color: Color(0xFF64748B), fontSize: 12),
+        title: Text(e.description ?? e.documentType, style: AppTypography.title.copyWith(fontSize: 14, fontWeight: FontWeight.w600)),
+        subtitle: Row(
+          children: [
+            Container(
+              margin: const EdgeInsets.only(top: 2),
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceSecondary,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(e.documentType, style: AppTypography.caption.copyWith(fontWeight: FontWeight.w700)),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              _dateFormat.format(e.entryDate.toLocal()),
+              style: AppTypography.caption,
+            ),
+          ],
         ),
         trailing: Text(
-          isCredit ? '+₹${e.credit.toStringAsFixed(2)}' : '-₹${e.debit.toStringAsFixed(2)}',
+          isCredit ? '+${money(e.credit)}' : '-${money(e.debit)}',
           style: TextStyle(
             fontWeight: FontWeight.w800,
             fontSize: 15,
@@ -395,51 +459,116 @@ class _RecordPaymentDialogState extends State<_RecordPaymentDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Record Payment'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          TextField(
-            key: const Key('payment_amount_field'),
-            controller: _amountController,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(labelText: 'Amount paid'),
-          ),
-          const SizedBox(height: 12),
-          DropdownButtonFormField<String>(
-            key: const Key('payment_method_dropdown'),
-            initialValue: _method,
-            decoration: const InputDecoration(labelText: 'Method'),
-            items: const [
-              DropdownMenuItem(value: 'CASH', child: Text('Cash')),
-              DropdownMenuItem(value: 'BANK', child: Text('Bank Transfer')),
-              DropdownMenuItem(value: 'OTHER', child: Text('Other')),
-            ],
-            onChanged: (value) => setState(() => _method = value ?? 'CASH'),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            key: const Key('payment_reference_field'),
-            controller: _referenceController,
-            decoration: const InputDecoration(labelText: 'Reference / note (optional)'),
-          ),
-          if (_error != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text(_error!, style: const TextStyle(color: Colors.red)),
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: AppDecorations.borderRadiusLg),
+      backgroundColor: AppColors.surface,
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    gradient: AppColors.gradientAmber,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.payments_rounded, color: Colors.white, size: 22),
+                ),
+                const SizedBox(width: 14),
+                const Expanded(
+                  child: Text(
+                    'Record Payment',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.textPrimary),
+                  ),
+                ),
+              ],
             ),
-        ],
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
-        FilledButton(
-          key: const Key('payment_submit_button'),
-          onPressed: _submit,
-          child: const Text('Record'),
+            const SizedBox(height: 18),
+            TextField(
+              key: const Key('payment_amount_field'),
+              controller: _amountController,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: InputDecoration(
+                labelText: 'Amount paid',
+                prefixIcon: const Icon(Icons.currency_rupee_rounded, size: 18, color: AppColors.warning),
+                border: OutlineInputBorder(borderRadius: AppDecorations.borderRadiusMd),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: AppDecorations.borderRadiusMd,
+                  borderSide: const BorderSide(color: AppColors.border),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: AppDecorations.borderRadiusMd,
+                  borderSide: const BorderSide(color: AppColors.warning, width: 1.5),
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            DropdownButtonFormField<String>(
+              key: const Key('payment_method_dropdown'),
+              initialValue: _method,
+              decoration: InputDecoration(
+                labelText: 'Method',
+                prefixIcon: const Icon(Icons.account_balance_wallet_rounded, size: 18, color: AppColors.warning),
+                border: OutlineInputBorder(borderRadius: AppDecorations.borderRadiusMd),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: AppDecorations.borderRadiusMd,
+                  borderSide: const BorderSide(color: AppColors.border),
+                ),
+              ),
+              items: const [
+                DropdownMenuItem(value: 'CASH', child: Text('Cash')),
+                DropdownMenuItem(value: 'BANK', child: Text('Bank Transfer')),
+                DropdownMenuItem(value: 'OTHER', child: Text('Other')),
+              ],
+              onChanged: (value) => setState(() => _method = value ?? 'CASH'),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              key: const Key('payment_reference_field'),
+              controller: _referenceController,
+              decoration: InputDecoration(
+                labelText: 'Reference / note (optional)',
+                prefixIcon: const Icon(Icons.notes_rounded, size: 18, color: AppColors.textSecondary),
+                border: OutlineInputBorder(borderRadius: AppDecorations.borderRadiusMd),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: AppDecorations.borderRadiusMd,
+                  borderSide: const BorderSide(color: AppColors.border),
+                ),
+              ),
+            ),
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: Text(_error!, style: const TextStyle(color: Colors.red, fontSize: 12, fontWeight: FontWeight.w600)),
+              ),
+            const SizedBox(height: 20),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Cancel', style: TextStyle(color: AppColors.textSecondary)),
+                ),
+                const SizedBox(width: 8),
+                FilledButton(
+                  key: const Key('payment_submit_button'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.warning,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: _submit,
+                  child: const Text('Record', style: TextStyle(fontWeight: FontWeight.w700)),
+                ),
+              ],
+            ),
+          ],
         ),
-      ],
+      ),
     );
   }
 }

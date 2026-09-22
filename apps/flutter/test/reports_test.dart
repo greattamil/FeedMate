@@ -93,10 +93,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('12'), findsOneWidget); // invoice count
-    expect(find.text('₹50000.00'), findsOneWidget); // gross
-    expect(find.text('₹52000.00'), findsOneWidget); // net
-    expect(find.text('₹30000.00'), findsOneWidget); // CASH tender
-    expect(find.text('₹22000.00'), findsOneWidget); // CREDIT tender
+    expect(find.text('₹50,000.00'), findsOneWidget); // gross
+    expect(find.text('₹52,000.00'), findsOneWidget); // net
+    expect(find.text('₹30,000.00'), findsOneWidget); // CASH tender
+    expect(find.text('₹22,000.00'), findsOneWidget); // CREDIT tender
     expect(find.byKey(const Key('sales_export_csv_button')), findsOneWidget);
   });
 
@@ -124,10 +124,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Over Limit Farmer'), findsOneWidget);
-    expect(find.text('₹12000.00'), findsOneWidget);
+    expect(find.text('₹12,000.00'), findsOneWidget);
     expect(find.text('Healthy Farmer'), findsOneWidget);
 
-    final overLimitText = tester.widget<Text>(find.text('₹12000.00'));
+    final overLimitText = tester.widget<Text>(find.text('₹12,000.00'));
     expect(overLimitText.style?.color, Colors.red);
     expect(find.byKey(const Key('balances_export_csv_button')), findsOneWidget);
   });
@@ -143,7 +143,7 @@ void main() {
     expect(find.textContaining('12 Sep 2026'), findsOneWidget);
     expect(find.textContaining('11 Sep 2026'), findsOneWidget);
     expect(find.text('₹0.00'), findsOneWidget);
-    expect(find.text('₹-300.00'), findsOneWidget);
+    expect(find.text('-₹300.00'), findsOneWidget);
     expect(find.byKey(const Key('eod_export_csv_button')), findsOneWidget);
   });
 }

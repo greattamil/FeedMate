@@ -8,6 +8,7 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_decorations.dart';
 import '../pos/pos_api.dart';
 import 'returns_api.dart';
+import '../../core/number_format.dart';
 
 class _LineState {
   final InvoiceLineForReturn original;
@@ -155,7 +156,7 @@ class _ReturnScreenState extends State<ReturnScreen> {
             ],
           ),
           content: Text(
-            'Return ${result.returnNumber} was posted.\nRefund: ₹${result.totalRefund.toStringAsFixed(2)} via $_refundMethod',
+            'Return ${result.returnNumber} was posted.\nRefund: ${money(result.totalRefund)} via $_refundMethod',
             style: const TextStyle(height: 1.4),
           ),
           actions: [
@@ -330,7 +331,7 @@ class _ReturnScreenState extends State<ReturnScreen> {
                           border: Border.all(color: AppColors.primaryLight.withAlpha(100)),
                         ),
                         child: Text(
-                          '₹${_invoice!.grandTotal.toStringAsFixed(2)}',
+                          money(_invoice!.grandTotal),
                           key: const Key('return_invoice_summary'),
                           style: const TextStyle(
                             color: Colors.white,

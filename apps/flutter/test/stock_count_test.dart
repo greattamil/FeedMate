@@ -160,7 +160,7 @@ void main() {
     expect(postCalled, isTrue);
     expect(find.text('Stock Count Posted'), findsOneWidget);
     expect(find.textContaining('1 line(s) adjusted'), findsOneWidget);
-    expect(find.textContaining('-2000.00'), findsOneWidget);
+    expect(find.textContaining('-₹2,000.00'), findsOneWidget);
 
     await tester.tap(find.text('OK'));
     await tester.pumpAndSettle();

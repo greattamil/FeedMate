@@ -27,6 +27,7 @@ import '../procurement/grn_screen.dart';
 import '../products/master_data_screen.dart';
 import '../products/product_list_screen.dart';
 import '../products/tax_profile_screen.dart';
+import '../products/location_screen.dart';
 import '../reports/reports_api.dart';
 import '../reports/reports_screen.dart';
 import '../reports/stock_management_screen.dart';
@@ -36,6 +37,7 @@ import '../staff/staff_list_screen.dart';
 import '../stockcount/stock_count_history_screen.dart';
 import '../supplier/supplier_list_screen.dart';
 import '../sync/outbox_screen.dart';
+import '../../core/number_format.dart';
 
 /// Executive Cockpit & Store Home Dashboard for FeedMate.
 /// Benchmarked against modern retail POS cockpits (Shopify POS, Square, Khatabook).
@@ -264,11 +266,11 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
 
   Widget _buildWelcomeBanner(AuthSession session, String todayStr) {
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        gradient: AppColors.gradientEmerald,
+        gradient: AppColors.gradientHeroMesh,
         borderRadius: AppDecorations.borderRadiusLg,
-        boxShadow: AppDecorations.cardShadow,
+        boxShadow: AppDecorations.emeraldGlow,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -276,46 +278,80 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                'Good day, ${session.displayName ?? "Operator"}',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 20,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -0.3,
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Good day, ${session.displayName ?? "Operator"} 👋',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.5,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'FeedMate POS • Andipatti Terminal',
+                      style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 13, fontWeight: FontWeight.w500),
+                    ),
+                  ],
                 ),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.2),
+                  color: Colors.white.withValues(alpha: 0.18),
                   borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.3)),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Container(
-                      width: 7,
-                      height: 7,
+                      width: 8,
+                      height: 8,
                       decoration: const BoxDecoration(
-                        color: Color(0xFF6EE7B7),
+                        color: Color(0xFF34D399),
                         shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: Color(0xFF34D399),
+                            blurRadius: 6,
+                            spreadRadius: 1,
+                          ),
+                        ],
                       ),
                     ),
-                    const SizedBox(width: 6),
+                    const SizedBox(width: 8),
                     const Text(
-                      'Live Counter',
-                      style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
+                      'STORE ACTIVE',
+                      style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.5),
                     ),
                   ],
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 6),
-          Text(
-            todayStr,
-            style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 13),
+          const SizedBox(height: 14),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.calendar_today_rounded, color: Colors.white70, size: 14),
+                const SizedBox(width: 8),
+                Text(
+                  todayStr,
+                  style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -436,28 +472,31 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
         final cards = [
           _buildKpiCard(
             title: "Today's Gross Sales",
-            value: sales != null ? '₹${sales.grossSales.toStringAsFixed(2)}' : '—',
+            value: sales != null ? money(sales.grossSales) : '—',
             subtitle: sales != null ? '${sales.invoiceCount} invoices finalized' : 'No sales yet',
             icon: Icons.payments_rounded,
-            iconColor: AppColors.primary,
-            iconBg: AppColors.primaryContainer,
+            iconColor: Colors.white,
+            iconBg: AppColors.primary,
+            cardGradient: AppColors.gradientEmerald,
           ),
           _buildKpiCard(
             title: "Customer Receivables",
-            value: customerOutstanding != null ? '₹${customerOutstanding.toStringAsFixed(2)}' : '—',
+            value: customerOutstanding != null ? money(customerOutstanding) : '—',
             subtitle: _overdueCustomerCount > 0 ? '$_overdueCustomerCount over credit limit' : 'All accounts healthy',
             icon: Icons.account_balance_wallet_rounded,
-            iconColor: AppColors.danger,
-            iconBg: AppColors.dangerContainer,
+            iconColor: Colors.white,
+            iconBg: _overdueCustomerCount > 0 ? AppColors.danger : AppColors.secondary,
+            cardGradient: _overdueCustomerCount > 0 ? AppColors.gradientRose : AppColors.gradientIndigo,
             isAlert: _overdueCustomerCount > 0,
           ),
           _buildKpiCard(
             title: "Cash Session (EOD)",
-            value: eod != null ? '₹${eod.openingCash.toStringAsFixed(2)} Float' : (_eodNotOpened ? 'Not Opened' : '—'),
+            value: eod != null ? '${money(eod.openingCash)} Float' : (_eodNotOpened ? 'Not Opened' : '—'),
             subtitle: eod != null ? 'Status: ${eod.status}' : 'Open morning till',
             icon: Icons.point_of_sale_rounded,
-            iconColor: AppColors.warning,
-            iconBg: AppColors.warningContainer,
+            iconColor: Colors.white,
+            iconBg: AppColors.warning,
+            cardGradient: AppColors.gradientAmber,
           ),
         ];
 
@@ -468,10 +507,10 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
         }
 
         return SizedBox(
-          height: 130,
+          height: 136,
           child: ListView(
             scrollDirection: Axis.horizontal,
-            children: cards.map((c) => Container(width: 260, margin: const EdgeInsets.only(right: 12), child: c)).toList(),
+            children: cards.map((c) => Container(width: 270, margin: const EdgeInsets.only(right: 12), child: c)).toList(),
           ),
         );
       },
@@ -485,14 +524,18 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     required IconData icon,
     required Color iconColor,
     required Color iconBg,
+    LinearGradient? cardGradient,
     bool isAlert = false,
   }) {
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: AppDecorations.borderRadiusMd,
-        border: Border.all(color: isAlert ? AppColors.danger.withValues(alpha: 0.4) : AppColors.border),
+        border: Border.all(
+          color: isAlert ? AppColors.danger.withValues(alpha: 0.5) : AppColors.border,
+          width: isAlert ? 1.5 : 1,
+        ),
         boxShadow: AppDecorations.cardShadow,
       ),
       child: Column(
@@ -505,33 +548,57 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
               Expanded(
                 child: Text(
                   title,
-                  style: AppTypography.caption.copyWith(fontWeight: FontWeight.w600),
+                  style: AppTypography.caption.copyWith(fontWeight: FontWeight.w700, color: AppColors.textSecondary),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
               Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(color: iconBg, shape: BoxShape.circle),
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  gradient: cardGradient,
+                  borderRadius: BorderRadius.circular(10),
+                  boxShadow: [
+                    BoxShadow(
+                      color: iconBg.withValues(alpha: 0.3),
+                      blurRadius: 8,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
+                ),
                 child: Icon(icon, color: iconColor, size: 16),
               ),
             ],
           ),
+          const SizedBox(height: 6),
           Text(
             value,
             style: AppTypography.headline.copyWith(
               color: isAlert ? AppColors.danger : AppColors.textPrimary,
-              fontSize: 19,
+              fontSize: 20,
+              fontWeight: FontWeight.w800,
             ),
           ),
-          Text(
-            subtitle,
-            style: AppTypography.caption.copyWith(
-              color: isAlert ? AppColors.danger : AppColors.textSecondary,
-              fontSize: 11,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              if (isAlert) ...[
+                const Icon(Icons.error_outline_rounded, size: 12, color: AppColors.danger),
+                const SizedBox(width: 4),
+              ],
+              Expanded(
+                child: Text(
+                  subtitle,
+                  style: AppTypography.caption.copyWith(
+                    color: isAlert ? AppColors.danger : AppColors.textSecondary,
+                    fontSize: 11,
+                    fontWeight: isAlert ? FontWeight.bold : FontWeight.normal,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -664,6 +731,16 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
           gradient: const LinearGradient(colors: [Color(0xFF7C3AED), Color(0xFFA78BFA)]),
           onTap: () => Navigator.of(context).push(
             MaterialPageRoute(builder: (_) => const MasterDataScreen()),
+          ),
+        ),
+      if (session.hasPermission('product.manage'))
+        _ActionItem(
+          title: 'Locations',
+          subtitle: 'Shops, godowns & warehouses',
+          icon: Icons.warehouse_rounded,
+          gradient: const LinearGradient(colors: [Color(0xFF0D9488), Color(0xFF5EEAD4)]),
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const LocationScreen()),
           ),
         ),
       if (session.hasPermission('product.manage'))
@@ -819,6 +896,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                 child: InkWell(
                   onTap: a.onTap,
                   borderRadius: AppDecorations.borderRadiusMd,
+                  hoverColor: AppColors.surfaceHover,
                   child: Padding(
                     padding: const EdgeInsets.all(14),
                     child: Row(
@@ -827,9 +905,19 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                           padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
                             gradient: a.gradient,
-                            borderRadius: AppDecorations.borderRadiusSm,
+                            borderRadius: BorderRadius.circular(12),
+                            boxShadow: [
+                              BoxShadow(
+                                color: (a.gradient is LinearGradient
+                                        ? (a.gradient as LinearGradient).colors.first
+                                        : AppColors.primary)
+                                    .withValues(alpha: 0.3),
+                                blurRadius: 10,
+                                offset: const Offset(0, 4),
+                              ),
+                            ],
                           ),
-                          child: Icon(a.icon, color: Colors.white, size: 22),
+                          child: Icon(a.icon, color: Colors.white, size: 20),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
@@ -839,20 +927,21 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                             children: [
                               Text(
                                 a.title,
-                                style: AppTypography.title.copyWith(fontSize: 13.5),
+                                style: AppTypography.title.copyWith(fontSize: 13.5, fontWeight: FontWeight.bold),
                                 maxLines: 2,
                                 overflow: TextOverflow.ellipsis,
                               ),
                               const SizedBox(height: 2),
                               Text(
                                 a.subtitle,
-                                style: AppTypography.caption,
+                                style: AppTypography.caption.copyWith(color: AppColors.textSecondary),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ],
                           ),
                         ),
+                        Icon(Icons.chevron_right_rounded, size: 18, color: AppColors.textTertiary),
                       ],
                     ),
                   ),

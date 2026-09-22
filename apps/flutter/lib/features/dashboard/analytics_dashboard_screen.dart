@@ -11,8 +11,9 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_decorations.dart';
 import '../../core/theme/app_typography.dart';
 import 'dashboard_overview_api.dart';
+import '../../core/number_format.dart';
 
-String _money(dynamic value) => '₹${value.toStringAsFixed(2)}';
+String _money(dynamic value) => money(value);
 final _dayLabel = DateFormat('d MMM');
 final _dateTimeLabel = DateFormat('d MMM, h:mm a');
 

@@ -15,6 +15,7 @@ import '../reports/reports_api.dart';
 import 'cart_model.dart';
 import 'product.dart';
 import 'product_repository.dart';
+import '../../core/number_format.dart';
 
 /// The product catalog: search bar, category filter chips, and a
 /// tap-to-add results list — backed by ranked search (barcode > SKU > exact
@@ -287,28 +288,52 @@ class _CatalogPanelState extends State<CatalogPanel> {
                   itemBuilder: (context, index) {
                     final p = _results[index];
                     final stock = _stockByProduct[p.id];
+                    final cart = context.watch<CartModel>();
+                    CartLine? inCartLine;
+                    for (final l in cart.lines) {
+                      if (l.product.id == p.id) {
+                        inCartLine = l;
+                        break;
+                      }
+                    }
+
+                    // Dynamic chromatic avatar gradient based on first character
+                    final charCode = p.name.isNotEmpty ? p.name.codeUnitAt(0) : 0;
+                    final avatarGradient = (charCode % 4 == 0)
+                        ? AppColors.gradientEmerald
+                        : (charCode % 4 == 1)
+                            ? AppColors.gradientIndigo
+                            : (charCode % 4 == 2)
+                                ? AppColors.gradientCyan
+                                : AppColors.gradientPurple;
+
                     return Container(
                       margin: const EdgeInsets.only(bottom: 10),
                       decoration: BoxDecoration(
                         color: AppColors.surface,
                         borderRadius: AppDecorations.borderRadiusMd,
-                        border: Border.all(color: AppColors.border),
-                        boxShadow: AppDecorations.cardShadow,
+                        border: Border.all(
+                          color: inCartLine != null
+                              ? AppColors.secondary.withValues(alpha: 0.5)
+                              : AppColors.border,
+                          width: inCartLine != null ? 1.5 : 1,
+                        ),
+                        boxShadow: inCartLine != null
+                            ? [
+                                BoxShadow(
+                                  color: AppColors.secondary.withValues(alpha: 0.12),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 3),
+                                ),
+                              ]
+                            : AppDecorations.cardShadow,
                       ),
                       child: Material(
                         color: Colors.transparent,
                         child: InkWell(
                           borderRadius: AppDecorations.borderRadiusMd,
+                          hoverColor: AppColors.surfaceHover,
                           onTap: () {
-                            // Real bug, reported live: a zero-stock product
-                            // could be added to the cart with no feedback at
-                            // all — the only rejection was the server's
-                            // ErrInsufficientStock at checkout, potentially
-                            // after the cashier had already picked a tender
-                            // and customer. The stock chip already tells the
-                            // cashier this item is out of stock; tapping it
-                            // must refuse the add right here, not silently
-                            // queue up a sale that can only fail later.
                             if (stock != null && stock.isOutOfStock) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
@@ -345,13 +370,20 @@ class _CatalogPanelState extends State<CatalogPanel> {
                             padding: const EdgeInsets.all(12),
                             child: Row(
                               children: [
-                                // Product Initial Avatar
+                                // Product Initial Avatar with Dynamic Gradient
                                 Container(
-                                  width: 44,
-                                  height: 44,
+                                  width: 46,
+                                  height: 46,
                                   decoration: BoxDecoration(
-                                    gradient: AppColors.gradientEmerald,
-                                    borderRadius: BorderRadius.circular(10),
+                                    gradient: avatarGradient,
+                                    borderRadius: BorderRadius.circular(12),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: avatarGradient.colors.first.withValues(alpha: 0.3),
+                                        blurRadius: 8,
+                                        offset: const Offset(0, 3),
+                                      ),
+                                    ],
                                   ),
                                   child: Center(
                                     child: Text(
@@ -361,13 +393,38 @@ class _CatalogPanelState extends State<CatalogPanel> {
                                   ),
                                 ),
                                 const SizedBox(width: 12),
-                                // Product Title, Tamil name & SKU
+                                // Product Title, Tamil name, SKU & In-Cart Badge
                                 Expanded(
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      Text(p.name, style: AppTypography.title.copyWith(fontSize: 15)),
-                                      const SizedBox(height: 3),
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              p.name,
+                                              style: AppTypography.title.copyWith(fontSize: 15, fontWeight: FontWeight.bold),
+                                            ),
+                                          ),
+                                          if (inCartLine != null)
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                              decoration: BoxDecoration(
+                                                gradient: AppColors.gradientIndigo,
+                                                borderRadius: BorderRadius.circular(10),
+                                              ),
+                                              child: Text(
+                                                'In Cart: ${inCartLine.quantity}',
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 10,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 4),
                                       Wrap(
                                         spacing: 6,
                                         runSpacing: 4,
@@ -423,6 +480,7 @@ class _CatalogPanelState extends State<CatalogPanel> {
                                                       : stock.isLowStock
                                                           ? AppColors.onWarningContainer
                                                           : AppColors.onSuccessContainer,
+                                                  fontWeight: FontWeight.w600,
                                                 ),
                                               ),
                                             ),
@@ -437,12 +495,12 @@ class _CatalogPanelState extends State<CatalogPanel> {
                                   crossAxisAlignment: CrossAxisAlignment.end,
                                   children: [
                                     Text(
-                                      p.sellingPrice != null ? '₹${p.sellingPrice!.toStringAsFixed(2)}' : '—',
-                                      style: AppTypography.currencyMedium.copyWith(color: AppColors.primary),
+                                      p.sellingPrice != null ? money(p.sellingPrice!) : '—',
+                                      style: AppTypography.currencyMedium.copyWith(color: AppColors.primary, fontWeight: FontWeight.w800),
                                     ),
                                     const SizedBox(height: 4),
                                     Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                       decoration: BoxDecoration(
                                         color: stock != null && stock.isOutOfStock
                                             ? AppColors.surfaceSecondary
@@ -457,7 +515,7 @@ class _CatalogPanelState extends State<CatalogPanel> {
                                             size: 14,
                                             color: stock != null && stock.isOutOfStock ? AppColors.textSecondary : AppColors.primary,
                                           ),
-                                          const SizedBox(width: 2),
+                                          const SizedBox(width: 3),
                                           Text(
                                             stock != null && stock.isOutOfStock ? 'Unavailable' : 'Add',
                                             style: TextStyle(

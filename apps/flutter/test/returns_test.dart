@@ -111,7 +111,7 @@ void main() {
 
     expect(find.text('Return Posted'), findsOneWidget);
     expect(find.textContaining('RET-2627-0001'), findsOneWidget);
-    expect(find.textContaining('₹2520.00'), findsOneWidget);
+    expect(find.textContaining('₹2,520.00'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('return_posted_ok_button')));
     await tester.pumpAndSettle();

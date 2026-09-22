@@ -40,9 +40,69 @@ func (h *MasterDataHandlers) ListCategories(w http.ResponseWriter, r *http.Reque
 	WriteJSON(w, http.StatusOK, map[string]interface{}{"categories": out})
 }
 
+func categoryJSON(c masterdata.Category) map[string]interface{} {
+	return map[string]interface{}{
+		"id": c.ID.String(), "name": c.Name, "local_name": c.LocalName, "active": c.Active,
+	}
+}
+
+// ListAllCategories includes inactive categories — the dedicated
+// management screen, gated on product.manage like every other
+// master-data mutation endpoint below.
+func (h *MasterDataHandlers) ListAllCategories(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	claims, ok := reqctx.Claims(r.Context())
+	if !ok {
+		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		return
+	}
+	categories, err := h.MasterData.ListAllCategories(r.Context(), claims.TenantID)
+	if err != nil {
+		WriteError(w, reqID, CodeInternal, "failed to list categories: "+err.Error())
+		return
+	}
+	out := make([]map[string]interface{}, 0, len(categories))
+	for _, c := range categories {
+		out = append(out, categoryJSON(c))
+	}
+	WriteJSON(w, http.StatusOK, map[string]interface{}{"categories": out})
+}
+
 type createCategoryRequest struct {
 	Name      string `json:"name"`
 	LocalName string `json:"local_name,omitempty"`
+}
+
+func (h *MasterDataHandlers) UpdateCategory(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	claims, ok := reqctx.Claims(r.Context())
+	if !ok {
+		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid category id")
+		return
+	}
+	var req createCategoryRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid request body")
+		return
+	}
+	if err := h.MasterData.UpdateCategory(r.Context(), claims.TenantID, id, req.Name, req.LocalName); err != nil {
+		if errors.Is(err, masterdata.ErrValidation) {
+			WriteError(w, reqID, CodeValidation, err.Error())
+			return
+		}
+		if errors.Is(err, masterdata.ErrNotFound) {
+			WriteError(w, reqID, CodeNotFound, "category not found")
+			return
+		}
+		WriteError(w, reqID, CodeInternal, "failed to update category: "+err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *MasterDataHandlers) CreateCategory(w http.ResponseWriter, r *http.Request) {
@@ -120,9 +180,68 @@ func (h *MasterDataHandlers) ListBrands(w http.ResponseWriter, r *http.Request) 
 	WriteJSON(w, http.StatusOK, map[string]interface{}{"brands": out})
 }
 
+func brandJSON(b masterdata.Brand) map[string]interface{} {
+	return map[string]interface{}{
+		"id": b.ID.String(), "name": b.Name, "local_name": b.LocalName, "active": b.Active,
+	}
+}
+
+// ListAllBrands includes inactive brands — see ListAllCategories's doc
+// comment for why.
+func (h *MasterDataHandlers) ListAllBrands(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	claims, ok := reqctx.Claims(r.Context())
+	if !ok {
+		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		return
+	}
+	brands, err := h.MasterData.ListAllBrands(r.Context(), claims.TenantID)
+	if err != nil {
+		WriteError(w, reqID, CodeInternal, "failed to list brands: "+err.Error())
+		return
+	}
+	out := make([]map[string]interface{}, 0, len(brands))
+	for _, b := range brands {
+		out = append(out, brandJSON(b))
+	}
+	WriteJSON(w, http.StatusOK, map[string]interface{}{"brands": out})
+}
+
 type createBrandRequest struct {
 	Name      string `json:"name"`
 	LocalName string `json:"local_name,omitempty"`
+}
+
+func (h *MasterDataHandlers) UpdateBrand(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	claims, ok := reqctx.Claims(r.Context())
+	if !ok {
+		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid brand id")
+		return
+	}
+	var req createBrandRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid request body")
+		return
+	}
+	if err := h.MasterData.UpdateBrand(r.Context(), claims.TenantID, id, req.Name, req.LocalName); err != nil {
+		if errors.Is(err, masterdata.ErrValidation) {
+			WriteError(w, reqID, CodeValidation, err.Error())
+			return
+		}
+		if errors.Is(err, masterdata.ErrNotFound) {
+			WriteError(w, reqID, CodeNotFound, "brand not found")
+			return
+		}
+		WriteError(w, reqID, CodeInternal, "failed to update brand: "+err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *MasterDataHandlers) CreateBrand(w http.ResponseWriter, r *http.Request) {

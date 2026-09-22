@@ -83,19 +83,19 @@ void main() {
 
     expect(find.text('Test Feed Mill'), findsOneWidget);
     expect(find.textContaining('SUP001'), findsOneWidget);
-    expect(find.text('₹12000.00 Payable'), findsOneWidget);
+    expect(find.text('₹12,000.00 Payable'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('supplier_sup-1')));
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('supplier_outstanding_payable')), findsOneWidget);
-    expect(find.text('₹12000.00'), findsOneWidget);
+    expect(find.text('₹12,000.00'), findsOneWidget);
     expect(find.text('30 days'), findsOneWidget);
 
     expect(find.text('GRN received'), findsOneWidget);
     expect(find.text('Cash payment'), findsOneWidget);
-    expect(find.text('+₹12000.00'), findsOneWidget);
-    expect(find.text('-₹5000.00'), findsOneWidget);
+    expect(find.text('+₹12,000.00'), findsOneWidget);
+    expect(find.text('-₹5,000.00'), findsOneWidget);
   });
 
   testWidgets('a long phone number and a large payable amount never overflow the list tile', (tester) async {
@@ -119,7 +119,7 @@ void main() {
     await tester.pumpWidget(_wrapWithProviders(httpClient: client, child: const SupplierListScreen()));
     await tester.pumpAndSettle();
 
-    expect(find.text('₹171825.00 Payable'), findsOneWidget);
+    expect(find.text('₹1,71,825.00 Payable'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -177,7 +177,7 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    expect(find.text('₹10000.00'), findsWidgets);
+    expect(find.text('₹10,000.00'), findsWidgets);
 
     await tester.tap(find.byKey(const Key('record_payment_fab')));
     await tester.pumpAndSettle();
@@ -188,8 +188,8 @@ void main() {
 
     expect(sentIdempotencyKey, isNotNull);
     expect(sentIdempotencyKey, isNotEmpty);
-    expect(find.textContaining('Payment of ₹2500.00 recorded'), findsOneWidget);
-    expect(find.text('₹7500.00'), findsOneWidget);
+    expect(find.textContaining('Payment of ₹2,500.00 recorded'), findsOneWidget);
+    expect(find.text('₹7,500.00'), findsOneWidget);
   });
 
   testWidgets('Record Payment rejects a zero amount client-side before calling the server', (tester) async {
@@ -253,7 +253,7 @@ void main() {
       if (request.method == 'POST' && request.url.path == '/api/v1/suppliers') {
         createdBody = jsonDecode(request.body) as Map<String, dynamic>;
         return http.Response(jsonEncode({
-          'id': 'sup-new', 'supplier_code': createdBody!['supplier_code'], 'name': createdBody!['name'],
+          'id': 'sup-new', 'supplier_code': 'SUPP-0001', 'name': createdBody!['name'],
           'payment_terms_days': createdBody!['payment_terms_days'], 'status': 'ACTIVE',
         }), 201);
       }
@@ -287,7 +287,6 @@ void main() {
     await tester.tap(find.byKey(const Key('add_supplier_fab')));
     await tester.pumpAndSettle();
 
-    await tester.enterText(find.byKey(const Key('supplier_code_field')), 'SUPNEW');
     await tester.enterText(find.byKey(const Key('supplier_name_field')), 'New Feed Mill');
     await tester.enterText(find.byKey(const Key('supplier_phone_field')), '9000000000');
     await tester.enterText(find.byKey(const Key('supplier_payment_terms_field')), '20');
@@ -295,7 +294,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(createdBody, isNotNull);
-    expect(createdBody!['supplier_code'], 'SUPNEW');
+    expect(createdBody!.containsKey('supplier_code'), isFalse, reason: 'supplier_code is server-generated and must never be sent by the client');
     expect(createdBody!['name'], 'New Feed Mill');
     expect(createdBody!['phone'], '9000000000');
     expect(createdBody!['payment_terms_days'], 20);

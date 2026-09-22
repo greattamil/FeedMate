@@ -50,7 +50,19 @@ services:
       ]
     profiles: ["migrate"]
 
-  api:
+  # Service keys below are deliberately NOT "api"/"web" — Docker's embedded
+  # DNS auto-aliases every container by its compose service key on every
+  # network it joins, and the host's shared Caddy container is also joined
+  # to a completely unrelated project's network whose services happen to
+  # be named exactly "api" and "web". A multi-homed container's short-name
+  # lookups aren't reliably scoped to one specific network, so a same-named
+  # alias on ANY of Caddy's networks can shadow the intended target and
+  # silently misroute traffic — this broke smartpay.ramadas.me in
+  # production the first time these were named "api"/"web" here. The
+  # Caddyfile always addresses these by their fully-qualified container_name
+  # (feedmate-api / feedmate-web), which is unique host-wide, never by
+  # these service keys — the rename below only changes the redundant alias.
+  apisvc:
     build:
       context: ../../services/api
       dockerfile: Dockerfile
@@ -71,7 +83,7 @@ services:
       - feedmate_internal
       - feedmate_public
 
-  web:
+  webapp:
     image: nginx:1.27-alpine
     container_name: feedmate-web
     restart: unless-stopped

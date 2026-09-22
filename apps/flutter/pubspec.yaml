@@ -50,6 +50,7 @@ dependencies:
   printing: ^5.13.4
   path_provider: ^2.1.5
   fl_chart: ^0.69.0
+  file_picker: ^8.1.6
 
 dev_dependencies:
   flutter_test:

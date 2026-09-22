@@ -20,6 +20,10 @@ class StoreProfile {
   final String invoicePrefix;
   final String? receiptHeader;
   final String? receiptFooter;
+  /// The shop's uploaded logo as a data: URI (e.g.
+  /// "data:image/png;base64,..."), printed on the invoice PDF and detail
+  /// screen header. Null means no logo has been uploaded yet.
+  final String? logoDataUri;
 
   StoreProfile({
     required this.legalName,
@@ -37,6 +41,7 @@ class StoreProfile {
     required this.invoicePrefix,
     this.receiptHeader,
     this.receiptFooter,
+    this.logoDataUri,
   });
 
   factory StoreProfile.fromJson(Map<String, dynamic> json) {
@@ -56,6 +61,7 @@ class StoreProfile {
       invoicePrefix: json['invoice_prefix'] as String,
       receiptHeader: json['receipt_header'] as String?,
       receiptFooter: json['receipt_footer'] as String?,
+      logoDataUri: json['logo_data_uri'] as String?,
     );
   }
 
@@ -75,6 +81,7 @@ class StoreProfile {
         'invoice_prefix': invoicePrefix,
         'receipt_header': receiptHeader,
         'receipt_footer': receiptFooter,
+        'logo_data_uri': logoDataUri,
       };
 }
 

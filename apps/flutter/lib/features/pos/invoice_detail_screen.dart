@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -394,6 +396,34 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
     );
   }
 
+  Widget _storeLogoOrIcon(String? logoDataUri) {
+    if (logoDataUri != null && logoDataUri.isNotEmpty) {
+      try {
+        final bytes = base64Decode(logoDataUri.substring(logoDataUri.indexOf(',') + 1));
+        return Container(
+          width: 32,
+          height: 32,
+          padding: const EdgeInsets.all(3),
+          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8)),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(5),
+            child: Image.memory(bytes, fit: BoxFit.contain),
+          ),
+        );
+      } catch (_) {
+        // Falls through to the default icon below on any decode failure.
+      }
+    }
+    return Container(
+      padding: const EdgeInsets.all(6),
+      decoration: BoxDecoration(
+        color: Colors.white.withAlpha(40),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: const Icon(Icons.storefront_rounded, color: Colors.white, size: 18),
+    );
+  }
+
   Widget _shopHeaderCard(InvoiceStoreDetail store) {
     return Container(
       key: const Key('invoice_detail_shop_header'),
@@ -413,14 +443,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
         children: [
           Row(
             children: [
-              Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  color: Colors.white.withAlpha(40),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Icon(Icons.storefront_rounded, color: Colors.white, size: 18),
-              ),
+              _storeLogoOrIcon(store.logoDataUri),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(

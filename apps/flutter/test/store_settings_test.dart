@@ -30,7 +30,12 @@ Map<String, dynamic> _seedProfile() => {
       'invoice_prefix': 'AAFS',
       'receipt_header': null,
       'receipt_footer': null,
+      'logo_data_uri': null,
     };
+
+// A minimal valid 1x1 PNG, base64-encoded.
+const _onePixelPngDataUri =
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 
 /// StoreSettingsScreen's form is a plain ListView(children: [...]), whose
 /// SliverChildListDelegate only inflates elements within the viewport +
@@ -139,5 +144,68 @@ void main() {
     expect(putCalled, isFalse);
     await _scrollUntilVisible(tester, find.text('Legal Name is required'), up: true);
     expect(find.text('Legal Name is required'), findsOneWidget);
+  });
+
+  testWidgets('shows the saved logo and offers Replace/Remove instead of Upload', (tester) async {
+    final client = MockClient((request) async {
+      if (request.method == 'GET' && request.url.path == '/api/v1/settings/store-profile') {
+        final profile = Map<String, dynamic>.from(_seedProfile())..['logo_data_uri'] = _onePixelPngDataUri;
+        return _jsonOk(profile);
+      }
+      return http.Response('not found', 404);
+    });
+
+    await tester.pumpWidget(_wrapWithProviders(httpClient: client));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('store_settings_logo_preview')), findsOneWidget);
+    expect(find.widgetWithText(OutlinedButton, 'Replace Logo'), findsOneWidget);
+    expect(find.byKey(const Key('store_settings_remove_logo_button')), findsOneWidget);
+  });
+
+  testWidgets('a profile with no logo yet offers Upload, not Replace/Remove', (tester) async {
+    final client = MockClient((request) async {
+      if (request.method == 'GET' && request.url.path == '/api/v1/settings/store-profile') {
+        return _jsonOk(_seedProfile());
+      }
+      return http.Response('not found', 404);
+    });
+
+    await tester.pumpWidget(_wrapWithProviders(httpClient: client));
+    await tester.pumpAndSettle();
+
+    expect(find.widgetWithText(OutlinedButton, 'Upload Logo'), findsOneWidget);
+    expect(find.byKey(const Key('store_settings_remove_logo_button')), findsNothing);
+  });
+
+  testWidgets('removing an existing logo and saving sends a null logo_data_uri', (tester) async {
+    Map<String, dynamic>? putBody;
+    final client = MockClient((request) async {
+      if (request.method == 'GET' && request.url.path == '/api/v1/settings/store-profile') {
+        final profile = Map<String, dynamic>.from(_seedProfile())..['logo_data_uri'] = _onePixelPngDataUri;
+        return _jsonOk(profile);
+      }
+      if (request.method == 'PUT' && request.url.path == '/api/v1/settings/store-profile') {
+        putBody = jsonDecode(request.body) as Map<String, dynamic>;
+        return _jsonOk(_seedProfile());
+      }
+      return http.Response('not found', 404);
+    });
+
+    await tester.pumpWidget(_wrapWithProviders(httpClient: client));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('store_settings_remove_logo_button')));
+    await tester.pumpAndSettle();
+
+    expect(find.widgetWithText(OutlinedButton, 'Upload Logo'), findsOneWidget);
+
+    await _scrollUntilVisible(tester, find.byKey(const Key('store_settings_save_button')));
+    await tester.tap(find.byKey(const Key('store_settings_save_button')));
+    await tester.pumpAndSettle();
+
+    expect(putBody, isNotNull);
+    expect(putBody!['logo_data_uri'], isNull);
+    expect(putBody!.containsKey('logo_data_uri'), isTrue);
   });
 }

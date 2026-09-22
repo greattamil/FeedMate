@@ -123,6 +123,7 @@ class InvoiceStoreDetail {
   final String? postalCode;
   final String? receiptHeader;
   final String? receiptFooter;
+  final String? logoDataUri;
 
   InvoiceStoreDetail({
     required this.legalName,
@@ -139,6 +140,7 @@ class InvoiceStoreDetail {
     required this.postalCode,
     required this.receiptHeader,
     required this.receiptFooter,
+    required this.logoDataUri,
   });
 
   factory InvoiceStoreDetail.fromJson(Map<String, dynamic> json) {
@@ -157,6 +159,7 @@ class InvoiceStoreDetail {
       postalCode: json['postal_code'] as String?,
       receiptHeader: json['receipt_header'] as String?,
       receiptFooter: json['receipt_footer'] as String?,
+      logoDataUri: json['logo_data_uri'] as String?,
     );
   }
 

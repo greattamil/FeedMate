@@ -71,6 +71,48 @@ InvoiceDetail _sampleInvoice() {
       postalCode: null,
       receiptHeader: null,
       receiptFooter: 'Thank you for your business',
+      logoDataUri: null,
+    ),
+  );
+}
+
+InvoiceDetail _sampleInvoiceWithLogo() {
+  final base = _sampleInvoice();
+  // A minimal valid 1x1 PNG, base64-encoded — enough to prove the PDF
+  // builder actually decodes and embeds real image bytes rather than
+  // silently ignoring the field.
+  const onePixelPng =
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+  return InvoiceDetail(
+    id: base.id,
+    invoiceNumber: base.invoiceNumber,
+    customerName: base.customerName,
+    subtotal: base.subtotal,
+    discountTotal: base.discountTotal,
+    taxableTotal: base.taxableTotal,
+    taxTotal: base.taxTotal,
+    roundingAmount: base.roundingAmount,
+    grandTotal: base.grandTotal,
+    paymentStatus: base.paymentStatus,
+    finalizedAt: base.finalizedAt,
+    lines: base.lines,
+    tenders: base.tenders,
+    store: InvoiceStoreDetail(
+      legalName: base.store.legalName,
+      tradeName: base.store.tradeName,
+      gstin: base.store.gstin,
+      fssaiLicenseNo: base.store.fssaiLicenseNo,
+      phone: base.store.phone,
+      email: base.store.email,
+      addressLine1: base.store.addressLine1,
+      addressLine2: base.store.addressLine2,
+      city: base.store.city,
+      district: base.store.district,
+      stateCode: base.store.stateCode,
+      postalCode: base.store.postalCode,
+      receiptHeader: base.store.receiptHeader,
+      receiptFooter: base.store.receiptFooter,
+      logoDataUri: onePixelPng,
     ),
   );
 }
@@ -78,6 +120,53 @@ InvoiceDetail _sampleInvoice() {
 void main() {
   test('the generated invoice PDF is a real, non-empty PDF document', () async {
     final doc = buildInvoicePdf(_sampleInvoice());
+    final bytes = await doc.save();
+    expect(bytes.length, greaterThan(500));
+    expect(String.fromCharCodes(bytes.take(5)), '%PDF-');
+  });
+
+  test('embeds a real store logo image when one is set on the invoice', () async {
+    final doc = buildInvoicePdf(_sampleInvoiceWithLogo());
+    final bytes = await doc.save();
+    expect(bytes.length, greaterThan(500));
+    expect(String.fromCharCodes(bytes.take(5)), '%PDF-');
+  });
+
+  test('a corrupt logo data URI never breaks PDF generation', () async {
+    final base = _sampleInvoice();
+    final withBadLogo = InvoiceDetail(
+      id: base.id,
+      invoiceNumber: base.invoiceNumber,
+      customerName: base.customerName,
+      subtotal: base.subtotal,
+      discountTotal: base.discountTotal,
+      taxableTotal: base.taxableTotal,
+      taxTotal: base.taxTotal,
+      roundingAmount: base.roundingAmount,
+      grandTotal: base.grandTotal,
+      paymentStatus: base.paymentStatus,
+      finalizedAt: base.finalizedAt,
+      lines: base.lines,
+      tenders: base.tenders,
+      store: InvoiceStoreDetail(
+        legalName: base.store.legalName,
+        tradeName: base.store.tradeName,
+        gstin: base.store.gstin,
+        fssaiLicenseNo: base.store.fssaiLicenseNo,
+        phone: base.store.phone,
+        email: base.store.email,
+        addressLine1: base.store.addressLine1,
+        addressLine2: base.store.addressLine2,
+        city: base.store.city,
+        district: base.store.district,
+        stateCode: base.store.stateCode,
+        postalCode: base.store.postalCode,
+        receiptHeader: base.store.receiptHeader,
+        receiptFooter: base.store.receiptFooter,
+        logoDataUri: 'data:image/png;base64,not-actually-valid-base64!!!',
+      ),
+    );
+    final doc = buildInvoicePdf(withBadLogo);
     final bytes = await doc.save();
     expect(bytes.length, greaterThan(500));
     expect(String.fromCharCodes(bytes.take(5)), '%PDF-');

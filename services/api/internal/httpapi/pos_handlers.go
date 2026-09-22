@@ -169,6 +169,9 @@ func (h *POSHandlers) GetInvoiceDetail(w http.ResponseWriter, r *http.Request) {
 	if detail.Store.ReceiptFooter != nil {
 		store["receipt_footer"] = *detail.Store.ReceiptFooter
 	}
+	if detail.Store.LogoDataURI != nil {
+		store["logo_data_uri"] = *detail.Store.LogoDataURI
+	}
 
 	resp := map[string]interface{}{
 		"id":              header.ID.String(),

@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -142,6 +143,88 @@ func TestUpdateStoreProfile_PersistsProfileAndReceiptTextAndAudits(t *testing.T)
 	})
 	if err != nil {
 		t.Fatalf("expected an audit log entry for the update: %v", err)
+	}
+}
+
+func TestUpdateStoreProfile_PersistsLogoDataURI(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	tenantID, userID := seedTenantAndUser(t, db)
+	svc := settings.NewService(db)
+
+	const logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+	update := settings.StoreProfile{
+		LegalName:     "Logo Test Tenant",
+		AddressLine1:  "12 Market Road",
+		City:          "Andipatti",
+		StateCode:     "TN",
+		InvoicePrefix: "LOGO",
+		LogoDataURI:   strPtr(logo),
+	}
+	if err := svc.UpdateStoreProfile(context.Background(), tenantID, userID, update); err != nil {
+		t.Fatalf("update store profile with logo: %v", err)
+	}
+
+	got, err := svc.GetStoreProfile(context.Background(), tenantID)
+	if err != nil {
+		t.Fatalf("get store profile after logo update: %v", err)
+	}
+	if got.LogoDataURI == nil || *got.LogoDataURI != logo {
+		t.Fatalf("expected logo data URI persisted, got %v", got.LogoDataURI)
+	}
+
+	// Clearing it (nil) must actually remove the key, not just leave it stale.
+	update.LogoDataURI = nil
+	if err := svc.UpdateStoreProfile(context.Background(), tenantID, userID, update); err != nil {
+		t.Fatalf("clear logo: %v", err)
+	}
+	got, err = svc.GetStoreProfile(context.Background(), tenantID)
+	if err != nil {
+		t.Fatalf("get store profile after clearing logo: %v", err)
+	}
+	if got.LogoDataURI != nil {
+		t.Fatalf("expected logo cleared, got %v", *got.LogoDataURI)
+	}
+}
+
+func TestUpdateStoreProfile_RejectsInvalidLogoDataURI(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	tenantID, userID := seedTenantAndUser(t, db)
+	svc := settings.NewService(db)
+
+	update := settings.StoreProfile{
+		LegalName:     "Bad Logo Tenant",
+		AddressLine1:  "12 Market Road",
+		City:          "Andipatti",
+		StateCode:     "TN",
+		InvoicePrefix: "BADLOGO",
+		LogoDataURI:   strPtr("not-a-data-uri"),
+	}
+	err := svc.UpdateStoreProfile(context.Background(), tenantID, userID, update)
+	if !errors.Is(err, settings.ErrValidation) {
+		t.Fatalf("expected ErrValidation for malformed logo data URI, got %v", err)
+	}
+}
+
+func TestUpdateStoreProfile_RejectsOversizedLogoDataURI(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	tenantID, userID := seedTenantAndUser(t, db)
+	svc := settings.NewService(db)
+
+	oversized := "data:image/png;base64," + strings.Repeat("A", 1_600_000)
+	update := settings.StoreProfile{
+		LegalName:     "Oversized Logo Tenant",
+		AddressLine1:  "12 Market Road",
+		City:          "Andipatti",
+		StateCode:     "TN",
+		InvoicePrefix: "BIGLOGO",
+		LogoDataURI:   strPtr(oversized),
+	}
+	err := svc.UpdateStoreProfile(context.Background(), tenantID, userID, update)
+	if !errors.Is(err, settings.ErrValidation) {
+		t.Fatalf("expected ErrValidation for oversized logo data URI, got %v", err)
 	}
 }
 

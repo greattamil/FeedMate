@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -17,6 +18,10 @@ import (
 )
 
 var ErrValidation = errors.New("validation error")
+
+var logoDataURIPattern = regexp.MustCompile(`^data:image/(png|jpe?g|webp);base64,[A-Za-z0-9+/]+=*$`)
+
+const maxLogoDataURILen = 1_500_000
 
 type Service struct {
 	db *dbctx.DB
@@ -55,6 +60,17 @@ func (s *Service) UpdateStoreProfile(ctx context.Context, tenantID, userID uuid.
 	if p.InvoicePrefix == "" {
 		return fmt.Errorf("%w: invoice_prefix is required", ErrValidation)
 	}
+	if p.LogoDataURI != nil {
+		if !logoDataURIPattern.MatchString(*p.LogoDataURI) {
+			return fmt.Errorf("%w: logo must be a PNG, JPEG, or WEBP image", ErrValidation)
+		}
+		// ~1.5MB of base64 (~1.1MB decoded) is plenty for a print-quality
+		// logo and keeps the row comfortably inside a single jsonb TOAST
+		// chunk — reject anything larger client-side by refusing to persist it.
+		if len(*p.LogoDataURI) > maxLogoDataURILen {
+			return fmt.Errorf("%w: logo image is too large (max 1.5MB)", ErrValidation)
+		}
+	}
 
 	return s.db.WithTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
 		before, err := GetStoreProfile(ctx, tx, tenantID)
@@ -64,7 +80,7 @@ func (s *Service) UpdateStoreProfile(ctx context.Context, tenantID, userID uuid.
 		if err := UpdateTenantProfile(ctx, tx, tenantID, p); err != nil {
 			return fmt.Errorf("update tenant profile: %w", err)
 		}
-		if err := UpdateReceiptText(ctx, tx, tenantID, p.ReceiptHeader, p.ReceiptFooter); err != nil {
+		if err := UpdateReceiptText(ctx, tx, tenantID, p.ReceiptHeader, p.ReceiptFooter, p.LogoDataURI); err != nil {
 			return fmt.Errorf("update receipt text: %w", err)
 		}
 		_, err = tx.Exec(ctx, `
@@ -92,5 +108,10 @@ func profileToAuditJSON(p StoreProfile) map[string]interface{} {
 		"invoice_prefix":   p.InvoicePrefix,
 		"receipt_header":   p.ReceiptHeader,
 		"receipt_footer":   p.ReceiptFooter,
+		// The image data itself is deliberately left out of the audit
+		// trail — only whether a logo is present, to keep audit_logs rows
+		// small and avoid duplicating megabytes of image bytes on every
+		// settings edit.
+		"logo_present": p.LogoDataURI != nil,
 	}
 }

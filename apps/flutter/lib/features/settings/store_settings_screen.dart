@@ -1,17 +1,25 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/api_client.dart';
 import '../../core/api_error.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_decorations.dart';
 import '../../core/theme/app_typography.dart';
 import 'store_settings_api.dart';
 
+/// Server-side cap on the stored data URI length (settings.maxLogoDataURILen
+/// server-side) — enforced client-side too so a rejected upload fails
+/// immediately with a clear message instead of round-tripping to the API.
+const _maxLogoBytes = 1100000;
+
 /// The shop profile screen every tenant needs before going live: legal/
 /// trade name, GSTIN, FSSAI license, contact, address, invoice number
-/// prefix, and receipt header/footer text. Before this screen existed, none
-/// of it was editable from the app — onboarding a real tenant required a
-/// raw SQL UPDATE against the tenants table.
+/// prefix, and receipt header/footer text.
 class StoreSettingsScreen extends StatefulWidget {
   const StoreSettingsScreen({super.key});
 
@@ -41,6 +49,15 @@ class _StoreSettingsScreenState extends State<StoreSettingsScreen> {
   bool _loading = true;
   bool _saving = false;
   String? _error;
+
+  /// The logo actually persisted server-side, as loaded — used to detect
+  /// whether the pending edit below is a genuine change worth showing a
+  /// "Remove" affordance for.
+  String? _savedLogoDataUri;
+  /// Pending edit: null means "no change to the saved logo", an empty
+  /// string means "remove the logo on next save", anything else is a new
+  /// data: URI staged from a freshly picked image.
+  String? _pendingLogoDataUri;
 
   @override
   void initState() {
@@ -84,6 +101,56 @@ class _StoreSettingsScreenState extends State<StoreSettingsScreen> {
     _invoicePrefixCtrl.text = p.invoicePrefix;
     _receiptHeaderCtrl.text = p.receiptHeader ?? '';
     _receiptFooterCtrl.text = p.receiptFooter ?? '';
+    _savedLogoDataUri = p.logoDataUri;
+    _pendingLogoDataUri = null;
+  }
+
+  /// The logo that should actually be shown in the preview right now: a
+  /// freshly picked image, an explicit removal, or whatever is already
+  /// saved — in that priority order.
+  String? get _effectiveLogoDataUri {
+    if (_pendingLogoDataUri == null) return _savedLogoDataUri;
+    return _pendingLogoDataUri!.isEmpty ? null : _pendingLogoDataUri;
+  }
+
+  Future<void> _pickLogo() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.image,
+      withData: true,
+    );
+    final files = result?.files;
+    if (files == null || files.isEmpty) return;
+    final picked = files.first;
+    if (picked.bytes == null) return;
+
+    if (picked.bytes!.length > _maxLogoBytes) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Logo image is too large — please use one under ~800KB')),
+      );
+      return;
+    }
+
+    final ext = (picked.extension ?? '').toLowerCase();
+    final mimeType = switch (ext) {
+      'png' => 'image/png',
+      'jpg' || 'jpeg' => 'image/jpeg',
+      'webp' => 'image/webp',
+      _ => null,
+    };
+    if (mimeType == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please choose a PNG, JPEG, or WEBP image')),
+      );
+      return;
+    }
+
+    setState(() => _pendingLogoDataUri = 'data:$mimeType;base64,${base64Encode(picked.bytes!)}');
+  }
+
+  void _removeLogo() {
+    setState(() => _pendingLogoDataUri = '');
   }
 
   Future<void> _load() async {
@@ -129,6 +196,7 @@ class _StoreSettingsScreenState extends State<StoreSettingsScreen> {
         invoicePrefix: _invoicePrefixCtrl.text.trim(),
         receiptHeader: _blank(_receiptHeaderCtrl.text),
         receiptFooter: _blank(_receiptFooterCtrl.text),
+        logoDataUri: _effectiveLogoDataUri,
       );
       final saved = await api.updateStoreProfile(updated);
       if (!mounted) return;
@@ -142,10 +210,72 @@ class _StoreSettingsScreenState extends State<StoreSettingsScreen> {
     }
   }
 
-  Widget _sectionHeader(String title) => Padding(
-        padding: const EdgeInsets.only(top: 20, bottom: 8),
-        child: Text(title, style: AppTypography.caption.copyWith(fontWeight: FontWeight.bold, letterSpacing: 0.8, color: AppColors.primary)),
-      );
+  Widget _sectionCard({
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required Color iconColor,
+    required Gradient iconGradient,
+    required List<Widget> children,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 20),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: AppDecorations.borderRadiusLg,
+        border: Border.all(color: AppColors.border),
+        boxShadow: AppDecorations.cardShadow,
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    gradient: iconGradient,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: iconColor.withValues(alpha: 0.3),
+                        blurRadius: 8,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
+                  ),
+                  child: Icon(icon, color: Colors.white, size: 20),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: AppTypography.title.copyWith(fontSize: 15, fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle,
+                        style: AppTypography.caption.copyWith(color: AppColors.textSecondary),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            const Divider(height: 1, color: AppColors.border),
+            const SizedBox(height: 16),
+            ...children,
+          ],
+        ),
+      ),
+    );
+  }
 
   Widget _field(
     TextEditingController controller,
@@ -154,24 +284,121 @@ class _StoreSettingsScreenState extends State<StoreSettingsScreen> {
     bool required = false,
     TextInputType? keyboardType,
     int maxLines = 1,
+    IconData? prefixIcon,
   }) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.only(bottom: 14),
       child: TextFormField(
         key: key,
         controller: controller,
         keyboardType: keyboardType,
         maxLines: maxLines,
-        decoration: InputDecoration(labelText: required ? '$label *' : label, border: const OutlineInputBorder()),
+        decoration: InputDecoration(
+          labelText: required ? '$label *' : label,
+          prefixIcon: prefixIcon != null ? Icon(prefixIcon, size: 18, color: AppColors.primary) : null,
+          filled: true,
+          fillColor: AppColors.surfaceSecondary,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: AppColors.border),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: AppColors.border),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
+          ),
+        ),
         validator: required ? (v) => (v == null || v.trim().isEmpty) ? '$label is required' : null : null,
       ),
+    );
+  }
+
+  Widget _logoUploadRow() {
+    final logo = _effectiveLogoDataUri;
+    Uint8List? bytes;
+    if (logo != null && logo.isNotEmpty) {
+      try {
+        bytes = base64Decode(logo.substring(logo.indexOf(',') + 1));
+      } catch (_) {
+        bytes = null;
+      }
+    }
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          key: const Key('store_settings_logo_preview'),
+          width: 84,
+          height: 84,
+          decoration: BoxDecoration(
+            color: AppColors.surfaceSecondary,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: bytes != null
+              ? ClipRRect(
+                  borderRadius: BorderRadius.circular(13),
+                  child: Image.memory(bytes, fit: BoxFit.contain),
+                )
+              : const Icon(Icons.storefront_rounded, color: AppColors.textTertiary, size: 32),
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'PNG, JPEG, or WEBP · shown on your invoice header and here in the app',
+                style: AppTypography.caption.copyWith(color: AppColors.textSecondary),
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  OutlinedButton.icon(
+                    key: const Key('store_settings_upload_logo_button'),
+                    onPressed: _pickLogo,
+                    icon: const Icon(Icons.upload_rounded, size: 18),
+                    label: Text(bytes != null ? 'Replace Logo' : 'Upload Logo'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.primary,
+                      side: const BorderSide(color: AppColors.primary),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                  if (bytes != null)
+                    OutlinedButton.icon(
+                      key: const Key('store_settings_remove_logo_button'),
+                      onPressed: _removeLogo,
+                      icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                      label: const Text('Remove'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.danger,
+                        side: const BorderSide(color: AppColors.danger),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Store Settings')),
+      backgroundColor: AppColors.background,
+      appBar: AppBar(
+        title: const Text('Store Settings', style: AppTypography.headline),
+      ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
@@ -190,42 +417,173 @@ class _StoreSettingsScreenState extends State<StoreSettingsScreen> {
                   child: ListView(
                     padding: const EdgeInsets.all(16),
                     children: [
-                      _sectionHeader('SHOP IDENTITY'),
-                      _field(_legalNameCtrl, 'Legal Name', key: const Key('store_settings_legal_name'), required: true),
-                      _field(_tradeNameCtrl, 'Trade Name'),
-                      _field(_gstinCtrl, 'GSTIN'),
-                      _field(_fssaiCtrl, 'FSSAI License No.'),
+                      // Hero Header Banner
+                      Container(
+                        padding: const EdgeInsets.all(20),
+                        margin: const EdgeInsets.only(bottom: 20),
+                        decoration: BoxDecoration(
+                          gradient: AppColors.gradientHeroMesh,
+                          borderRadius: AppDecorations.borderRadiusLg,
+                          boxShadow: AppDecorations.emeraldGlow,
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.18),
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(color: Colors.white.withValues(alpha: 0.3)),
+                              ),
+                              child: const Icon(Icons.storefront_rounded, color: Colors.white, size: 28),
+                            ),
+                            const SizedBox(width: 16),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Store & Brand Profile',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: -0.3,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Manage legal entity, tax GSTIN, address & receipt branding',
+                                    style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 12),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
 
-                      _sectionHeader('CONTACT'),
-                      _field(_phoneCtrl, 'Phone', keyboardType: TextInputType.phone),
-                      _field(_emailCtrl, 'Email', keyboardType: TextInputType.emailAddress),
+                      // 1. Logo Section
+                      _sectionCard(
+                        title: 'Store Logo',
+                        subtitle: 'Printed on the invoice PDF and shown in the app header',
+                        icon: Icons.image_rounded,
+                        iconColor: const Color(0xFF7C3AED),
+                        iconGradient: AppColors.gradientPurple,
+                        children: [_logoUploadRow()],
+                      ),
 
-                      _sectionHeader('ADDRESS'),
-                      _field(_addressLine1Ctrl, 'Address Line 1', required: true),
-                      _field(_addressLine2Ctrl, 'Address Line 2'),
-                      _field(_cityCtrl, 'City', required: true),
-                      _field(_districtCtrl, 'District'),
-                      _field(_stateCodeCtrl, 'State Code', required: true),
-                      _field(_postalCodeCtrl, 'Postal Code', keyboardType: TextInputType.number),
+                      // 2. Shop Identity Section
+                      _sectionCard(
+                        title: 'Shop Identity & Tax',
+                        subtitle: 'Legal names and statutory registration licenses',
+                        icon: Icons.business_rounded,
+                        iconColor: AppColors.primary,
+                        iconGradient: AppColors.gradientEmerald,
+                        children: [
+                          _field(
+                            _legalNameCtrl,
+                            'Legal Name',
+                            key: const Key('store_settings_legal_name'),
+                            required: true,
+                            prefixIcon: Icons.badge_rounded,
+                          ),
+                          _field(_tradeNameCtrl, 'Trade Name', prefixIcon: Icons.store_rounded),
+                          _field(_gstinCtrl, 'GSTIN', prefixIcon: Icons.receipt_rounded),
+                          _field(_fssaiCtrl, 'FSSAI License No.', prefixIcon: Icons.verified_rounded),
+                        ],
+                      ),
 
-                      _sectionHeader('BILLING'),
-                      _field(_invoicePrefixCtrl, 'Invoice Prefix', key: const Key('store_settings_invoice_prefix'), required: true),
+                      // 3. Contact Section
+                      _sectionCard(
+                        title: 'Contact Information',
+                        subtitle: 'Store phone and customer care communications',
+                        icon: Icons.contact_phone_rounded,
+                        iconColor: AppColors.secondary,
+                        iconGradient: AppColors.gradientIndigo,
+                        children: [
+                          _field(_phoneCtrl, 'Phone', keyboardType: TextInputType.phone, prefixIcon: Icons.phone_rounded),
+                          _field(_emailCtrl, 'Email', keyboardType: TextInputType.emailAddress, prefixIcon: Icons.email_rounded),
+                        ],
+                      ),
 
-                      _sectionHeader('RECEIPT TEXT'),
-                      _field(_receiptHeaderCtrl, 'Receipt Header', maxLines: 2),
-                      _field(_receiptFooterCtrl, 'Receipt Footer', maxLines: 2),
+                      // 4. Address Section
+                      _sectionCard(
+                        title: 'Store Location & Address',
+                        subtitle: 'Physical outlet address printed on tax invoices',
+                        icon: Icons.location_on_rounded,
+                        iconColor: AppColors.accent,
+                        iconGradient: AppColors.gradientCyan,
+                        children: [
+                          _field(_addressLine1Ctrl, 'Address Line 1', required: true, prefixIcon: Icons.home_rounded),
+                          _field(_addressLine2Ctrl, 'Address Line 2', prefixIcon: Icons.location_city_rounded),
+                          _field(_cityCtrl, 'City', required: true, prefixIcon: Icons.apartment_rounded),
+                          _field(_districtCtrl, 'District', prefixIcon: Icons.map_rounded),
+                          _field(_stateCodeCtrl, 'State Code', required: true, prefixIcon: Icons.flag_rounded),
+                          _field(_postalCodeCtrl, 'Postal Code', keyboardType: TextInputType.number, prefixIcon: Icons.markunread_mailbox_rounded),
+                        ],
+                      ),
 
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        width: double.infinity,
+                      // 5. Billing Configuration
+                      _sectionCard(
+                        title: 'Billing & Invoice Prefix',
+                        subtitle: 'Sequential invoice numbering prefix',
+                        icon: Icons.receipt_long_rounded,
+                        iconColor: AppColors.warning,
+                        iconGradient: AppColors.gradientAmber,
+                        children: [
+                          _field(
+                            _invoicePrefixCtrl,
+                            'Invoice Prefix',
+                            key: const Key('store_settings_invoice_prefix'),
+                            required: true,
+                            prefixIcon: Icons.confirmation_number_rounded,
+                          ),
+                        ],
+                      ),
+
+                      // 6. Receipt Text
+                      _sectionCard(
+                        title: 'Receipt Header & Footer',
+                        subtitle: 'Custom greetings and terms printed on physical slips',
+                        icon: Icons.print_rounded,
+                        iconColor: const Color(0xFF7C3AED),
+                        iconGradient: AppColors.gradientPurple,
+                        children: [
+                          _field(_receiptHeaderCtrl, 'Receipt Header', maxLines: 2, prefixIcon: Icons.notes_rounded),
+                          _field(_receiptFooterCtrl, 'Receipt Footer', maxLines: 2, prefixIcon: Icons.favorite_rounded),
+                        ],
+                      ),
+
+                      const SizedBox(height: 10),
+
+                      // Save Action Button
+                      Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(14),
+                          boxShadow: AppDecorations.emeraldGlow,
+                        ),
                         child: FilledButton(
                           key: const Key('store_settings_save_button'),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: AppColors.primary,
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                          ),
                           onPressed: _saving ? null : _save,
                           child: _saving
                               ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                              : const Text('Save'),
+                              : const Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(Icons.save_rounded, size: 20),
+                                    SizedBox(width: 8),
+                                    Text('Save Store Settings', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                                  ],
+                                ),
                         ),
                       ),
+                      const SizedBox(height: 24),
                     ],
                   ),
                 ),

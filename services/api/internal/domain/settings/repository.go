@@ -28,6 +28,11 @@ type StoreProfile struct {
 	InvoicePrefix  string
 	ReceiptHeader  *string
 	ReceiptFooter  *string
+	// LogoDataURI is the shop's uploaded logo, encoded as a data: URI
+	// (e.g. "data:image/png;base64,...") — stored inline rather than as a
+	// hosted URL since this deployment has no object storage, and printed
+	// on both the invoice PDF and the on-screen invoice detail header.
+	LogoDataURI *string
 }
 
 func GetStoreProfile(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) (StoreProfile, error) {
@@ -51,6 +56,7 @@ func GetStoreProfile(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) (StoreP
 	var parsed struct {
 		ReceiptHeader *string `json:"receipt_header"`
 		ReceiptFooter *string `json:"receipt_footer"`
+		LogoDataURI   *string `json:"logo_data_uri"`
 	}
 	if len(extra) > 0 {
 		if err := json.Unmarshal(extra, &parsed); err != nil {
@@ -59,6 +65,7 @@ func GetStoreProfile(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) (StoreP
 	}
 	p.ReceiptHeader = parsed.ReceiptHeader
 	p.ReceiptFooter = parsed.ReceiptFooter
+	p.LogoDataURI = parsed.LogoDataURI
 	return p, nil
 }
 
@@ -76,10 +83,10 @@ func UpdateTenantProfile(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, p S
 	return err
 }
 
-// UpdateReceiptText merges receipt_header/receipt_footer into
+// UpdateReceiptText merges receipt_header/receipt_footer/logo_data_uri into
 // tenant_settings.extra_settings, preserving whatever other keys that jsonb
 // blob might already carry.
-func UpdateReceiptText(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, header, footer *string) error {
+func UpdateReceiptText(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, header, footer, logoDataURI *string) error {
 	extra := map[string]interface{}{}
 	var current []byte
 	if err := tx.QueryRow(ctx, `SELECT extra_settings FROM tenant_settings WHERE tenant_id = $1`, tenantID).Scan(&current); err != nil {
@@ -99,6 +106,11 @@ func UpdateReceiptText(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, heade
 		extra["receipt_footer"] = *footer
 	} else {
 		delete(extra, "receipt_footer")
+	}
+	if logoDataURI != nil {
+		extra["logo_data_uri"] = *logoDataURI
+	} else {
+		delete(extra, "logo_data_uri")
 	}
 	encoded, err := json.Marshal(extra)
 	if err != nil {

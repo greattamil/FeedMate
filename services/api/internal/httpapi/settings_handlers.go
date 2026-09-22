@@ -34,6 +34,7 @@ func storeProfileToJSON(p settings.StoreProfile) map[string]interface{} {
 		"invoice_prefix":   p.InvoicePrefix,
 		"receipt_header":   p.ReceiptHeader,
 		"receipt_footer":   p.ReceiptFooter,
+		"logo_data_uri":    p.LogoDataURI,
 	}
 }
 
@@ -68,6 +69,7 @@ type updateStoreProfileRequest struct {
 	InvoicePrefix  string  `json:"invoice_prefix"`
 	ReceiptHeader  *string `json:"receipt_header"`
 	ReceiptFooter  *string `json:"receipt_footer"`
+	LogoDataURI    *string `json:"logo_data_uri"`
 }
 
 func (h *SettingsHandlers) UpdateStoreProfile(w http.ResponseWriter, r *http.Request) {
@@ -98,6 +100,7 @@ func (h *SettingsHandlers) UpdateStoreProfile(w http.ResponseWriter, r *http.Req
 		InvoicePrefix:  req.InvoicePrefix,
 		ReceiptHeader:  req.ReceiptHeader,
 		ReceiptFooter:  req.ReceiptFooter,
+		LogoDataURI:    req.LogoDataURI,
 	}
 	if err := h.Settings.UpdateStoreProfile(r.Context(), claims.TenantID, claims.UserID, p); err != nil {
 		if errors.Is(err, settings.ErrValidation) {

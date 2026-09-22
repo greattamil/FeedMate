@@ -1,4 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Required in every build variant (release included) for the app to
+         reach the API server at all. Debug/profile variant manifests also
+         declare this for their own reasons, but relying on that left the
+         release build with no network permission whatsoever — it silently
+         failed to reach the server on a real device. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+
     <application
         android:label="feedmate_app"
         android:name="${applicationName}"

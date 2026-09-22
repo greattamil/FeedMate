@@ -28,6 +28,21 @@ type User struct {
 	LockedUntil      *time.Time
 }
 
+// GetTenantStatus is checked alongside device resolution (same admin
+// transaction, no extra round trip) so a suspended/closed tenant is
+// rejected before any per-user credential check even runs — see
+// ErrTenantNotActive.
+func GetTenantStatus(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) (string, error) {
+	var status string
+	if err := tx.QueryRow(ctx, `SELECT status FROM tenants WHERE id = $1`, tenantID).Scan(&status); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", ErrNotFound
+		}
+		return "", err
+	}
+	return status, nil
+}
+
 // ResolveDeviceByUUID looks up which tenant a device belongs to. This is the one
 // legitimate pre-authentication cross-tenant lookup (a device physically cannot
 // know its own tenant_id before this call) and must run under admin mode, scoped

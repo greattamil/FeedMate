@@ -59,6 +59,8 @@ func (h *AuthHandlers) Login(w http.ResponseWriter, r *http.Request) {
 			WriteError(w, reqID, CodeForbidden, "account temporarily locked due to repeated failed logins")
 		case errors.Is(err, identity.ErrDeviceNotActive):
 			WriteError(w, reqID, CodeForbidden, "device is not registered or not active")
+		case errors.Is(err, identity.ErrTenantNotActive):
+			WriteError(w, reqID, CodeForbidden, "this account has been suspended — contact support")
 		default:
 			WriteError(w, reqID, CodeInternal, "login failed: "+err.Error())
 		}

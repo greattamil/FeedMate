@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../core/auth_session.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_decorations.dart';
+import '../platform/platform_login_screen.dart';
 import '../shell/app_shell.dart';
 import 'pair_device_screen.dart';
 
@@ -156,6 +157,17 @@ class _LoginScreenState extends State<LoginScreen> {
                       );
                     }
                   },
+                ),
+                const SizedBox(height: 4),
+                TextButton(
+                  key: const Key('platform_admin_link'),
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const PlatformLoginScreen()),
+                  ),
+                  child: const Text(
+                    'Platform Admin',
+                    style: TextStyle(fontSize: 11, color: AppColors.textSecondary, fontWeight: FontWeight.w500),
+                  ),
                 ),
               ],
             ),

@@ -19,6 +19,11 @@ type AccessClaims struct {
 	TenantID    uuid.UUID `json:"tid"`
 	DeviceID    uuid.UUID `json:"did"`
 	Permissions []string  `json:"perms"`
+	// IsPlatform marks a platform-admin session — one with no tenant/device
+	// at all (see platformadmin.Service). Checked by middleware.RequirePlatform
+	// as a belt-and-braces guard alongside the "platform.admin" permission
+	// string, since this field can never be forged by ordinary tenant login.
+	IsPlatform bool `json:"plat,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -38,6 +43,30 @@ func IssueAccessToken(signingKey string, userID, tenantID, deviceID uuid.UUID, p
 	signed, err := token.SignedString([]byte(signingKey))
 	if err != nil {
 		return "", fmt.Errorf("sign access token: %w", err)
+	}
+	return signed, nil
+}
+
+// IssuePlatformAccessToken issues a tenant-less, device-less token for a
+// platform admin — TenantID/DeviceID are the zero UUID, which is safe only
+// because nothing in the tenant-scoped request path is reachable with this
+// token (platform routes require IsPlatform, and no dbctx.WithTenantTx call
+// site would accept uuid.Nil as a real tenant anyway).
+func IssuePlatformAccessToken(signingKey string, platformAdminID uuid.UUID, ttl time.Duration) (string, error) {
+	claims := AccessClaims{
+		UserID:      platformAdminID,
+		Permissions: []string{"platform.admin"},
+		IsPlatform:  true,
+		RegisteredClaims: jwt.RegisteredClaims{
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(ttl)),
+			Subject:   platformAdminID.String(),
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	signed, err := token.SignedString([]byte(signingKey))
+	if err != nil {
+		return "", fmt.Errorf("sign platform access token: %w", err)
 	}
 	return signed, nil
 }

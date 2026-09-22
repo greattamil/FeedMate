@@ -23,6 +23,11 @@ var (
 	ErrAccountLocked       = errors.New("account locked")
 	ErrDeviceNotActive     = errors.New("device not registered or not active")
 	ErrRefreshTokenInvalid = errors.New("refresh token invalid or expired")
+	// ErrTenantNotActive is returned when a platform admin has suspended or
+	// closed the tenant — status was a schema field nothing actually
+	// enforced before this (see 0021's doc comment), so a suspended client
+	// could keep using the app indefinitely.
+	ErrTenantNotActive = errors.New("tenant account is suspended")
 )
 
 type Service struct {
@@ -63,6 +68,13 @@ func (s *Service) Login(ctx context.Context, deviceUUID uuid.UUID, username, pas
 			return fmt.Errorf("resolve device: %w", err)
 		}
 		device = d
+		status, err := GetTenantStatus(ctx, tx, d.TenantID)
+		if err != nil {
+			return fmt.Errorf("get tenant status: %w", err)
+		}
+		if status != "ACTIVE" {
+			return ErrTenantNotActive
+		}
 		return nil
 	}); err != nil {
 		return nil, err
@@ -150,6 +162,16 @@ func (s *Service) Refresh(ctx context.Context, tenantID uuid.UUID, refreshToken 
 				return ErrRefreshTokenInvalid
 			}
 			return err
+		}
+
+		// A tenant suspended after this session was issued must not be able
+		// to keep it alive indefinitely by only ever refreshing.
+		status, err := GetTenantStatus(ctx, tx, tenantID)
+		if err != nil {
+			return fmt.Errorf("get tenant status: %w", err)
+		}
+		if status != "ACTIVE" {
+			return ErrTenantNotActive
 		}
 
 		if err := RevokeSession(ctx, tx, session.ID); err != nil {

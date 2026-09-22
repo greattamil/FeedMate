@@ -14,6 +14,7 @@ import 'core/secure_storage.dart';
 import 'core/sync_service.dart';
 import 'core/theme/app_theme.dart';
 import 'features/auth/login_screen.dart';
+import 'features/platform/platform_api_client.dart';
 import 'features/pos/cart_model.dart';
 import 'features/pos/product_repository.dart';
 import 'features/shell/app_shell.dart';
@@ -80,6 +81,7 @@ class FeedMateApp extends StatelessWidget {
           create: (_) => AuthSession(apiClient: apiClient, storage: storage),
         ),
         ChangeNotifierProvider<CartModel>(create: (_) => CartModel()),
+        ChangeNotifierProvider<PlatformApiClient>(create: (_) => PlatformApiClient(baseUrl: apiBaseUrl)),
         if (localDb != null) ...[
           Provider<LocalDatabase>.value(value: localDb),
           Provider<ProductRepository>(create: (_) => ProductRepository(client: apiClient, localDb: localDb)),

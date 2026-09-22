@@ -103,6 +103,23 @@ func ClaimsFromContext(ctx context.Context) (*auth.AccessClaims, bool) {
 	return reqctx.Claims(ctx)
 }
 
+// RequirePlatform enforces that the authenticated token is a platform-admin
+// session (see auth.IssuePlatformAccessToken), never an ordinary tenant
+// user's token — checked on the IsPlatform claim itself, not just a
+// permission string, since IsPlatform can only ever be set by the platform
+// login/refresh path.
+func RequirePlatform(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqID := RequestIDFromContext(r.Context())
+		claims, ok := ClaimsFromContext(r.Context())
+		if !ok || !claims.IsPlatform {
+			httpapi.WriteError(w, reqID, httpapi.CodeForbidden, "platform admin access required")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // RequirePermission enforces that the authenticated user's token carries the
 // given permission code. This is the application-layer RBAC check that sits
 // alongside — never instead of — PostgreSQL RLS.

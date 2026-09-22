@@ -433,3 +433,50 @@ func TestLoginRefreshLogout(t *testing.T) {
 		}
 	})
 }
+
+// TestLogin_SuspendedTenantRejected closes a real gap found in production:
+// tenants.status has always had a SUSPENDED value, but nothing enforced it
+// before — a platform admin suspending a tenant had no actual effect on
+// that tenant's ability to keep logging in.
+func TestLogin_SuspendedTenantRejected(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+
+	const password = "IntegrationTest123!"
+	tenantID, deviceUUID, username := seedFixture(t, db, password)
+	svc := identity.NewService(db, "test_signing_key", 15*time.Minute, 30*24*time.Hour, 4)
+
+	// A working login before suspension proves the fixture itself is sound.
+	loginResult, err := svc.Login(context.Background(), deviceUUID, username, password)
+	if err != nil {
+		t.Fatalf("login before suspension: %v", err)
+	}
+
+	if err := db.WithAdminTx(context.Background(), func(tx pgx.Tx) error {
+		_, err := tx.Exec(context.Background(), `UPDATE tenants SET status = 'SUSPENDED' WHERE id = $1`, tenantID)
+		return err
+	}); err != nil {
+		t.Fatalf("suspend tenant: %v", err)
+	}
+
+	if _, err := svc.Login(context.Background(), deviceUUID, username, password); !errors.Is(err, identity.ErrTenantNotActive) {
+		t.Fatalf("expected ErrTenantNotActive after suspension, got: %v", err)
+	}
+
+	// An already-issued refresh token must also stop working — suspension
+	// isn't just a block on new logins.
+	if _, err := svc.Refresh(context.Background(), tenantID, loginResult.RefreshToken); !errors.Is(err, identity.ErrTenantNotActive) {
+		t.Fatalf("expected ErrTenantNotActive on refresh after suspension, got: %v", err)
+	}
+
+	// Reactivating must restore both.
+	if err := db.WithAdminTx(context.Background(), func(tx pgx.Tx) error {
+		_, err := tx.Exec(context.Background(), `UPDATE tenants SET status = 'ACTIVE' WHERE id = $1`, tenantID)
+		return err
+	}); err != nil {
+		t.Fatalf("reactivate tenant: %v", err)
+	}
+	if _, err := svc.Login(context.Background(), deviceUUID, username, password); err != nil {
+		t.Fatalf("expected login to succeed again after reactivation, got: %v", err)
+	}
+}

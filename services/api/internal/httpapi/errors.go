@@ -45,11 +45,11 @@ var httpStatusByCode = map[ErrorCode]int{
 }
 
 type APIError struct {
-	Code      ErrorCode         `json:"code"`
-	Message   string            `json:"message"`
+	Code      ErrorCode          `json:"code"`
+	Message   string             `json:"message"`
 	Details   []ValidationDetail `json:"details,omitempty"`
-	RequestID string            `json:"request_id,omitempty"`
-	Retryable bool              `json:"retryable"`
+	RequestID string             `json:"request_id,omitempty"`
+	Retryable bool               `json:"retryable"`
 }
 
 type ValidationDetail struct {
@@ -59,6 +59,21 @@ type ValidationDetail struct {
 
 type errorEnvelope struct {
 	Error APIError `json:"error"`
+}
+
+// errorSink, when set via SetErrorSink, receives every CodeInternal
+// response's real (pre-sanitization) message — the one durable, queryable
+// record of a 500 beyond stdout/docker-logs (see the platform admin error
+// log screen). A plain function var, not an interface, since there is
+// exactly one implementation and it must never block or panic the request
+// that triggered it.
+var errorSink func(requestID string, statusCode int, message string)
+
+// SetErrorSink installs the function that persists internal-error details.
+// Called once at startup from main.go; nil (the default) disables
+// persistence entirely, which is fine for tests.
+func SetErrorSink(sink func(requestID string, statusCode int, message string)) {
+	errorSink = sink
 }
 
 // WriteError writes the standardized error envelope. Internal error details are
@@ -75,6 +90,9 @@ func WriteError(w http.ResponseWriter, requestID string, code ErrorCode, message
 		// place every CodeInternal response passes through, rather than
 		// requiring every call site to remember to log before calling this.
 		slog.Error("internal server error", "request_id", requestID, "detail", message)
+		if errorSink != nil {
+			errorSink(requestID, status, message)
+		}
 		message = "An internal error occurred. Please retry or contact support with the request ID."
 	}
 	retryable := code == CodeInternal || code == CodePaymentUnknown

@@ -31,6 +31,27 @@
 
   <title>feedmate_app</title>
   <link rel="manifest" href="manifest.json">
+  <script>
+    // This is a back-office/admin web app with no offline requirement, so
+    // builds are produced with --pwa-strategy=none: a fresh visit never
+    // registers a caching service worker. This one-time cleanup exists
+    // only to release anyone who already has an OLD caching service
+    // worker installed from a build before this change — otherwise that
+    // old worker can keep serving a stale cached app (including a stale
+    // copy of THIS file) indefinitely, since a page reload alone doesn't
+    // reliably escape it. Safe to run on every load: once there's nothing
+    // registered/cached, both calls are instant no-ops.
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then((regs) => {
+        for (const reg of regs) reg.unregister();
+      });
+    }
+    if (window.caches) {
+      caches.keys().then((keys) => {
+        for (const key of keys) caches.delete(key);
+      });
+    }
+  </script>
 </head>
 <body>
   <script src="flutter_bootstrap.js" async></script>

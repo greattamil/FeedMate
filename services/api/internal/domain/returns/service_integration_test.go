@@ -215,6 +215,82 @@ func TestPostReturn_FullSellableReturnCashRefund(t *testing.T) {
 	}
 }
 
+// TestPostReturn_CashRefundToRealCustomerAppearsInTheirLedger closes the
+// same 360°-visibility gap as the cash-sale fix, on the return side: before
+// this, only a CREDIT_NOTE refund ever touched customer_ledger_entries, so
+// a customer's ledger silently omitted every cash-refunded return.
+func TestPostReturn_CashRefundToRealCustomerAppearsInTheirLedger(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	f := seedFixture(t, db, "100")
+	posSvc := pos.NewService(db)
+	returnsSvc := returns.NewService(db)
+
+	sale, err := posSvc.FinalizeInvoice(context.Background(), f.tenantID, f.deviceID, f.userID, pos.FinalizeRequest{
+		ClientTransactionID: uuid.New(), LocationID: f.locationID, CustomerID: &f.customerID,
+		Lines:   []pos.SaleLine{{ProductID: f.productID, Quantity: decimal.RequireFromString("10")}},
+		Tenders: []pos.Tender{{Method: "CASH", Amount: decimal.RequireFromString("12600.00")}},
+	})
+	if err != nil {
+		t.Fatalf("finalize sale: %v", err)
+	}
+	lineID := firstLineID(t, db, sale.InvoiceID)
+
+	result, err := returnsSvc.PostReturn(context.Background(), f.tenantID, f.deviceID, f.userID, returns.PostReturnRequest{
+		OriginalInvoiceID: sale.InvoiceID, Reason: "customer changed mind",
+		Lines:        []returns.ReturnLineInput{{OriginalLineID: lineID, Quantity: decimal.RequireFromString("10"), ConditionStatus: "SELLABLE"}},
+		RefundMethod: "CASH",
+	})
+	if err != nil {
+		t.Fatalf("post return: %v", err)
+	}
+
+	type ledgerRow struct {
+		documentType  string
+		debit, credit decimal.Decimal
+	}
+	var rows []ledgerRow
+	err = db.WithAdminTx(context.Background(), func(tx pgx.Tx) error {
+		r, qerr := tx.Query(context.Background(), `
+			SELECT document_type, debit, credit FROM customer_ledger_entries
+			WHERE customer_id = $1 AND document_id = $2 ORDER BY seq
+		`, f.customerID, result.ReturnID)
+		if qerr != nil {
+			return qerr
+		}
+		defer r.Close()
+		for r.Next() {
+			var row ledgerRow
+			if serr := r.Scan(&row.documentType, &row.debit, &row.credit); serr != nil {
+				return serr
+			}
+			rows = append(rows, row)
+		}
+		return r.Err()
+	})
+	if err != nil {
+		t.Fatalf("query ledger entries: %v", err)
+	}
+
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 ledger entries (return credit + refund debit) for a cash refund, got %d: %+v", len(rows), rows)
+	}
+	if rows[0].documentType != "RETURN" || !rows[0].credit.Equal(decimal.RequireFromString("12600.00")) || !rows[0].debit.IsZero() {
+		t.Fatalf("expected first entry to be the return credit, got %+v", rows[0])
+	}
+	if rows[1].documentType != "RETURN" || !rows[1].debit.Equal(decimal.RequireFromString("12600.00")) || !rows[1].credit.IsZero() {
+		t.Fatalf("expected second entry to be the cash refund debit, got %+v", rows[1])
+	}
+
+	balance, err := getBalance(db, f.customerID)
+	if err != nil {
+		t.Fatalf("read balance: %v", err)
+	}
+	if !balance.IsZero() {
+		t.Fatalf("a cash-refunded return must leave outstanding balance at zero, got %s", balance)
+	}
+}
+
 func TestPostReturn_PartialReturnThenExceedingRejected(t *testing.T) {
 	db := connectTest(t)
 	defer db.Close()

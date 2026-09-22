@@ -34,7 +34,7 @@ func NewService(db *dbctx.DB) *Service {
 type ReturnLineInput struct {
 	OriginalLineID    uuid.UUID
 	Quantity          decimal.Decimal
-	ConditionStatus   string // SELLABLE, DAMAGED, EXPIRED, QUARANTINE, OTHER
+	ConditionStatus   string     // SELLABLE, DAMAGED, EXPIRED, QUARANTINE, OTHER
 	RestockLocationID *uuid.UUID // required only when ConditionStatus != SELLABLE
 }
 
@@ -81,13 +81,13 @@ func (s *Service) PostReturn(ctx context.Context, tenantID, deviceID, userID uui
 		}
 
 		type preparedLine struct {
-			input           ReturnLineInput
-			original        *OriginalLine
-			refundTaxable   decimal.Decimal
-			taxByType       map[string]decimal.Decimal
-			refundTaxTotal  decimal.Decimal
-			refundAmount    decimal.Decimal
-			allocations     []BatchAllocation
+			input          ReturnLineInput
+			original       *OriginalLine
+			refundTaxable  decimal.Decimal
+			taxByType      map[string]decimal.Decimal
+			refundTaxTotal decimal.Decimal
+			refundAmount   decimal.Decimal
+			allocations    []BatchAllocation
 		}
 
 		var (
@@ -201,14 +201,32 @@ func (s *Service) PostReturn(ctx context.Context, tenantID, deviceID, userID uui
 			}
 		}
 
-		if req.RefundMethod == "CREDIT_NOTE" {
+		// Every return against a real customer belongs in their ledger, not
+		// only credit-note ones — the same 360°-visibility reasoning as a
+		// cash sale's invoice entry above. A CREDIT_NOTE genuinely reduces
+		// what they owe (credit only, no offsetting debit). A CASH/UPI
+		// refund never touches their balance (cash changes hands directly),
+		// but is still a real event a shop owner expects to see in that
+		// customer's history — posted as a self-cancelling credit+debit
+		// pair so it's visible with zero net balance impact.
+		if invoice.CustomerID != nil {
 			if _, err := customer.PostLedgerEntry(ctx, tx, tenantID, customer.LedgerEntry{
 				CustomerID: *invoice.CustomerID, DocumentType: "RETURN", DocumentID: header.ID,
 				Debit: decimal.Zero, Credit: grandTotal,
-				Description: fmt.Sprintf("Credit note for return %s", returnNumber),
-				DeviceID: &deviceID, CreatedByUserID: &userID,
+				Description: fmt.Sprintf("Return %s", returnNumber),
+				DeviceID:    &deviceID, CreatedByUserID: &userID,
 			}); err != nil {
-				return fmt.Errorf("post customer credit note: %w", err)
+				return fmt.Errorf("post customer return entry: %w", err)
+			}
+			if req.RefundMethod != "CREDIT_NOTE" {
+				if _, err := customer.PostLedgerEntry(ctx, tx, tenantID, customer.LedgerEntry{
+					CustomerID: *invoice.CustomerID, DocumentType: "RETURN", DocumentID: header.ID,
+					Debit: grandTotal, Credit: decimal.Zero,
+					Description: fmt.Sprintf("Refund paid via %s for return %s", req.RefundMethod, returnNumber),
+					DeviceID:    &deviceID, CreatedByUserID: &userID,
+				}); err != nil {
+					return fmt.Errorf("post customer refund entry: %w", err)
+				}
 			}
 		}
 

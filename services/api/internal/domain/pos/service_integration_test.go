@@ -207,6 +207,79 @@ func TestFinalizeInvoice_CashSale(t *testing.T) {
 	})
 }
 
+// TestFinalizeInvoice_CashSaleToRealCustomerAppearsInTheirLedger closes a
+// real gap reported live: a fully cash/UPI-paid sale to a named customer
+// never posted anything to customer_ledger_entries at all (only the
+// credit-tendered *portion* of a sale did), so that customer's ledger
+// screen silently omitted every cash purchase — a shop owner checking "what
+// has this customer bought from me" saw only their credit history, not a
+// complete 360° record. A cash sale must now show both the invoice (debit)
+// and its immediate payment (credit) — net zero balance impact, same as
+// before, but now visible.
+func TestFinalizeInvoice_CashSaleToRealCustomerAppearsInTheirLedger(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	f := seedFixture(t, db)
+	svc := pos.NewService(db)
+
+	req := pos.FinalizeRequest{
+		ClientTransactionID: uuid.New(),
+		LocationID:          f.locationID,
+		CustomerID:          &f.customerID,
+		Lines:               []pos.SaleLine{{ProductID: f.productID, Quantity: decimal.RequireFromString("3")}},
+		Tenders:             []pos.Tender{{Method: "CASH", Amount: decimal.RequireFromString("3780.00")}},
+	}
+	result, err := svc.FinalizeInvoice(context.Background(), f.tenantID, f.deviceID, f.userID, req)
+	if err != nil {
+		t.Fatalf("finalize: %v", err)
+	}
+
+	type ledgerRow struct {
+		documentType  string
+		debit, credit decimal.Decimal
+	}
+	var rows []ledgerRow
+	err = db.WithAdminTx(context.Background(), func(tx pgx.Tx) error {
+		r, err := tx.Query(context.Background(), `
+			SELECT document_type, debit, credit FROM customer_ledger_entries
+			WHERE customer_id = $1 AND document_id = $2 ORDER BY seq
+		`, f.customerID, result.InvoiceID)
+		if err != nil {
+			return err
+		}
+		defer r.Close()
+		for r.Next() {
+			var row ledgerRow
+			if err := r.Scan(&row.documentType, &row.debit, &row.credit); err != nil {
+				return err
+			}
+			rows = append(rows, row)
+		}
+		return r.Err()
+	})
+	if err != nil {
+		t.Fatalf("query ledger entries: %v", err)
+	}
+
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 ledger entries (invoice debit + payment credit) for a cash sale, got %d: %+v", len(rows), rows)
+	}
+	if rows[0].documentType != "INVOICE" || !rows[0].debit.Equal(decimal.RequireFromString("3780.00")) || !rows[0].credit.IsZero() {
+		t.Fatalf("expected first entry to be the full invoice debit, got %+v", rows[0])
+	}
+	if rows[1].documentType != "INVOICE" || !rows[1].credit.Equal(decimal.RequireFromString("3780.00")) || !rows[1].debit.IsZero() {
+		t.Fatalf("expected second entry to be the full payment credit, got %+v", rows[1])
+	}
+
+	balance, err := getOutstandingBalance(db, f.customerID)
+	if err != nil {
+		t.Fatalf("read balance: %v", err)
+	}
+	if !balance.IsZero() {
+		t.Fatalf("a fully cash-paid sale must leave outstanding balance at zero, got %s", balance)
+	}
+}
+
 func invoiceCustomer(t *testing.T, db *dbctx.DB, invoiceID uuid.UUID) (customerID *uuid.UUID, customerCode, name string) {
 	t.Helper()
 	err := db.WithAdminTx(context.Background(), func(tx pgx.Tx) error {

@@ -455,18 +455,44 @@ func (s *Service) FinalizeInvoice(ctx context.Context, tenantID, deviceID, userI
 			}
 		}
 
-		if creditAmount.GreaterThan(decimal.Zero) {
-			description := fmt.Sprintf("Credit sale %s", invoiceNumber)
-			if creditOverrideApplied {
-				description = fmt.Sprintf("Credit sale %s (credit limit override: %s)", invoiceNumber, req.CreditOverride.Reason)
+		// Every invoice against a real customer belongs in their ledger, not
+		// only the credit-tendered ones — a shop owner checking a customer's
+		// statement expects to see every sale to them, cash included, not a
+		// narrow AR-only view that makes fully-paid purchases invisible.
+		// Post the full invoice as a debit, then immediately offset whatever
+		// was actually collected at the counter (cash/UPI/bank) as a credit
+		// in the same entry batch — the net effect on OutstandingBalance is
+		// unchanged (still exactly creditAmount), but the itemized history
+		// now shows the real sale and its real payment instead of nothing.
+		// The Walking Customer (an anonymous shared bucket, never viewed as
+		// "a customer's ledger" by staff) accumulates these too, which is
+		// harmless — see customer.GetOrCreateWalkIn.
+		if req.CustomerID != nil {
+			description := fmt.Sprintf("Sale %s", invoiceNumber)
+			if creditAmount.GreaterThan(decimal.Zero) {
+				description = fmt.Sprintf("Credit sale %s", invoiceNumber)
+				if creditOverrideApplied {
+					description = fmt.Sprintf("Credit sale %s (credit limit override: %s)", invoiceNumber, req.CreditOverride.Reason)
+				}
 			}
 			if _, err := customer.PostLedgerEntry(ctx, tx, tenantID, customer.LedgerEntry{
 				CustomerID: *req.CustomerID, DocumentType: "INVOICE", DocumentID: header.ID,
-				Debit: creditAmount, Credit: decimal.Zero,
+				Debit: grandTotal, Credit: decimal.Zero,
 				Description: description,
 				DeviceID:    &deviceID, CreatedByUserID: &userID,
 			}); err != nil {
 				return fmt.Errorf("post customer ledger entry: %w", err)
+			}
+			paidAtSale := grandTotal.Sub(creditAmount)
+			if paidAtSale.GreaterThan(decimal.Zero) {
+				if _, err := customer.PostLedgerEntry(ctx, tx, tenantID, customer.LedgerEntry{
+					CustomerID: *req.CustomerID, DocumentType: "INVOICE", DocumentID: header.ID,
+					Debit: decimal.Zero, Credit: paidAtSale,
+					Description: fmt.Sprintf("Payment received at sale %s", invoiceNumber),
+					DeviceID:    &deviceID, CreatedByUserID: &userID,
+				}); err != nil {
+					return fmt.Errorf("post customer ledger payment entry: %w", err)
+				}
 			}
 		}
 

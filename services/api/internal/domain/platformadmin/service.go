@@ -18,6 +18,7 @@ import (
 
 	"github.com/andipatti/feedmate/services/api/internal/auth"
 	"github.com/andipatti/feedmate/services/api/internal/dbctx"
+	"github.com/andipatti/feedmate/services/api/internal/domain/identity"
 )
 
 var (
@@ -280,6 +281,86 @@ func (s *Service) ListErrorLogs(ctx context.Context, limit, offset int) ([]Error
 		return err
 	})
 	return out, err
+}
+
+func (s *Service) GetPlatformSettings(ctx context.Context) (*PlatformSettings, error) {
+	var out *PlatformSettings
+	err := s.db.WithAdminTx(ctx, func(tx pgx.Tx) error {
+		var err error
+		out, err = GetPlatformSettings(ctx, tx)
+		return err
+	})
+	return out, err
+}
+
+func (s *Service) UpdatePlatformSettings(ctx context.Context, appName, appTagline string, logoURL, primaryColor *string) error {
+	if appName == "" {
+		return fmt.Errorf("%w: app_name is required", ErrValidation)
+	}
+	return s.db.WithAdminTx(ctx, func(tx pgx.Tx) error {
+		return UpdatePlatformSettings(ctx, tx, appName, appTagline, logoURL, primaryColor)
+	})
+}
+
+// EffectiveBranding is what the app actually shows: a tenant's own override
+// for any field they've set, falling back field-by-field to the platform
+// default — the single source of truth replacing every hardcoded "FeedMate"
+// / "Andipatti Animal Feed System" string that used to live in the Flutter
+// source directly.
+type EffectiveBranding struct {
+	AppName      string
+	AppTagline   string
+	LogoURL      *string
+	PrimaryColor *string
+}
+
+// ResolveBranding is deliberately reachable with no authentication at all —
+// the login screen, by definition, has no access token yet. deviceUUID is
+// optional: nil (or an unrecognized/inactive device) just returns the
+// platform default, which is exactly the same "safe, always-available
+// fallback" role a hardcoded string used to play, except this one is real
+// data instead of a compile-time literal.
+func (s *Service) ResolveBranding(ctx context.Context, deviceUUID *uuid.UUID) (*EffectiveBranding, error) {
+	var out *EffectiveBranding
+	err := s.db.WithAdminTx(ctx, func(tx pgx.Tx) error {
+		defaults, err := GetPlatformSettings(ctx, tx)
+		if err != nil {
+			return err
+		}
+		out = &EffectiveBranding{AppName: defaults.AppName, AppTagline: defaults.AppTagline, LogoURL: defaults.LogoURL, PrimaryColor: defaults.PrimaryColor}
+
+		if deviceUUID == nil {
+			return nil
+		}
+		device, err := identity.ResolveDeviceByUUID(ctx, tx, *deviceUUID)
+		if err != nil {
+			if errors.Is(err, identity.ErrNotFound) {
+				return nil
+			}
+			return err
+		}
+		override, err := GetTenantBrandingOverride(ctx, tx, device.TenantID)
+		if err != nil {
+			if errors.Is(err, ErrNotFound) {
+				return nil
+			}
+			return err
+		}
+		if override.AppDisplayName != nil && *override.AppDisplayName != "" {
+			out.AppName = *override.AppDisplayName
+		}
+		if override.LogoURL != nil && *override.LogoURL != "" {
+			out.LogoURL = override.LogoURL
+		}
+		if override.PrimaryColor != nil && *override.PrimaryColor != "" {
+			out.PrimaryColor = override.PrimaryColor
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // RecordError persists one CodeInternal response's detail (see

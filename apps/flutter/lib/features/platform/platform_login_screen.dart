@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/api_error.dart';
+import '../../core/branding_provider.dart';
 import '../../core/theme/app_colors.dart';
 import 'platform_api_client.dart';
 import 'platform_shell.dart';
@@ -74,9 +75,9 @@ class _PlatformLoginScreenState extends State<PlatformLoginScreen> {
                   style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900, color: Colors.white),
                 ),
                 const SizedBox(height: 6),
-                const Text(
-                  'FeedMate — Super Admin Control Plane',
-                  style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
+                Text(
+                  '${context.watch<BrandingProvider>().appName} — Super Admin Control Plane',
+                  style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
                 ),
                 const SizedBox(height: 28),
                 Container(

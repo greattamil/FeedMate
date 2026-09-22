@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 
 import 'core/api_client.dart';
 import 'core/auth_session.dart';
+import 'core/branding_provider.dart';
 import 'core/in_memory_local_db.dart';
 import 'core/local_db.dart';
 import 'core/local_db_sqlcipher.dart';
@@ -82,6 +83,9 @@ class FeedMateApp extends StatelessWidget {
         ),
         ChangeNotifierProvider<CartModel>(create: (_) => CartModel()),
         ChangeNotifierProvider<PlatformApiClient>(create: (_) => PlatformApiClient(baseUrl: apiBaseUrl)),
+        ChangeNotifierProvider<BrandingProvider>(
+          create: (_) => BrandingProvider(client: apiClient, storage: storage)..refresh(),
+        ),
         if (localDb != null) ...[
           Provider<LocalDatabase>.value(value: localDb),
           Provider<ProductRepository>(create: (_) => ProductRepository(client: apiClient, localDb: localDb)),
@@ -89,7 +93,7 @@ class FeedMateApp extends StatelessWidget {
         ],
       ],
       child: MaterialApp(
-        title: 'Andipatti Animal Feed System',
+        onGenerateTitle: (context) => context.watch<BrandingProvider>().appName,
         theme: AppTheme.lightTheme,
         home: localDb != null ? const _ConnectivitySyncGate(child: _SessionGate()) : const _SessionGate(),
       ),

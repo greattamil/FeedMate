@@ -10,6 +10,7 @@ import 'package:provider/provider.dart';
 
 import 'package:feedmate_app/core/api_client.dart';
 import 'package:feedmate_app/core/auth_session.dart';
+import 'package:feedmate_app/core/branding_provider.dart';
 import 'package:feedmate_app/core/local_db.dart';
 import 'package:feedmate_app/core/secure_storage.dart';
 import 'package:feedmate_app/features/auditlog/audit_log_screen.dart';
@@ -69,6 +70,7 @@ Widget _wrap({required AuthSession session}) {
     providers: [
       ChangeNotifierProvider<AuthSession>.value(value: session),
       Provider<ApiClient>.value(value: session.apiClient),
+      ChangeNotifierProvider<BrandingProvider>(create: (_) => BrandingProvider(client: session.apiClient, storage: session.storage)),
       Provider<LocalDatabase>.value(value: localDb),
     ],
     child: MaterialApp(home: HomeDashboardScreen(onOpenPos: () {})),

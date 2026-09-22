@@ -9,6 +9,9 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:provider/provider.dart';
 
+import 'package:feedmate_app/core/api_client.dart';
+import 'package:feedmate_app/core/branding_provider.dart';
+import 'package:feedmate_app/core/secure_storage.dart';
 import 'package:feedmate_app/features/platform/platform_api_client.dart';
 import 'package:feedmate_app/features/platform/platform_login_screen.dart';
 import 'package:feedmate_app/features/platform/platform_shell.dart';
@@ -16,6 +19,7 @@ import 'package:feedmate_app/features/platform/tenant_list_screen.dart';
 import 'package:feedmate_app/features/platform/tenant_detail_screen.dart';
 import 'package:feedmate_app/features/platform/platform_audit_log_screen.dart';
 import 'package:feedmate_app/features/platform/platform_error_log_screen.dart';
+import 'package:feedmate_app/features/platform/platform_settings_screen.dart';
 
 http.Response _jsonOk(Map<String, dynamic> body) =>
     http.Response(jsonEncode(body), 200, headers: {'content-type': 'application/json; charset=utf-8'});
@@ -25,8 +29,13 @@ Widget _wrap({required http.Client httpClient, required Widget child, PlatformAp
   if (loggedIn && client == null) {
     resolvedClient.seedTokensForTesting(accessToken: 'test-access-token', refreshToken: 'test-refresh-token');
   }
-  return ChangeNotifierProvider<PlatformApiClient>.value(
-    value: resolvedClient,
+  final storage = SecureStorage(store: InMemoryKeyValueStore());
+  final apiClient = ApiClient(baseUrl: 'http://test.invalid', storage: storage, httpClient: httpClient);
+  return MultiProvider(
+    providers: [
+      ChangeNotifierProvider<PlatformApiClient>.value(value: resolvedClient),
+      ChangeNotifierProvider<BrandingProvider>(create: (_) => BrandingProvider(client: apiClient, storage: storage)),
+    ],
     child: MaterialApp(home: Scaffold(backgroundColor: const Color(0xFF0F172A), body: child)),
   );
 }
@@ -308,6 +317,69 @@ void main() {
     expect(find.text('500'), findsOneWidget);
     expect(find.textContaining('failed to post GRN'), findsOneWidget);
     expect(find.textContaining('11111111-1111-1111-1111-111111111111'), findsOneWidget);
+  });
+
+  testWidgets('platform settings loads, edits, and saves the global default branding', (tester) async {
+    var appName = 'FeedMate';
+    var tagline = 'Multi-Tenant Retail & Wholesale POS';
+    Map<String, dynamic>? putBody;
+
+    final client = MockClient((request) async {
+      if (request.method == 'PUT' && request.url.path == '/api/v1/platform/settings') {
+        putBody = jsonDecode(request.body) as Map<String, dynamic>;
+        appName = putBody!['app_name'] as String;
+        tagline = putBody!['app_tagline'] as String;
+        return http.Response('', 204);
+      }
+      if (request.url.path == '/api/v1/platform/settings') {
+        return _jsonOk({'app_name': appName, 'app_tagline': tagline});
+      }
+      if (request.url.path == '/api/v1/branding') {
+        return _jsonOk({'app_name': appName, 'app_tagline': tagline});
+      }
+      return http.Response('not found', 404);
+    });
+
+    await tester.pumpWidget(_wrap(httpClient: client, child: const PlatformSettingsScreen()));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('platform_settings_app_name_field')), findsOneWidget);
+    final appNameField = tester.widget<TextFormField>(find.byKey(const Key('platform_settings_app_name_field')));
+    expect(appNameField.controller!.text, 'FeedMate');
+
+    await tester.enterText(find.byKey(const Key('platform_settings_app_name_field')), 'Client Feed Systems');
+    await tester.enterText(find.byKey(const Key('platform_settings_tagline_field')), 'New Tagline');
+    await tester.tap(find.byKey(const Key('platform_settings_save_button')));
+    await tester.pumpAndSettle();
+
+    expect(putBody, isNotNull);
+    expect(putBody!['app_name'], 'Client Feed Systems');
+    expect(putBody!['app_tagline'], 'New Tagline');
+    expect(find.textContaining('Platform default branding updated'), findsOneWidget);
+  });
+
+  testWidgets('platform settings rejects an empty app name client-side', (tester) async {
+    var putCallCount = 0;
+    final client = MockClient((request) async {
+      if (request.url.path == '/api/v1/platform/settings' && request.method == 'GET') {
+        return _jsonOk({'app_name': 'FeedMate', 'app_tagline': 'Tagline'});
+      }
+      if (request.url.path == '/api/v1/platform/settings' && request.method == 'PUT') {
+        putCallCount++;
+        return http.Response('', 204);
+      }
+      return http.Response('not found', 404);
+    });
+
+    await tester.pumpWidget(_wrap(httpClient: client, child: const PlatformSettingsScreen()));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byKey(const Key('platform_settings_app_name_field')), '');
+    await tester.tap(find.byKey(const Key('platform_settings_save_button')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Required'), findsOneWidget);
+    expect(putCallCount, 0);
   });
 
   testWidgets('logging out from the shell returns to the platform login screen', (tester) async {

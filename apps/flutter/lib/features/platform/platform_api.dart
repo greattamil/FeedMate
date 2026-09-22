@@ -235,4 +235,46 @@ class PlatformApi {
     final response = await client.getAuthed('/api/v1/platform/error-logs?limit=$limit&offset=$offset');
     return (response['entries'] as List<dynamic>).map((e) => PlatformErrorLogEntry.fromJson(e as Map<String, dynamic>)).toList();
   }
+
+  Future<PlatformSettings> getPlatformSettings() async {
+    final response = await client.getAuthed('/api/v1/platform/settings');
+    return PlatformSettings.fromJson(response);
+  }
+
+  Future<void> updatePlatformSettings({
+    required String appName,
+    required String appTagline,
+    String? logoUrl,
+    String? primaryColor,
+  }) async {
+    await client.putAuthed('/api/v1/platform/settings', {
+      'app_name': appName,
+      'app_tagline': appTagline,
+      if (logoUrl != null) 'logo_url': logoUrl,
+      if (primaryColor != null) 'primary_color': primaryColor,
+    });
+  }
+}
+
+/// The platform-wide default branding — the single source of truth every
+/// tenant's own app name/tagline/logo/color falls back to when they haven't
+/// set their own override (see TenantDetail.appDisplayName etc.). Editing
+/// this is what used to require changing a hardcoded string in the Flutter
+/// source and shipping a new build.
+class PlatformSettings {
+  final String appName;
+  final String appTagline;
+  final String? logoUrl;
+  final String? primaryColor;
+
+  PlatformSettings({required this.appName, required this.appTagline, this.logoUrl, this.primaryColor});
+
+  factory PlatformSettings.fromJson(Map<String, dynamic> json) {
+    return PlatformSettings(
+      appName: json['app_name'] as String,
+      appTagline: json['app_tagline'] as String,
+      logoUrl: json['logo_url'] as String?,
+      primaryColor: json['primary_color'] as String?,
+    );
+  }
 }

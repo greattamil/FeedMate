@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import '../../core/api_client.dart';
 import '../../core/api_error.dart';
 import '../../core/auth_session.dart';
+import '../../core/branding_provider.dart';
 import '../../core/local_db.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_decorations.dart';
@@ -169,6 +170,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   @override
   Widget build(BuildContext context) {
     final session = context.watch<AuthSession>();
+    final branding = context.watch<BrandingProvider>();
     final todayStr = _dateFormatter.format(DateTime.now());
 
     return Scaffold(
@@ -188,8 +190,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('FeedMate', style: AppTypography.headline),
-                Text('Andipatti Animal Feed System', style: AppTypography.caption),
+                Text(branding.appName, style: AppTypography.headline),
+                Text(branding.appTagline, style: AppTypography.caption),
               ],
             ),
           ],
@@ -231,7 +233,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           children: [
             // 1. Welcome & Shift Banner
-            _buildWelcomeBanner(session, todayStr),
+            _buildWelcomeBanner(session, todayStr, branding),
             const SizedBox(height: 16),
 
             // 2. Urgent Alerts (if any)
@@ -264,7 +266,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     );
   }
 
-  Widget _buildWelcomeBanner(AuthSession session, String todayStr) {
+  Widget _buildWelcomeBanner(AuthSession session, String todayStr, BrandingProvider branding) {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -293,7 +295,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'FeedMate POS • Andipatti Terminal',
+                      '${branding.appName} POS Terminal',
                       style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 13, fontWeight: FontWeight.w500),
                     ),
                   ],

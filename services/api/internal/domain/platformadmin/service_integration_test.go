@@ -306,6 +306,115 @@ func TestListTenants_IncludesNewlyCreatedOne(t *testing.T) {
 	}
 }
 
+func TestBranding_FallsBackToPlatformDefaultThenTenantOverride(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	svc := platformadmin.NewService(db, "test_signing_key", 15*time.Minute, 30*24*time.Hour, 4)
+
+	// No device_uuid at all — the login screen's very first paint, before
+	// any device identity is even relevant — must still resolve to
+	// *something* sane (the seeded platform default), never an error.
+	branding, err := svc.ResolveBranding(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("resolve branding with nil device: %v", err)
+	}
+	if branding.AppName == "" {
+		t.Fatal("expected a non-empty platform default app name")
+	}
+	originalAppName := branding.AppName
+
+	// An unrecognized device_uuid must fall back the same way, not error.
+	randomDevice := uuid.New()
+	branding, err = svc.ResolveBranding(context.Background(), &randomDevice)
+	if err != nil {
+		t.Fatalf("resolve branding with unknown device: %v", err)
+	}
+	if branding.AppName != originalAppName {
+		t.Fatalf("expected platform default for an unknown device, got %q", branding.AppName)
+	}
+
+	// A real device belonging to a tenant with no branding override set
+	// must also fall back to the platform default.
+	suffix := uuid.NewString()[:8]
+	tenantID, _, err := svc.CreateTenant(context.Background(), newTestInput(suffix))
+	if err != nil {
+		t.Fatalf("create tenant: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.WithAdminTx(context.Background(), func(tx pgx.Tx) error {
+			_, err := tx.Exec(context.Background(), `DELETE FROM tenants WHERE id = $1`, tenantID)
+			return err
+		})
+	})
+	deviceUUID := uuid.New()
+	if err := db.WithAdminTx(context.Background(), func(tx pgx.Tx) error {
+		_, err := tx.Exec(context.Background(), `
+			INSERT INTO devices (tenant_id, device_uuid, display_name, platform, status) VALUES ($1,$2,'Test Device','ANDROID','ACTIVE')
+		`, tenantID, deviceUUID)
+		return err
+	}); err != nil {
+		t.Fatalf("seed device: %v", err)
+	}
+
+	branding, err = svc.ResolveBranding(context.Background(), &deviceUUID)
+	if err != nil {
+		t.Fatalf("resolve branding for a tenant with no override: %v", err)
+	}
+	if branding.AppName != originalAppName {
+		t.Fatalf("expected platform default when tenant has no override, got %q", branding.AppName)
+	}
+
+	// Once the tenant sets its own app_display_name, that device's branding
+	// must reflect it — this is the actual whitelabel behavior.
+	customName := "Client's Own Feed Store"
+	if err := svc.SetTenantBranding(context.Background(), tenantID, &customName, nil, nil); err != nil {
+		t.Fatalf("set tenant branding: %v", err)
+	}
+	branding, err = svc.ResolveBranding(context.Background(), &deviceUUID)
+	if err != nil {
+		t.Fatalf("resolve branding after override: %v", err)
+	}
+	if branding.AppName != customName {
+		t.Fatalf("expected tenant override %q, got %q", customName, branding.AppName)
+	}
+	// The tagline was never overridden — it must still come from the
+	// platform default, proving the merge is field-by-field, not all-or-nothing.
+	if branding.AppTagline == "" {
+		t.Fatal("expected the platform default tagline to still apply")
+	}
+}
+
+func TestPlatformSettings_GetAndUpdate(t *testing.T) {
+	db := connectTest(t)
+	defer db.Close()
+	svc := platformadmin.NewService(db, "test_signing_key", 15*time.Minute, 30*24*time.Hour, 4)
+
+	original, err := svc.GetPlatformSettings(context.Background())
+	if err != nil {
+		t.Fatalf("get platform settings: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = svc.UpdatePlatformSettings(context.Background(), original.AppName, original.AppTagline, original.LogoURL, original.PrimaryColor)
+	})
+
+	newTagline := "Integration Test Tagline " + uuid.NewString()[:8]
+	if err := svc.UpdatePlatformSettings(context.Background(), "Test App Name", newTagline, nil, nil); err != nil {
+		t.Fatalf("update platform settings: %v", err)
+	}
+
+	updated, err := svc.GetPlatformSettings(context.Background())
+	if err != nil {
+		t.Fatalf("get platform settings after update: %v", err)
+	}
+	if updated.AppName != "Test App Name" || updated.AppTagline != newTagline {
+		t.Fatalf("expected updated settings, got %+v", updated)
+	}
+
+	if err := svc.UpdatePlatformSettings(context.Background(), "", "tagline", nil, nil); !errors.Is(err, platformadmin.ErrValidation) {
+		t.Fatalf("expected ErrValidation for empty app_name, got: %v", err)
+	}
+}
+
 func TestErrorLogs_RecordAndList(t *testing.T) {
 	db := connectTest(t)
 	defer db.Close()

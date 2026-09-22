@@ -402,3 +402,77 @@ func (h *PlatformHandlers) ListErrorLogs(w http.ResponseWriter, r *http.Request)
 	}
 	WriteJSON(w, http.StatusOK, map[string]interface{}{"entries": out})
 }
+
+func brandingJSON(b *platformadmin.EffectiveBranding) map[string]interface{} {
+	out := map[string]interface{}{"app_name": b.AppName, "app_tagline": b.AppTagline}
+	if b.LogoURL != nil {
+		out["logo_url"] = *b.LogoURL
+	}
+	if b.PrimaryColor != nil {
+		out["primary_color"] = *b.PrimaryColor
+	}
+	return out
+}
+
+// GetBranding is deliberately unauthenticated — the login screen has no
+// access token yet, so it can only identify itself by device_uuid (which
+// may be absent, unrecognized, or belong to a tenant with no branding
+// override; every one of those cases still returns the platform default,
+// never an error) — see platformadmin.Service.ResolveBranding's doc comment.
+func (h *PlatformHandlers) GetBranding(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	var deviceUUID *uuid.UUID
+	if v := r.URL.Query().Get("device_uuid"); v != "" {
+		if id, err := uuid.Parse(v); err == nil {
+			deviceUUID = &id
+		}
+	}
+	branding, err := h.Platform.ResolveBranding(r.Context(), deviceUUID)
+	if err != nil {
+		WriteError(w, reqID, CodeInternal, "failed to resolve branding: "+err.Error())
+		return
+	}
+	WriteJSON(w, http.StatusOK, brandingJSON(branding))
+}
+
+func (h *PlatformHandlers) GetPlatformSettings(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	settings, err := h.Platform.GetPlatformSettings(r.Context())
+	if err != nil {
+		WriteError(w, reqID, CodeInternal, "failed to fetch platform settings: "+err.Error())
+		return
+	}
+	out := map[string]interface{}{"app_name": settings.AppName, "app_tagline": settings.AppTagline}
+	if settings.LogoURL != nil {
+		out["logo_url"] = *settings.LogoURL
+	}
+	if settings.PrimaryColor != nil {
+		out["primary_color"] = *settings.PrimaryColor
+	}
+	WriteJSON(w, http.StatusOK, out)
+}
+
+type updatePlatformSettingsRequest struct {
+	AppName      string  `json:"app_name"`
+	AppTagline   string  `json:"app_tagline"`
+	LogoURL      *string `json:"logo_url,omitempty"`
+	PrimaryColor *string `json:"primary_color,omitempty"`
+}
+
+func (h *PlatformHandlers) UpdatePlatformSettings(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	var req updatePlatformSettingsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid request body")
+		return
+	}
+	if err := h.Platform.UpdatePlatformSettings(r.Context(), req.AppName, req.AppTagline, req.LogoURL, req.PrimaryColor); err != nil {
+		if errors.Is(err, platformadmin.ErrValidation) {
+			WriteError(w, reqID, CodeValidation, err.Error())
+			return
+		}
+		WriteError(w, reqID, CodeInternal, "failed to update platform settings: "+err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

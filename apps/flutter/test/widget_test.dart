@@ -11,6 +11,7 @@ import 'package:provider/provider.dart';
 
 import 'package:feedmate_app/core/api_client.dart';
 import 'package:feedmate_app/core/auth_session.dart';
+import 'package:feedmate_app/core/branding_provider.dart';
 import 'package:feedmate_app/core/local_db.dart';
 import 'package:feedmate_app/core/secure_storage.dart';
 import 'package:feedmate_app/core/sync_service.dart';
@@ -38,6 +39,7 @@ Widget _wrapWithProviders({
         create: (_) => AuthSession(apiClient: apiClient, storage: storage),
       ),
       ChangeNotifierProvider<CartModel>(create: (_) => CartModel()),
+      ChangeNotifierProvider<BrandingProvider>(create: (_) => BrandingProvider(client: apiClient, storage: storage)),
       Provider<LocalDatabase>.value(value: db),
       Provider<ProductRepository>(create: (_) => ProductRepository(client: apiClient, localDb: db)),
       Provider<SyncService>(create: (_) => SyncService(client: apiClient, localDb: db)),
@@ -146,6 +148,7 @@ void main() {
         Provider<ApiClient>.value(value: apiClient),
         ChangeNotifierProvider<AuthSession>(create: (_) => AuthSession(apiClient: apiClient, storage: storage)),
         ChangeNotifierProvider<CartModel>(create: (_) => CartModel()),
+        ChangeNotifierProvider<BrandingProvider>(create: (_) => BrandingProvider(client: apiClient, storage: storage)),
         Provider<LocalDatabase>.value(value: localDb),
         Provider<ProductRepository>(create: (_) => ProductRepository(client: apiClient, localDb: localDb)),
         Provider<SyncService>(create: (_) => SyncService(client: apiClient, localDb: localDb)),
@@ -195,6 +198,7 @@ void main() {
         Provider<ApiClient>.value(value: apiClient),
         ChangeNotifierProvider<AuthSession>(create: (_) => AuthSession(apiClient: apiClient, storage: storage)),
         ChangeNotifierProvider<CartModel>.value(value: cart),
+        ChangeNotifierProvider<BrandingProvider>(create: (_) => BrandingProvider(client: apiClient, storage: storage)),
         Provider<LocalDatabase>.value(value: localDb),
         Provider<ProductRepository>(create: (_) => ProductRepository(client: apiClient, localDb: localDb)),
         Provider<SyncService>(create: (_) => SyncService(client: apiClient, localDb: localDb)),

@@ -368,3 +368,50 @@ func InsertErrorLog(ctx context.Context, tx pgx.Tx, requestID *uuid.UUID, status
 	_, err := tx.Exec(ctx, `INSERT INTO error_logs (request_id, status_code, message) VALUES ($1,$2,$3)`, requestID, statusCode, message)
 	return err
 }
+
+// PlatformSettings is the single global row of default branding — the one
+// place "FeedMate" / a tagline / a logo / a color live as data instead of
+// being hardcoded into the Flutter source, per that codebase-wide sweep.
+type PlatformSettings struct {
+	AppName      string
+	AppTagline   string
+	LogoURL      *string
+	PrimaryColor *string
+}
+
+func GetPlatformSettings(ctx context.Context, tx pgx.Tx) (*PlatformSettings, error) {
+	var s PlatformSettings
+	err := tx.QueryRow(ctx, `SELECT app_name, app_tagline, logo_url, primary_color FROM platform_settings WHERE id = 1`).
+		Scan(&s.AppName, &s.AppTagline, &s.LogoURL, &s.PrimaryColor)
+	return &s, err
+}
+
+func UpdatePlatformSettings(ctx context.Context, tx pgx.Tx, appName, appTagline string, logoURL, primaryColor *string) error {
+	_, err := tx.Exec(ctx, `
+		UPDATE platform_settings SET app_name = $1, app_tagline = $2, logo_url = $3, primary_color = $4, updated_at = now() WHERE id = 1
+	`, appName, appTagline, logoURL, primaryColor)
+	return err
+}
+
+// TenantBrandingOverride is just the three whitelabel fields — a lean
+// projection of GetTenant used by the branding-resolution path, which runs
+// on every app cold start and shouldn't pay for the feature-map/user-count
+// queries GetTenant also does.
+type TenantBrandingOverride struct {
+	AppDisplayName *string
+	LogoURL        *string
+	PrimaryColor   *string
+}
+
+func GetTenantBrandingOverride(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) (*TenantBrandingOverride, error) {
+	var o TenantBrandingOverride
+	err := tx.QueryRow(ctx, `SELECT app_display_name, logo_url, primary_color FROM tenants WHERE id = $1`, tenantID).
+		Scan(&o.AppDisplayName, &o.LogoURL, &o.PrimaryColor)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &o, nil
+}

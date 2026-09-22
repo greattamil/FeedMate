@@ -52,6 +52,13 @@ class ApiClient {
     return _decodeOrThrow(response);
   }
 
+  /// Same as [postUnauthed] but for a GET — e.g. resolving branding (app
+  /// name/logo/color) on the login screen, before any token exists.
+  Future<Map<String, dynamic>> getUnauthed(String path) async {
+    final response = await _send((_) => _http.get(_uri(path)), '');
+    return _decodeOrThrow(response);
+  }
+
   Future<Map<String, dynamic>> refresh({
     required String tenantId,
     required String refreshToken,

@@ -6,6 +6,7 @@ import 'platform_api_client.dart';
 import 'platform_audit_log_screen.dart';
 import 'platform_error_log_screen.dart';
 import 'platform_login_screen.dart';
+import 'platform_settings_screen.dart';
 import 'tenant_list_screen.dart';
 
 /// The super-admin shell: a bottom-nav switcher between Tenants, Audit Log,
@@ -25,6 +26,7 @@ class _PlatformShellState extends State<PlatformShell> {
     TenantListScreen(),
     PlatformAuditLogScreen(),
     PlatformErrorLogScreen(),
+    PlatformSettingsScreen(),
   ];
 
   Future<void> _logout() async {
@@ -66,6 +68,7 @@ class _PlatformShellState extends State<PlatformShell> {
           NavigationDestination(icon: Icon(Icons.storefront_rounded, color: Color(0xFF94A3B8)), selectedIcon: Icon(Icons.storefront_rounded, color: Colors.white), label: 'Tenants'),
           NavigationDestination(icon: Icon(Icons.history_rounded, color: Color(0xFF94A3B8)), selectedIcon: Icon(Icons.history_rounded, color: Colors.white), label: 'Audit Log'),
           NavigationDestination(icon: Icon(Icons.bug_report_rounded, color: Color(0xFF94A3B8)), selectedIcon: Icon(Icons.bug_report_rounded, color: Colors.white), label: 'Error Log'),
+          NavigationDestination(icon: Icon(Icons.settings_outlined, color: Color(0xFF94A3B8)), selectedIcon: Icon(Icons.settings_rounded, color: Colors.white), label: 'Settings'),
         ],
       ),
     );

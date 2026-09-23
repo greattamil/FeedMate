@@ -16,6 +16,11 @@ type Config struct {
 
 	DatabaseURL      string
 	DatabaseAdminURL string
+	// DBPoolMaxConns/DBAdminPoolMaxConns bound the two connection pools —
+	// see dbctx.PoolConfig's doc comment for why these must be sized to the
+	// database's actual connection budget, not the API host's CPU count.
+	DBPoolMaxConns      int32
+	DBAdminPoolMaxConns int32
 
 	RedisURL string
 
@@ -41,6 +46,8 @@ func Load() (Config, error) {
 		HTTPAddr:             resolveHTTPAddr(),
 		DatabaseURL:          os.Getenv("DATABASE_URL"),
 		DatabaseAdminURL:     os.Getenv("DATABASE_ADMIN_URL"),
+		DBPoolMaxConns:       int32(getInt("DB_POOL_MAX_CONNS", 8)),
+		DBAdminPoolMaxConns:  int32(getInt("DB_ADMIN_POOL_MAX_CONNS", 3)),
 		RedisURL:             os.Getenv("REDIS_URL"),
 		JWTSigningKey:        os.Getenv("JWT_SIGNING_KEY"),
 		AccessTokenTTL:       getDuration("ACCESS_TOKEN_TTL", 15*time.Minute),

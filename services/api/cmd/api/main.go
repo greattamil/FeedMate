@@ -50,7 +50,10 @@ func main() {
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	db, err := dbctx.Connect(ctx, cfg.DatabaseURL, cfg.DatabaseAdminURL)
+	db, err := dbctx.ConnectWithPoolConfig(ctx, cfg.DatabaseURL, cfg.DatabaseAdminURL, dbctx.PoolConfig{
+		AppUserMaxConns: cfg.DBPoolMaxConns,
+		AdminMaxConns:   cfg.DBAdminPoolMaxConns,
+	})
 	cancel()
 	if err != nil {
 		slog.Error("database connection failed", "error", err)

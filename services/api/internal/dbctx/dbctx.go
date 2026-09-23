@@ -31,12 +31,41 @@ type DB struct {
 	AdminPool *pgxpool.Pool
 }
 
+// PoolConfig caps how many connections each of the two pools may open.
+// pgxpool defaults MaxConns to 4x the host's CPU count when unset, which on
+// a 4-core host is 16 connections *per pool* — 32 total between Pool and
+// AdminPool, comfortably exceeding a small managed Postgres instance's
+// connection budget (Aiven's cheapest tier caps at 20, several of which
+// Aiven's own internal processes already hold) on a single API instance
+// with no other client connected. Callers must size these to the actual
+// database's max_connections, leaving headroom for direct psql access,
+// the migrate tool, and the provider's own overhead.
+type PoolConfig struct {
+	// AppUserMaxConns bounds the pool used for every normal request.
+	AppUserMaxConns int32
+	// AdminMaxConns bounds the pool used only for the narrow, rare
+	// cross-tenant operations WithAdminTx performs — it needs far less
+	// headroom than the main traffic pool.
+	AdminMaxConns int32
+}
+
+// DefaultPoolConfig is deliberately conservative rather than derived from
+// the host's CPU count, since the constraint here is the database's
+// connection budget, not the API host's compute.
+func DefaultPoolConfig() PoolConfig {
+	return PoolConfig{AppUserMaxConns: 8, AdminMaxConns: 3}
+}
+
 func Connect(ctx context.Context, appUserURL, adminURL string) (*DB, error) {
-	pool, err := newPool(ctx, appUserURL)
+	return ConnectWithPoolConfig(ctx, appUserURL, adminURL, DefaultPoolConfig())
+}
+
+func ConnectWithPoolConfig(ctx context.Context, appUserURL, adminURL string, cfg PoolConfig) (*DB, error) {
+	pool, err := newPool(ctx, appUserURL, cfg.AppUserMaxConns)
 	if err != nil {
 		return nil, fmt.Errorf("connect app_user pool: %w", err)
 	}
-	adminPool, err := newPool(ctx, adminURL)
+	adminPool, err := newPool(ctx, adminURL, cfg.AdminMaxConns)
 	if err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("connect app_admin pool: %w", err)
@@ -44,10 +73,13 @@ func Connect(ctx context.Context, appUserURL, adminURL string) (*DB, error) {
 	return &DB{Pool: pool, AdminPool: adminPool}, nil
 }
 
-func newPool(ctx context.Context, url string) (*pgxpool.Pool, error) {
+func newPool(ctx context.Context, url string, maxConns int32) (*pgxpool.Pool, error) {
 	poolCfg, err := pgxpool.ParseConfig(url)
 	if err != nil {
 		return nil, fmt.Errorf("parse database url: %w", err)
+	}
+	if maxConns > 0 {
+		poolCfg.MaxConns = maxConns
 	}
 	// Register shopspring/decimal <-> PostgreSQL NUMERIC codec on every
 	// connection so money/quantity values round-trip as decimal.Decimal —

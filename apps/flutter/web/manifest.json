@@ -1,11 +1,11 @@
 {
-    "name": "feedmate_app",
-    "short_name": "feedmate_app",
+    "name": "FeedMate",
+    "short_name": "FeedMate",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#0D9488",
+    "theme_color": "#0D9488",
+    "description": "FeedMate — Multi-Tenant Retail & Wholesale POS for animal feed stores.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

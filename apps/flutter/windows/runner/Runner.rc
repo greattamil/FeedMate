@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "com.andipatti" "\0"
-            VALUE "FileDescription", "feedmate_app" "\0"
+            VALUE "FileDescription", "FeedMate - Animal Feed Management" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "feedmate_app" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 com.andipatti. All rights reserved." "\0"
             VALUE "OriginalFilename", "feedmate_app.exe" "\0"
-            VALUE "ProductName", "feedmate_app" "\0"
+            VALUE "ProductName", "FeedMate" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

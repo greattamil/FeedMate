@@ -144,7 +144,12 @@ void main() {
     // second route without popping the first would leave it stacked
     // underneath, making the dashboard's own cards unreachable.
     for (final entry in destinations.entries) {
-      await _scrollToManageSection(tester);
+      // Scroll to the card itself, not just the section header: the grid's
+      // taller icon-over-label tiles mean a card several rows into the
+      // MANAGE section can still sit below the fold even once the header
+      // is visible.
+      await tester.dragUntilVisible(find.text(entry.key), find.byType(Scrollable).first, const Offset(0, -300));
+      await tester.pumpAndSettle();
 
       await tester.tap(find.text(entry.key));
       await tester.pumpAndSettle();

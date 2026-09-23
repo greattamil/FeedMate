@@ -9,6 +9,7 @@ import '../../core/api_error.dart';
 import '../../core/auth_session.dart';
 import '../../core/branding_provider.dart';
 import '../../core/local_db.dart';
+import '../../core/responsive.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_decorations.dart';
 import '../../core/theme/app_typography.dart';
@@ -860,12 +861,25 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     return _buildActionGrid(actions);
   }
 
+  /// A modern icon-over-label tile grid (the pattern used by Google Pay/
+  /// PhonePe-style service launchers), replacing an older icon-left/text-
+  /// right row layout that squeezed the title into roughly half a narrow
+  /// phone's width — the actual cause of titles/subtitles wrapping badly
+  /// on mobile. Giving the label the tile's full width fixes that
+  /// directly, and the subtitle (redundant with the title on a small
+  /// screen, and the thing most prone to overflow) only shows on tablet
+  /// and desktop, where there's room for it to add real information.
   Widget _buildActionGrid(List<_ActionItem> actions) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
-        final crossAxisCount = width >= 720 ? 4 : 2;
-        final double childAspectRatio = width >= 720 ? 1.35 : 1.15;
+        final isMobile = width < ResponsiveBreakpoints.tabletMin;
+        final crossAxisCount = width >= ResponsiveBreakpoints.desktopMin
+            ? 4
+            : width >= ResponsiveBreakpoints.tabletMin
+                ? 3
+                : 2;
+        final childAspectRatio = isMobile ? 1.02 : 1.18;
 
         return GridView.builder(
           shrinkWrap: true,
@@ -879,6 +893,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
           ),
           itemBuilder: (context, index) {
             final a = actions[index];
+            final accentColor = a.gradient is LinearGradient ? (a.gradient as LinearGradient).colors.first : AppColors.primary;
             // The tile's solid background lives on Material itself, not on
             // an opaque child Container: InkWell paints its splash as one
             // of the ancestor Material's own ink features, which render
@@ -900,8 +915,10 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                   borderRadius: AppDecorations.borderRadiusMd,
                   hoverColor: AppColors.surfaceHover,
                   child: Padding(
-                    padding: const EdgeInsets.all(14),
-                    child: Row(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Container(
                           padding: const EdgeInsets.all(10),
@@ -910,10 +927,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                             borderRadius: BorderRadius.circular(12),
                             boxShadow: [
                               BoxShadow(
-                                color: (a.gradient is LinearGradient
-                                        ? (a.gradient as LinearGradient).colors.first
-                                        : AppColors.primary)
-                                    .withValues(alpha: 0.3),
+                                color: accentColor.withValues(alpha: 0.3),
                                 blurRadius: 10,
                                 offset: const Offset(0, 4),
                               ),
@@ -921,29 +935,22 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                           ),
                           child: Icon(a.icon, color: Colors.white, size: 20),
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Text(
-                                a.title,
-                                style: AppTypography.title.copyWith(fontSize: 13.5, fontWeight: FontWeight.bold),
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                a.subtitle,
-                                style: AppTypography.caption.copyWith(color: AppColors.textSecondary),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ],
-                          ),
+                        const SizedBox(height: 10),
+                        Text(
+                          a.title,
+                          style: AppTypography.title.copyWith(fontSize: 13.5, fontWeight: FontWeight.bold),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        Icon(Icons.chevron_right_rounded, size: 18, color: AppColors.textTertiary),
+                        if (!isMobile) ...[
+                          const SizedBox(height: 3),
+                          Text(
+                            a.subtitle,
+                            style: AppTypography.caption.copyWith(color: AppColors.textSecondary),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
                       ],
                     ),
                   ),

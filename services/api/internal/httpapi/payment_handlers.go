@@ -110,6 +110,7 @@ func (h *PaymentHandlers) RecordManualReceipt(w http.ResponseWriter, r *http.Req
 	result, err := h.Payment.RecordManualReceipt(r.Context(), claims.TenantID, payment.RecordManualReceiptRequest{
 		CustomerID: customerID, Amount: amount, Method: req.Method,
 		Reference: req.Reference, IdempotencyKey: req.IdempotencyKey,
+		CreatedByUserID: claims.UserID,
 	})
 	if err != nil {
 		if errors.Is(err, payment.ErrValidation) {
@@ -185,6 +186,44 @@ func (h *PaymentHandlers) RecordSupplierPayment(w http.ResponseWriter, r *http.R
 	WriteJSON(w, http.StatusCreated, map[string]interface{}{
 		"payment_id": result.PaymentID.String(),
 		"duplicate":  result.Duplicate,
+	})
+}
+
+// GetManualPayment returns a previously-recorded manual receipt/payment so
+// the client can reprint it (e.g. "view receipt" on an old ledger entry).
+func (h *PaymentHandlers) GetManualPayment(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	claims, ok := reqctx.Claims(r.Context())
+	if !ok {
+		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		return
+	}
+	paymentID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid payment id")
+		return
+	}
+	detail, err := h.Payment.GetManualPayment(r.Context(), claims.TenantID, paymentID)
+	if err != nil {
+		if errors.Is(err, payment.ErrNotFound) {
+			WriteError(w, reqID, CodeNotFound, "payment not found")
+			return
+		}
+		WriteError(w, reqID, CodeInternal, "failed to fetch payment: "+err.Error())
+		return
+	}
+
+	var createdByName interface{}
+	if detail.CreatedByName != nil {
+		createdByName = *detail.CreatedByName
+	}
+	WriteJSON(w, http.StatusOK, map[string]interface{}{
+		"payment_id":      detail.ID.String(),
+		"amount":          detail.Amount.StringFixed(2),
+		"method":          detail.Method,
+		"reference":       detail.Reference,
+		"received_at":     detail.ReceivedAt,
+		"created_by_name": createdByName,
 	})
 }
 

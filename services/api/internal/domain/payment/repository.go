@@ -111,7 +111,7 @@ func MarkWebhookEventProcessed(ctx context.Context, tx pgx.Tx, eventRowID uuid.U
 
 type PaymentRecord struct {
 	ID                uuid.UUID
-	PaymentIntentID    uuid.UUID
+	PaymentIntentID   uuid.UUID
 	Provider          string
 	ProviderPaymentID string
 	Method            string
@@ -150,11 +150,12 @@ func InsertPaymentIfNew(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, p *P
 // UPI's PaymentRecord above only links to a payment_intent, never directly
 // to a customer.
 type ManualPayment struct {
-	ID             uuid.UUID
-	Method         string
-	Amount         decimal.Decimal
-	IdempotencyKey string
-	Reference      string
+	ID              uuid.UUID
+	Method          string
+	Amount          decimal.Decimal
+	IdempotencyKey  string
+	Reference       string
+	CreatedByUserID *uuid.UUID
 }
 
 // InsertManualPaymentIfNew is idempotent on (tenant_id, idempotency_key): a
@@ -164,11 +165,11 @@ type ManualPayment struct {
 // treat that the same as a fresh success, not surface it as a failure.
 func InsertManualPaymentIfNew(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, p *ManualPayment) (created bool, err error) {
 	row := tx.QueryRow(ctx, `
-		INSERT INTO payments (tenant_id, payment_intent_id, provider, provider_payment_id, method, amount, status, received_at, raw_reference, idempotency_key)
-		VALUES ($1, NULL, 'MANUAL', NULL, $2, $3, 'SUCCESS', now(), jsonb_build_object('reference', $4::text), $5)
+		INSERT INTO payments (tenant_id, payment_intent_id, provider, provider_payment_id, method, amount, status, received_at, raw_reference, idempotency_key, created_by_user_id)
+		VALUES ($1, NULL, 'MANUAL', NULL, $2, $3, 'SUCCESS', now(), jsonb_build_object('reference', $4::text), $5, $6)
 		ON CONFLICT (tenant_id, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
 		RETURNING id
-	`, tenantID, p.Method, p.Amount, p.Reference, p.IdempotencyKey)
+	`, tenantID, p.Method, p.Amount, p.Reference, p.IdempotencyKey, p.CreatedByUserID)
 	if err := row.Scan(&p.ID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return false, nil
@@ -176,6 +177,39 @@ func InsertManualPaymentIfNew(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID
 		return false, err
 	}
 	return true, nil
+}
+
+// ManualPaymentDetail is the full record needed to reprint an old receipt —
+// unlike ManualPayment (the narrow shape used at record time), this also
+// carries the reference, received_at, and the collecting user's display
+// name, joined here rather than requiring the client to separately call the
+// permission-gated /users/{id} endpoint.
+type ManualPaymentDetail struct {
+	ID            uuid.UUID
+	Method        string
+	Amount        decimal.Decimal
+	Reference     string
+	ReceivedAt    time.Time
+	CreatedByName *string
+}
+
+// GetManualPaymentByID loads a single manual (in-person) payment/receipt for
+// reprinting — see ManualPaymentDetail.
+func GetManualPaymentByID(ctx context.Context, tx pgx.Tx, tenantID, id uuid.UUID) (*ManualPaymentDetail, error) {
+	row := tx.QueryRow(ctx, `
+		SELECT p.id, p.method, p.amount, COALESCE(p.raw_reference->>'reference', ''), p.received_at, u.display_name
+		FROM payments p
+		LEFT JOIN users u ON u.id = p.created_by_user_id
+		WHERE p.tenant_id = $1 AND p.id = $2 AND p.provider = 'MANUAL'
+	`, tenantID, id)
+	var d ManualPaymentDetail
+	if err := row.Scan(&d.ID, &d.Method, &d.Amount, &d.Reference, &d.ReceivedAt, &d.CreatedByName); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &d, nil
 }
 
 // FindManualPaymentByIdempotencyKey resolves what an earlier, already-

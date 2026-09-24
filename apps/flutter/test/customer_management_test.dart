@@ -288,6 +288,73 @@ void main() {
     expect(find.text('₹4,200.00'), findsOneWidget);
   });
 
+  testWidgets('View Receipt reopens the PDF for a previously recorded receipt, with balances reconstructed from the ledger', (tester) async {
+    final client = MockClient((request) async {
+      if (request.url.path == '/api/v1/customers/cust-12') {
+        return _jsonOk({
+          'id': 'cust-12', 'customer_code': 'FARM012', 'name': 'Old Receipt Farmer',
+          'customer_type': 'FARMER', 'phone': null, 'status': 'ACTIVE',
+          'credit_limit': '5000.00', 'outstanding_balance': '200.00',
+          'available_credit': '4800.00', 'risk_status': 'NORMAL',
+        });
+      }
+      if (request.url.path == '/api/v1/customers/cust-12/ledger') {
+        // Newest-first, matching the real backend's ledger ordering — the
+        // receipt (index 0) is newer than the invoice that created the
+        // balance it partially paid off (index 1).
+        return _jsonOk({
+          'entries': [
+            {
+              'id': 'led-9', 'entry_date': '2026-09-20T10:00:00Z', 'document_type': 'RECEIPT',
+              'document_id': 'pay-9', 'debit': '0.00', 'credit': '300.00', 'description': 'Receipt',
+            },
+            {
+              'id': 'led-8', 'entry_date': '2026-09-18T09:00:00Z', 'document_type': 'INVOICE',
+              'document_id': 'inv-1', 'debit': '500.00', 'credit': '0.00', 'description': 'Invoice',
+            },
+          ],
+        });
+      }
+      if (request.url.path == '/api/v1/payments/pay-9') {
+        return _jsonOk({
+          'payment_id': 'pay-9', 'amount': '300.00', 'method': 'CASH', 'reference': 'old receipt',
+          'received_at': '2026-09-20T10:00:00Z', 'created_by_name': 'Ramadas',
+        });
+      }
+      if (request.url.path == '/api/v1/settings/store-profile') {
+        return _jsonOk({
+          'legal_name': 'Old Receipt Store', 'trade_name': null, 'gstin': null,
+          'fssai_license_no': null, 'phone': null, 'email': null,
+          'address_line1': '1 Market Road', 'address_line2': null, 'city': 'Testville',
+          'district': null, 'state_code': 'TN', 'postal_code': null,
+          'invoice_prefix': 'INV', 'receipt_header': null, 'receipt_footer': null,
+          'logo_data_uri': null,
+        });
+      }
+      return http.Response('not found', 404);
+    });
+
+    await tester.pumpWidget(_wrapWithProviders(
+      httpClient: client,
+      child: const CustomerLedgerScreen(customerId: 'cust-12'),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.textContaining('Payments'));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('view_receipt_led-9')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('view_receipt_led-9')));
+    // See the Record Receipt test above for why pumpAndSettle() can't be
+    // used once a real PdfPreview is on screen.
+    for (var i = 0; i < 10; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    expect(find.byType(ReceiptPdfPreviewScreen), findsOneWidget);
+    expect(find.textContaining('RCPT-'), findsOneWidget);
+  });
+
   testWidgets('Record Receipt rejects a zero amount client-side before calling the server', (tester) async {
     var receiptCallCount = 0;
     final client = MockClient((request) async {

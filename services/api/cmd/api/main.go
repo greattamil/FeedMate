@@ -244,6 +244,7 @@ func main() {
 			r.With(appmw.RequirePermission("pos.sell")).Post("/payments/receipt-intents", paymentHandlers.CreateReceiptIntent)
 			r.With(appmw.RequirePermission("pos.sell")).Get("/payments/intents/{id}", paymentHandlers.GetIntentStatus)
 			r.With(appmw.RequirePermission("pos.sell")).Post("/payments/receipts", paymentHandlers.RecordManualReceipt)
+			r.With(appmw.RequirePermission("pos.sell")).Get("/payments/{id}", paymentHandlers.GetManualPayment)
 			r.With(appmw.RequirePermission("supplier.manage")).Post("/payments/supplier-payments", paymentHandlers.RecordSupplierPayment)
 
 			r.With(appmw.RequirePermission("contra.approve")).Post("/contra", contraHandlers.PostContra)

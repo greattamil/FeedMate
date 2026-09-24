@@ -19,10 +19,10 @@ import (
 )
 
 var (
-	ErrValidation         = errors.New("validation error")
-	ErrInvalidSignature   = errors.New("webhook signature verification failed")
-	ErrIntentNotFound     = errors.New("payment intent not found for this order reference")
-	ErrAmountMismatch     = errors.New("webhook amount does not match the payment intent amount")
+	ErrValidation       = errors.New("validation error")
+	ErrInvalidSignature = errors.New("webhook signature verification failed")
+	ErrIntentNotFound   = errors.New("payment intent not found for this order reference")
+	ErrAmountMismatch   = errors.New("webhook amount does not match the payment intent amount")
 )
 
 type Service struct {
@@ -44,9 +44,9 @@ type CreateReceiptIntentRequest struct {
 }
 
 type CreateReceiptIntentResult struct {
-	IntentID     uuid.UUID
-	QRPayload    string
-	Status       string
+	IntentID  uuid.UUID
+	QRPayload string
+	Status    string
 }
 
 // CreateReceiptIntent starts a UPI collection against a customer's Khata
@@ -96,11 +96,12 @@ func (s *Service) CreateReceiptIntent(ctx context.Context, tenantID uuid.UUID, r
 }
 
 type RecordManualReceiptRequest struct {
-	CustomerID     uuid.UUID
-	Amount         decimal.Decimal
-	Method         string // CASH, BANK, or OTHER — never UPI (that must go through CreateReceiptIntent/ProcessWebhook)
-	Reference      string
-	IdempotencyKey string
+	CustomerID      uuid.UUID
+	Amount          decimal.Decimal
+	Method          string // CASH, BANK, or OTHER — never UPI (that must go through CreateReceiptIntent/ProcessWebhook)
+	Reference       string
+	IdempotencyKey  string
+	CreatedByUserID uuid.UUID // required — the authenticated caller recording this receipt
 }
 
 type RecordManualReceiptResult struct {
@@ -133,9 +134,14 @@ func (s *Service) RecordManualReceipt(ctx context.Context, tenantID uuid.UUID, r
 			return fmt.Errorf("load customer: %w", err)
 		}
 
+		var createdBy *uuid.UUID
+		if req.CreatedByUserID != uuid.Nil {
+			createdBy = &req.CreatedByUserID
+		}
 		p := &ManualPayment{
 			Method: req.Method, Amount: req.Amount,
 			IdempotencyKey: req.IdempotencyKey, Reference: req.Reference,
+			CreatedByUserID: createdBy,
 		}
 		created, err := InsertManualPaymentIfNew(ctx, tx, tenantID, p)
 		if err != nil {
@@ -160,6 +166,24 @@ func (s *Service) RecordManualReceipt(ctx context.Context, tenantID uuid.UUID, r
 		return nil, err
 	}
 	return &result, nil
+}
+
+// GetManualPayment loads a previously-recorded manual receipt/payment so it
+// can be reprinted (e.g. "view receipt" on an old ledger entry).
+func (s *Service) GetManualPayment(ctx context.Context, tenantID, paymentID uuid.UUID) (*ManualPaymentDetail, error) {
+	var detail *ManualPaymentDetail
+	err := s.db.WithTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
+		d, err := GetManualPaymentByID(ctx, tx, tenantID, paymentID)
+		if err != nil {
+			return err
+		}
+		detail = d
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return detail, nil
 }
 
 type RecordSupplierPaymentRequest struct {

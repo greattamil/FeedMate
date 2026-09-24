@@ -167,6 +167,66 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen>
     }
   }
 
+  /// Reopens the PDF for a receipt recorded earlier — since [_entries] is
+  /// returned newest-first, the running balance right after and right before
+  /// [entry] can be reconstructed from the current outstanding balance plus
+  /// every entry strictly newer than it, with no separate backend endpoint.
+  Future<void> _viewReceipt(LedgerEntry entry) async {
+    final detail = _detail;
+    if (detail == null || entry.documentId.isEmpty) return;
+
+    final index = _entries.indexWhere((e) => e.id == entry.id);
+    var balanceAfter = detail.outstandingBalance;
+    if (index > 0) {
+      for (final newer in _entries.sublist(0, index)) {
+        balanceAfter -= (newer.debit - newer.credit);
+      }
+    }
+    final balanceBefore = balanceAfter - entry.debit + entry.credit;
+
+    try {
+      final payment = await ReceiptApi(context.read<ApiClient>()).getPayment(entry.documentId);
+      if (!mounted) return;
+
+      StoreProfile? store;
+      try {
+        store = await StoreSettingsApi(context.read<ApiClient>()).getStoreProfile();
+      } on ApiError {
+        store = null;
+      }
+      if (!mounted) return;
+      if (store == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not load store details to rebuild this receipt')),
+        );
+        return;
+      }
+
+      final receiptData = PaymentReceiptData(
+        paymentId: payment.paymentId,
+        receivedAt: payment.receivedAt,
+        customerName: detail.name,
+        customerCode: detail.customerCode,
+        customerPhone: detail.phone,
+        amount: payment.amount,
+        method: payment.method,
+        reference: payment.reference,
+        balanceBefore: balanceBefore,
+        balanceAfter: balanceAfter,
+        receivedByName: payment.createdByName ?? 'Staff',
+        store: store,
+      );
+
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => ReceiptPdfPreviewScreen(receipt: receiptData)),
+      );
+    } on ApiError catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
   Future<void> _editCreditLimit() async {
     final detail = _detail;
     if (detail == null) return;
@@ -538,9 +598,24 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen>
           _dateFormat.format(e.entryDate.toLocal()),
           style: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
         ),
-        trailing: Text(
-          '-${money(e.credit)}',
-          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: AppColors.success),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              '-${money(e.credit)}',
+              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: AppColors.success),
+            ),
+            if (e.documentType == 'RECEIPT') ...[
+              const SizedBox(width: 4),
+              IconButton(
+                key: Key('view_receipt_${e.id}'),
+                onPressed: () => _viewReceipt(e),
+                icon: const Icon(Icons.receipt_long_rounded, color: AppColors.textTertiary, size: 20),
+                tooltip: 'View Receipt',
+                visualDensity: VisualDensity.compact,
+              ),
+            ],
+          ],
         ),
       ),
     );
@@ -783,13 +858,28 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen>
             ),
           ],
         ),
-        trailing: Text(
-          isDebit ? '+${money(e.debit)}' : '-${money(e.credit)}',
-          style: TextStyle(
-            fontWeight: FontWeight.w800,
-            fontSize: 16,
-            color: isDebit ? AppColors.danger : AppColors.success,
-          ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              isDebit ? '+${money(e.debit)}' : '-${money(e.credit)}',
+              style: TextStyle(
+                fontWeight: FontWeight.w800,
+                fontSize: 16,
+                color: isDebit ? AppColors.danger : AppColors.success,
+              ),
+            ),
+            if (e.documentType == 'RECEIPT') ...[
+              const SizedBox(width: 4),
+              IconButton(
+                key: Key('view_receipt_txn_${e.id}'),
+                onPressed: () => _viewReceipt(e),
+                icon: const Icon(Icons.receipt_long_rounded, color: AppColors.textTertiary, size: 20),
+                tooltip: 'View Receipt',
+                visualDensity: VisualDensity.compact,
+              ),
+            ],
+          ],
         ),
       ),
     );

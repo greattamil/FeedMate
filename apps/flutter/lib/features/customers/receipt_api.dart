@@ -17,6 +17,38 @@ class RecordReceiptResult {
   }
 }
 
+/// A previously-recorded manual receipt/payment, fetched back for reprinting
+/// (e.g. "view receipt" on an old ledger entry) — see
+/// services/api/internal/httpapi/payment_handlers.go's GetManualPayment.
+class ManualPaymentDetail {
+  final String paymentId;
+  final Decimal amount;
+  final String method;
+  final String? reference;
+  final DateTime receivedAt;
+  final String? createdByName;
+
+  ManualPaymentDetail({
+    required this.paymentId,
+    required this.amount,
+    required this.method,
+    required this.reference,
+    required this.receivedAt,
+    required this.createdByName,
+  });
+
+  factory ManualPaymentDetail.fromJson(Map<String, dynamic> json) {
+    return ManualPaymentDetail(
+      paymentId: json['payment_id'] as String,
+      amount: Decimal.parse(json['amount'] as String),
+      method: json['method'] as String,
+      reference: (json['reference'] as String?)?.trim().isEmpty ?? true ? null : json['reference'] as String,
+      receivedAt: DateTime.parse(json['received_at'] as String),
+      createdByName: json['created_by_name'] as String?,
+    );
+  }
+}
+
 /// Records a receipt collected in person against a customer's ledger — see
 /// services/api/internal/httpapi/payment_handlers.go's RecordManualReceipt.
 /// UPI collection goes through a different, provider-verified path
@@ -45,5 +77,10 @@ class ReceiptApi {
     };
     final response = await client.postAuthed('/api/v1/payments/receipts', body);
     return RecordReceiptResult.fromJson(response);
+  }
+
+  Future<ManualPaymentDetail> getPayment(String paymentId) async {
+    final response = await client.getAuthed('/api/v1/payments/$paymentId');
+    return ManualPaymentDetail.fromJson(response);
   }
 }

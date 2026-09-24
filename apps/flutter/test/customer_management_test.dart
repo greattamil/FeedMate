@@ -17,6 +17,7 @@ import 'package:feedmate_app/core/auth_session.dart';
 import 'package:feedmate_app/core/secure_storage.dart';
 import 'package:feedmate_app/features/customers/customer_ledger_screen.dart';
 import 'package:feedmate_app/features/customers/customer_list_screen.dart';
+import 'package:feedmate_app/features/customers/receipt_pdf_preview_screen.dart';
 import 'package:feedmate_app/features/pos/invoice_detail_screen.dart';
 
 http.Response _jsonOk(Map<String, dynamic> body) => http.Response(jsonEncode(body), 200);
@@ -236,6 +237,16 @@ void main() {
         sentIdempotencyKey = body['idempotency_key'] as String;
         return _jsonOk({'payment_id': 'pay-1', 'duplicate': false});
       }
+      if (request.url.path == '/api/v1/settings/store-profile') {
+        return _jsonOk({
+          'legal_name': 'Receipt Test Store', 'trade_name': null, 'gstin': null,
+          'fssai_license_no': null, 'phone': null, 'email': null,
+          'address_line1': '1 Market Road', 'address_line2': null, 'city': 'Testville',
+          'district': null, 'state_code': 'TN', 'postal_code': null,
+          'invoice_prefix': 'INV', 'receipt_header': null, 'receipt_footer': null,
+          'logo_data_uri': null,
+        });
+      }
       return http.Response('not found', 404);
     });
 
@@ -252,14 +263,28 @@ void main() {
 
     await tester.enterText(find.byKey(const Key('receipt_amount_field')), '800.00');
     await tester.tap(find.byKey(const Key('receipt_submit_button')));
-    await tester.pumpAndSettle();
+    // Not pumpAndSettle(): a successful, non-duplicate receipt now opens
+    // the real payment receipt PDF preview, which kicks off real PDF
+    // rasterization via a platform channel with no mock registered in a
+    // widget test — that never settles, so pumpAndSettle() here would hang
+    // the test. A handful of fixed pumps is enough to let recordReceipt's
+    // async chain (post receipt -> reload -> fetch store profile -> push
+    // the preview screen) run to completion and the screen mount.
+    for (var i = 0; i < 10; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
 
     expect(sentIdempotencyKey, isNotNull);
     expect(sentIdempotencyKey, isNotEmpty);
-    expect(find.textContaining('Receipt of ₹800.00 recorded'), findsOneWidget);
-    // The balance shown must come from a fresh fetch after recording, not a
-    // client-side subtraction — asserted by the mock returning a different
-    // balance on the second GET and that new value actually appearing.
+    expect(find.byType(ReceiptPdfPreviewScreen), findsOneWidget);
+    expect(find.textContaining('RCPT-'), findsOneWidget);
+
+    // Go back to the ledger and confirm the balance shown came from a
+    // fresh fetch after recording, not a client-side subtraction —
+    // asserted by the mock returning a different balance on the second GET
+    // and that new value actually appearing.
+    Navigator.pop(tester.element(find.byType(ReceiptPdfPreviewScreen)));
+    await tester.pumpAndSettle();
     expect(find.text('₹4,200.00'), findsOneWidget);
   });
 

@@ -12,8 +12,11 @@ import '../../core/theme/app_decorations.dart';
 import '../../core/theme/app_typography.dart';
 import '../pos/customer_api.dart';
 import '../pos/invoice_detail_screen.dart';
+import '../settings/store_settings_api.dart';
 import 'customer_form_dialog.dart';
 import 'receipt_api.dart';
+import 'receipt_pdf.dart';
+import 'receipt_pdf_preview_screen.dart';
 import '../../core/number_format.dart';
 
 /// A customer's ledger: current credit position plus the itemized history
@@ -98,6 +101,10 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen>
     );
     if (result == null) return;
 
+    final customerBefore = _detail;
+    if (customerBefore == null) return;
+    final balanceBefore = customerBefore.outstandingBalance;
+
     try {
       final api = ReceiptApi(context.read<ApiClient>());
       final receiptResult = await api.recordReceipt(
@@ -109,11 +116,51 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen>
       if (!mounted) return;
       await _load();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(receiptResult.duplicate
-            ? 'This receipt was already recorded'
-            : 'Receipt of ${money(result.amount)} recorded'),
-      ));
+
+      if (receiptResult.duplicate) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('This receipt was already recorded')),
+        );
+        return;
+      }
+
+      // The store profile (including any uploaded logo) is fetched fresh
+      // here rather than cached, so a receipt always reflects the shop's
+      // current branding — the same StoreSettingsApi the invoice PDF's own
+      // store snapshot is ultimately backed by.
+      StoreProfile? store;
+      try {
+        store = await StoreSettingsApi(context.read<ApiClient>()).getStoreProfile();
+      } on ApiError {
+        store = null;
+      }
+      if (!mounted) return;
+      if (store == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Receipt of ${money(result.amount)} recorded')),
+        );
+        return;
+      }
+
+      final receiptData = PaymentReceiptData(
+        paymentId: receiptResult.paymentId,
+        receivedAt: DateTime.now(),
+        customerName: customerBefore.name,
+        customerCode: customerBefore.customerCode,
+        customerPhone: customerBefore.phone,
+        amount: result.amount,
+        method: result.method,
+        reference: result.reference,
+        balanceBefore: balanceBefore,
+        balanceAfter: _detail?.outstandingBalance ?? (balanceBefore - result.amount),
+        receivedByName: context.read<AuthSession>().displayName,
+        store: store,
+      );
+
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => ReceiptPdfPreviewScreen(receipt: receiptData)),
+      );
     } on ApiError catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));

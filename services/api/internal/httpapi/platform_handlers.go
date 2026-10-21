@@ -9,10 +9,12 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 
 	"github.com/andipatti/feedmate/services/api/internal/domain/devicepairing"
 	"github.com/andipatti/feedmate/services/api/internal/domain/identity"
 	"github.com/andipatti/feedmate/services/api/internal/domain/platformadmin"
+	"github.com/andipatti/feedmate/services/api/internal/domain/subscription"
 	"github.com/andipatti/feedmate/services/api/internal/reqctx"
 )
 
@@ -21,7 +23,8 @@ import (
 // the ordinary tenant RequireAuth/RequirePermission pair, since a platform
 // admin has no tenant at all.
 type PlatformHandlers struct {
-	Platform *platformadmin.Service
+	Platform     *platformadmin.Service
+	Subscription *subscription.Service
 }
 
 type platformLoginRequest struct {
@@ -870,4 +873,265 @@ func (h *PlatformHandlers) GeneratePairingCodeForTenant(w http.ResponseWriter, r
 		"code":       result.Code,
 		"expires_at": result.ExpiresAt.Format("2006-01-02T15:04:05Z07:00"),
 	})
+}
+
+// --- Subscription/billing: a plan catalogue, each tenant's current
+// subscription state, and manually-recorded payments (no payment gateway —
+// see subscription.Service.RecordManualPayment's doc comment). ---
+
+func planJSON(p subscription.Plan) map[string]interface{} {
+	return map[string]interface{}{
+		"id": p.ID.String(), "code": p.Code, "name": p.Name,
+		"price": p.Price.StringFixed(2), "currency_code": p.CurrencyCode,
+		"billing_period": p.BillingPeriod, "grace_period_days": p.GracePeriodDays, "active": p.Active,
+	}
+}
+
+func (h *PlatformHandlers) ListPlans(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	plans, err := h.Subscription.ListPlans(r.Context())
+	if err != nil {
+		WriteError(w, reqID, CodeInternal, "failed to list plans: "+err.Error())
+		return
+	}
+	out := make([]map[string]interface{}, 0, len(plans))
+	for _, p := range plans {
+		out = append(out, planJSON(p))
+	}
+	WriteJSON(w, http.StatusOK, map[string]interface{}{"plans": out})
+}
+
+type createPlanRequest struct {
+	Code            string `json:"code"`
+	Name            string `json:"name"`
+	Price           string `json:"price"`
+	GracePeriodDays int    `json:"grace_period_days"`
+}
+
+func (h *PlatformHandlers) CreatePlan(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	var req createPlanRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid request body")
+		return
+	}
+	price, err := decimal.NewFromString(req.Price)
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "price must be a valid decimal")
+		return
+	}
+	id, err := h.Subscription.CreatePlan(r.Context(), subscription.CreatePlanInput{
+		Code: req.Code, Name: req.Name, Price: price, GracePeriodDays: req.GracePeriodDays,
+	})
+	if err != nil {
+		if errors.Is(err, subscription.ErrValidation) {
+			WriteError(w, reqID, CodeValidation, err.Error())
+			return
+		}
+		WriteError(w, reqID, CodeInternal, "failed to create plan: "+err.Error())
+		return
+	}
+	WriteJSON(w, http.StatusCreated, map[string]string{"id": id.String()})
+}
+
+type updatePlanRequest struct {
+	Name            string `json:"name"`
+	Price           string `json:"price"`
+	GracePeriodDays int    `json:"grace_period_days"`
+	Active          bool   `json:"active"`
+}
+
+func (h *PlatformHandlers) UpdatePlan(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid plan id")
+		return
+	}
+	var req updatePlanRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid request body")
+		return
+	}
+	price, err := decimal.NewFromString(req.Price)
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "price must be a valid decimal")
+		return
+	}
+	if err := h.Subscription.UpdatePlan(r.Context(), id, subscription.UpdatePlanInput{
+		Name: req.Name, Price: price, GracePeriodDays: req.GracePeriodDays, Active: req.Active,
+	}); err != nil {
+		switch {
+		case errors.Is(err, subscription.ErrValidation):
+			WriteError(w, reqID, CodeValidation, err.Error())
+		case errors.Is(err, subscription.ErrNotFound):
+			WriteError(w, reqID, CodeNotFound, "plan not found")
+		default:
+			WriteError(w, reqID, CodeInternal, "failed to update plan: "+err.Error())
+		}
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func tenantSubscriptionJSON(s *subscription.TenantSubscription) map[string]interface{} {
+	out := map[string]interface{}{
+		"id": s.ID.String(), "tenant_id": s.TenantID.String(), "plan_id": s.PlanID.String(),
+		"plan_code": s.PlanCode, "plan_name": s.PlanName, "plan_price": s.PlanPrice.StringFixed(2),
+		"status":                      s.Status,
+		"current_period_start":        s.CurrentPeriodStart.Format("2006-01-02"),
+		"current_period_end":          s.CurrentPeriodEnd.Format("2006-01-02"),
+		"effective_grace_period_days": s.EffectiveGraceDays,
+	}
+	if s.GracePeriodDays != nil {
+		out["grace_period_days_override"] = *s.GracePeriodDays
+	}
+	if s.PastDueSince != nil {
+		out["past_due_since"] = s.PastDueSince.Format(time.RFC3339)
+	}
+	return out
+}
+
+func (h *PlatformHandlers) GetTenantSubscription(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	tenantID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid tenant id")
+		return
+	}
+	sub, err := h.Subscription.GetTenantSubscription(r.Context(), tenantID)
+	if err != nil {
+		if errors.Is(err, subscription.ErrNotFound) {
+			WriteError(w, reqID, CodeNotFound, "tenant has no subscription assigned yet")
+			return
+		}
+		WriteError(w, reqID, CodeInternal, "failed to fetch subscription: "+err.Error())
+		return
+	}
+	WriteJSON(w, http.StatusOK, tenantSubscriptionJSON(sub))
+}
+
+type setTenantSubscriptionPlanRequest struct {
+	PlanID      string  `json:"plan_id"`
+	PeriodStart *string `json:"period_start,omitempty"`
+}
+
+func (h *PlatformHandlers) SetTenantSubscriptionPlan(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	tenantID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid tenant id")
+		return
+	}
+	var req setTenantSubscriptionPlanRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid request body")
+		return
+	}
+	planID, err := uuid.Parse(req.PlanID)
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "plan_id must be a valid UUID")
+		return
+	}
+	var periodStart *time.Time
+	if req.PeriodStart != nil && *req.PeriodStart != "" {
+		t, err := time.Parse("2006-01-02", *req.PeriodStart)
+		if err != nil {
+			WriteError(w, reqID, CodeValidation, "period_start must be YYYY-MM-DD")
+			return
+		}
+		periodStart = &t
+	}
+	if err := h.Subscription.SetTenantPlan(r.Context(), tenantID, planID, periodStart); err != nil {
+		if errors.Is(err, subscription.ErrNotFound) {
+			WriteError(w, reqID, CodeNotFound, "plan not found")
+			return
+		}
+		WriteError(w, reqID, CodeInternal, "failed to set tenant plan: "+err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+type recordSubscriptionPaymentRequest struct {
+	Amount         string `json:"amount"`
+	Method         string `json:"method"`
+	Reference      string `json:"reference,omitempty"`
+	Notes          string `json:"notes,omitempty"`
+	IdempotencyKey string `json:"idempotency_key"`
+}
+
+// RecordSubscriptionPayment is the manual-recording path — no payment
+// gateway: the platform admin collects payment out of band (UPI/bank
+// transfer/cash) and records it here, the same trust model as the
+// existing customer-receipt feature.
+func (h *PlatformHandlers) RecordSubscriptionPayment(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	claims, ok := reqctx.Claims(r.Context())
+	if !ok {
+		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		return
+	}
+	tenantID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid tenant id")
+		return
+	}
+	var req recordSubscriptionPaymentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid request body")
+		return
+	}
+	amount, err := decimal.NewFromString(req.Amount)
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "amount must be a valid decimal")
+		return
+	}
+	result, err := h.Subscription.RecordManualPayment(r.Context(), tenantID, subscription.RecordPaymentInput{
+		Amount: amount, Method: req.Method, Reference: req.Reference, Notes: req.Notes,
+		IdempotencyKey: req.IdempotencyKey, PlatformAdminID: claims.UserID,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, subscription.ErrValidation):
+			WriteError(w, reqID, CodeValidation, err.Error())
+		case errors.Is(err, subscription.ErrNotFound):
+			WriteError(w, reqID, CodeNotFound, "tenant has no subscription assigned yet")
+		default:
+			WriteError(w, reqID, CodeInternal, "failed to record payment: "+err.Error())
+		}
+		return
+	}
+	WriteJSON(w, http.StatusCreated, map[string]interface{}{"payment_id": result.PaymentID.String(), "duplicate": result.Duplicate})
+}
+
+func (h *PlatformHandlers) ListBillingHistory(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	tenantID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid tenant id")
+		return
+	}
+	limit, offset := parsePlatformLimitOffset(r)
+	entries, total, err := h.Subscription.ListBillingHistory(r.Context(), tenantID, limit, offset)
+	if err != nil {
+		WriteError(w, reqID, CodeInternal, "failed to list billing history: "+err.Error())
+		return
+	}
+	out := make([]map[string]interface{}, 0, len(entries))
+	for _, e := range entries {
+		row := map[string]interface{}{
+			"id": e.ID.String(), "amount": e.Amount.StringFixed(2),
+			"period_start": e.PeriodStart.Format("2006-01-02"), "period_end": e.PeriodEnd.Format("2006-01-02"),
+			"method": e.Method, "paid_at": e.PaidAt.Format(time.RFC3339),
+		}
+		if e.Reference != nil {
+			row["reference"] = *e.Reference
+		}
+		if e.Notes != nil {
+			row["notes"] = *e.Notes
+		}
+		out = append(out, row)
+	}
+	WriteJSON(w, http.StatusOK, map[string]interface{}{"payments": out, "total": total})
 }

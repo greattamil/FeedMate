@@ -33,6 +33,7 @@ import (
 	"github.com/andipatti/feedmate/services/api/internal/domain/returns"
 	"github.com/andipatti/feedmate/services/api/internal/domain/settings"
 	"github.com/andipatti/feedmate/services/api/internal/domain/stockcount"
+	"github.com/andipatti/feedmate/services/api/internal/domain/subscription"
 	"github.com/andipatti/feedmate/services/api/internal/domain/supplier"
 	"github.com/andipatti/feedmate/services/api/internal/httpapi"
 	appmw "github.com/andipatti/feedmate/services/api/internal/middleware"
@@ -79,6 +80,7 @@ func main() {
 	masterDataSvc := masterdata.NewService(db)
 	settingsSvc := settings.NewService(db)
 	platformSvc := platformadmin.NewService(db, cfg.JWTSigningKey, cfg.AccessTokenTTL, cfg.RefreshTokenTTL, cfg.BcryptCost)
+	subscriptionSvc := subscription.NewService(db)
 
 	var provider paymentprovider.Provider
 	switch cfg.PaymentProvider {
@@ -110,7 +112,7 @@ func main() {
 	supplierHandlers := &httpapi.SupplierHandlers{Supplier: supplierSvc}
 	masterDataHandlers := &httpapi.MasterDataHandlers{MasterData: masterDataSvc}
 	settingsHandlers := &httpapi.SettingsHandlers{Settings: settingsSvc}
-	platformHandlers := &httpapi.PlatformHandlers{Platform: platformSvc}
+	platformHandlers := &httpapi.PlatformHandlers{Platform: platformSvc, Subscription: subscriptionSvc}
 
 	// Every CodeInternal response's real (pre-sanitization) detail is
 	// persisted here so the platform admin's error log screen can show more
@@ -172,6 +174,13 @@ func main() {
 			r.Get("/platform/tenants/{id}/devices", platformHandlers.ListTenantDevices)
 			r.Post("/platform/tenants/{id}/devices/{deviceId}/revoke", platformHandlers.RevokeTenantDevice)
 			r.Post("/platform/tenants/{id}/devices/pairing-codes", platformHandlers.GeneratePairingCodeForTenant)
+			r.Get("/platform/plans", platformHandlers.ListPlans)
+			r.Post("/platform/plans", platformHandlers.CreatePlan)
+			r.Put("/platform/plans/{id}", platformHandlers.UpdatePlan)
+			r.Get("/platform/tenants/{id}/subscription", platformHandlers.GetTenantSubscription)
+			r.Put("/platform/tenants/{id}/subscription/plan", platformHandlers.SetTenantSubscriptionPlan)
+			r.Post("/platform/tenants/{id}/subscription/payments", platformHandlers.RecordSubscriptionPayment)
+			r.Get("/platform/tenants/{id}/subscription/payments", platformHandlers.ListBillingHistory)
 			r.Get("/platform/audit-logs", platformHandlers.ListAuditLogs)
 			r.Get("/platform/error-logs", platformHandlers.ListErrorLogs)
 			r.Get("/platform/settings", platformHandlers.GetPlatformSettings)
@@ -320,6 +329,15 @@ func main() {
 			// here as each domain module is implemented.
 		})
 	})
+
+	// Advances past-due subscriptions and auto-suspends tenants whose grace
+	// period has elapsed — see subscription.Service.StartBillingScheduler's
+	// doc comment. Tied to the server's own shutdown signal so it stops
+	// cleanly alongside everything else; a single run's error never stops
+	// future runs.
+	schedulerCtx, stopScheduler := context.WithCancel(context.Background())
+	defer stopScheduler()
+	go subscriptionSvc.StartBillingScheduler(schedulerCtx, 24*time.Hour)
 
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,

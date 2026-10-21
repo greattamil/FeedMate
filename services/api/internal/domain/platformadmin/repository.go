@@ -418,7 +418,7 @@ func ListAuditLogsAllTenants(ctx context.Context, tx pgx.Tx, filter AuditLogFilt
 	rows, err := tx.Query(ctx, `
 		SELECT a.id, a.tenant_id, t.legal_name, a.actor_user_id, u.display_name, a.actor_device_id,
 		       a.actor_platform_admin_id, pa.display_name, a.action_code, a.entity_type, a.entity_id,
-		       a.before_json, a.after_json, a.reason, a.request_id, a.ip_address, a.user_agent, a.created_at
+		       a.before_json, a.after_json, a.reason, a.request_id, a.ip_address::text, a.user_agent, a.created_at
 		`+fromJoin+where+`
 		ORDER BY a.created_at DESC
 		LIMIT $7 OFFSET $8
@@ -488,7 +488,7 @@ func ListErrorLogs(ctx context.Context, tx pgx.Tx, filter ErrorLogFilter, limit,
 	args = append(args, limit, offset)
 	rows, err := tx.Query(ctx, `
 		SELECT id, request_id, status_code, code, message, method, path, query_params, request_body,
-		       ip_address, user_agent, tenant_id, actor_user_id, actor_platform_admin_id, stack_trace, created_at
+		       ip_address::text, user_agent, tenant_id, actor_user_id, actor_platform_admin_id, stack_trace, created_at
 		FROM error_logs `+where+`
 		ORDER BY created_at DESC
 		LIMIT $7 OFFSET $8

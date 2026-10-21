@@ -275,6 +275,11 @@ void main() {
     expect(featureBody!['enabled'], true);
   });
 
+  // Full filter/pagination/detail-view coverage for these two screens now
+  // lives in platform_audit_log_screen_test.dart and
+  // platform_error_log_screen_test.dart; these two just keep a basic
+  // smoke check that the list renders against the new {entries, total}
+  // response shape.
   testWidgets('cross-tenant audit log lists entries from multiple tenants', (tester) async {
     final client = MockClient((request) async {
       if (request.url.path == '/api/v1/platform/audit-logs') {
@@ -288,7 +293,8 @@ void main() {
               'id': 'a2', 'tenant_id': 't2', 'tenant_name': 'Other Store', 'actor_name': null,
               'action_code': 'DEVICE_PAIRED', 'entity_type': 'device', 'created_at': '2026-09-19T09:00:00+05:30',
             },
-          ]
+          ],
+          'total': 2,
         });
       }
       return http.Response('not found', 404);
@@ -297,9 +303,9 @@ void main() {
     await tester.pumpWidget(_wrap(httpClient: client, child: const PlatformAuditLogScreen()));
     await tester.pumpAndSettle();
 
-    expect(find.text('TENANT_SUSPENDED'), findsOneWidget);
+    expect(find.text('Tenant Suspended'), findsOneWidget);
     expect(find.textContaining('SKM Feeds'), findsOneWidget);
-    expect(find.text('DEVICE_PAIRED'), findsOneWidget);
+    expect(find.text('Device Paired'), findsOneWidget);
     expect(find.textContaining('Other Store'), findsOneWidget);
   });
 
@@ -312,7 +318,8 @@ void main() {
               'id': 'e1', 'request_id': '11111111-1111-1111-1111-111111111111', 'status_code': 500,
               'message': 'failed to post GRN: something broke', 'created_at': '2026-09-21T08:00:00+05:30',
             },
-          ]
+          ],
+          'total': 1,
         });
       }
       return http.Response('not found', 404);
@@ -323,6 +330,9 @@ void main() {
 
     expect(find.text('500'), findsOneWidget);
     expect(find.textContaining('failed to post GRN'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('platform_error_entry_e1')));
+    await tester.pumpAndSettle();
     expect(find.textContaining('11111111-1111-1111-1111-111111111111'), findsOneWidget);
   });
 

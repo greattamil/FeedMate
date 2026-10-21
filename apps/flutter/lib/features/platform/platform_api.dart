@@ -251,66 +251,141 @@ class PairingCodeResult {
   }
 }
 
+/// One row of the platform-wide audit trail
+/// (platformadmin.Service.ListAuditLogsAllTenants) — now carrying full
+/// before/after state, actor identity (tenant staff OR platform admin, at
+/// most one of each pair is ever present) and request provenance, not just
+/// the bare action/entity/reason the old thin DTO exposed.
 class PlatformAuditLogEntry {
   final String id;
-  final String? tenantId;
-  final String? tenantName;
-  final String? actorName;
   final String actionCode;
   final String entityType;
-  final String? entityId;
-  final String? reason;
   final DateTime createdAt;
+  final String? tenantId;
+  final String? tenantName;
+  final String? actorUserId;
+  final String? actorName;
+  final String? actorDeviceId;
+  final String? actorPlatformAdminId;
+  final String? actorPlatformAdminName;
+  final String? entityId;
+  final Map<String, dynamic>? beforeJson;
+  final Map<String, dynamic>? afterJson;
+  final String? reason;
+  final String? requestId;
+  final String? ipAddress;
+  final String? userAgent;
 
   PlatformAuditLogEntry({
     required this.id,
-    this.tenantId,
-    this.tenantName,
-    this.actorName,
     required this.actionCode,
     required this.entityType,
-    this.entityId,
-    this.reason,
     required this.createdAt,
+    this.tenantId,
+    this.tenantName,
+    this.actorUserId,
+    this.actorName,
+    this.actorDeviceId,
+    this.actorPlatformAdminId,
+    this.actorPlatformAdminName,
+    this.entityId,
+    this.beforeJson,
+    this.afterJson,
+    this.reason,
+    this.requestId,
+    this.ipAddress,
+    this.userAgent,
   });
+
+  /// "Who did this" for display: a tenant staff member's name if one acted,
+  /// else the platform admin's name if one acted, else "System" for a
+  /// server-initiated action (e.g. an automated auto-suspend job).
+  String get displayActor => actorName ?? actorPlatformAdminName ?? 'System';
 
   factory PlatformAuditLogEntry.fromJson(Map<String, dynamic> json) {
     return PlatformAuditLogEntry(
       id: json['id'] as String,
-      tenantId: json['tenant_id'] as String?,
-      tenantName: json['tenant_name'] as String?,
-      actorName: json['actor_name'] as String?,
       actionCode: json['action_code'] as String,
       entityType: json['entity_type'] as String,
-      entityId: json['entity_id'] as String?,
-      reason: json['reason'] as String?,
       createdAt: DateTime.parse(json['created_at'] as String),
+      tenantId: json['tenant_id'] as String?,
+      tenantName: json['tenant_name'] as String?,
+      actorUserId: json['actor_user_id'] as String?,
+      actorName: json['actor_name'] as String?,
+      actorDeviceId: json['actor_device_id'] as String?,
+      actorPlatformAdminId: json['actor_platform_admin_id'] as String?,
+      actorPlatformAdminName: json['actor_platform_admin_name'] as String?,
+      entityId: json['entity_id'] as String?,
+      beforeJson: json['before_json'] as Map<String, dynamic>?,
+      afterJson: json['after_json'] as Map<String, dynamic>?,
+      reason: json['reason'] as String?,
+      requestId: json['request_id'] as String?,
+      ipAddress: json['ip_address'] as String?,
+      userAgent: json['user_agent'] as String?,
     );
   }
 }
 
+/// One row of the platform-wide error log (httpapi.SetErrorSink) — now
+/// capturing genuinely complete debug-level detail for EVERY error (not
+/// just 500s): the request that triggered it, the already-redacted request
+/// body, caller identity/network provenance, and — only for a recovered
+/// panic — a stack trace.
 class PlatformErrorLogEntry {
   final String id;
-  final String? requestId;
   final int statusCode;
   final String message;
   final DateTime createdAt;
+  final String? requestId;
+  final String? code;
+  final String? method;
+  final String? path;
+  final String? queryParams;
+  final Map<String, dynamic>? requestBody;
+  final String? ipAddress;
+  final String? userAgent;
+  final String? tenantId;
+  final String? actorUserId;
+  final String? actorPlatformAdminId;
+  final String? stackTrace;
 
   PlatformErrorLogEntry({
     required this.id,
-    this.requestId,
     required this.statusCode,
     required this.message,
     required this.createdAt,
+    this.requestId,
+    this.code,
+    this.method,
+    this.path,
+    this.queryParams,
+    this.requestBody,
+    this.ipAddress,
+    this.userAgent,
+    this.tenantId,
+    this.actorUserId,
+    this.actorPlatformAdminId,
+    this.stackTrace,
   });
 
   factory PlatformErrorLogEntry.fromJson(Map<String, dynamic> json) {
     return PlatformErrorLogEntry(
       id: json['id'] as String,
-      requestId: json['request_id'] as String?,
       statusCode: json['status_code'] as int,
       message: json['message'] as String,
       createdAt: DateTime.parse(json['created_at'] as String),
+      requestId: json['request_id'] as String?,
+      code: json['code'] as String?,
+      method: json['method'] as String?,
+      path: json['path'] as String?,
+      queryParams: json['query_params'] as String?,
+      requestBody: json['request_body'] as Map<String, dynamic>?,
+      ipAddress: json['ip_address'] as String?,
+      userAgent: json['user_agent'] as String?,
+      tenantId: json['tenant_id'] as String?,
+      actorUserId: json['actor_user_id'] as String?,
+      actorPlatformAdminId: json['actor_platform_admin_id'] as String?,
+      stackTrace: json['stack_trace'] as String?,
     );
   }
 }
@@ -527,14 +602,64 @@ class PlatformApi {
     await client.putAuthed('/api/v1/platform/tenants/$id/features', {'feature_code': featureCode, 'enabled': enabled});
   }
 
-  Future<List<PlatformAuditLogEntry>> listAuditLogs({int limit = 50, int offset = 0}) async {
-    final response = await client.getAuthed('/api/v1/platform/audit-logs?limit=$limit&offset=$offset');
-    return (response['entries'] as List<dynamic>).map((e) => PlatformAuditLogEntry.fromJson(e as Map<String, dynamic>)).toList();
+  Future<({List<PlatformAuditLogEntry> entries, int total})> listAuditLogs({
+    int limit = 50,
+    int offset = 0,
+    String? actionCode,
+    String? entityType,
+    String? tenantId,
+    DateTime? from,
+    DateTime? to,
+    String? q,
+  }) async {
+    final path = _query('/api/v1/platform/audit-logs', {
+      'limit': '$limit',
+      'offset': '$offset',
+      if (actionCode != null && actionCode.isNotEmpty) 'action_code': actionCode,
+      if (entityType != null && entityType.isNotEmpty) 'entity_type': entityType,
+      if (tenantId != null && tenantId.isNotEmpty) 'tenant_id': tenantId,
+      if (from != null) 'from': from.toUtc().toIso8601String(),
+      if (to != null) 'to': to.toUtc().toIso8601String(),
+      if (q != null && q.isNotEmpty) 'q': q,
+    });
+    final response = await client.getAuthed(path);
+    final entries = (response['entries'] as List<dynamic>).map((e) => PlatformAuditLogEntry.fromJson(e as Map<String, dynamic>)).toList();
+    return (entries: entries, total: response['total'] as int);
   }
 
-  Future<List<PlatformErrorLogEntry>> listErrorLogs({int limit = 50, int offset = 0}) async {
-    final response = await client.getAuthed('/api/v1/platform/error-logs?limit=$limit&offset=$offset');
-    return (response['entries'] as List<dynamic>).map((e) => PlatformErrorLogEntry.fromJson(e as Map<String, dynamic>)).toList();
+  Future<({List<PlatformErrorLogEntry> entries, int total})> listErrorLogs({
+    int limit = 50,
+    int offset = 0,
+    int? statusCode,
+    String? code,
+    String? method,
+    DateTime? from,
+    DateTime? to,
+    String? q,
+  }) async {
+    final path = _query('/api/v1/platform/error-logs', {
+      'limit': '$limit',
+      'offset': '$offset',
+      if (statusCode != null) 'status_code': '$statusCode',
+      if (code != null && code.isNotEmpty) 'code': code,
+      if (method != null && method.isNotEmpty) 'method': method,
+      if (from != null) 'from': from.toUtc().toIso8601String(),
+      if (to != null) 'to': to.toUtc().toIso8601String(),
+      if (q != null && q.isNotEmpty) 'q': q,
+    });
+    final response = await client.getAuthed(path);
+    final entries = (response['entries'] as List<dynamic>).map((e) => PlatformErrorLogEntry.fromJson(e as Map<String, dynamic>)).toList();
+    return (entries: entries, total: response['total'] as int);
+  }
+
+  /// Builds `basePath?k=v&...` from only the non-null/non-empty params,
+  /// percent-encoding each value — the straightforward way to build an
+  /// optional-filter query string since no existing method in this file
+  /// had more than one or two always-present params to interpolate.
+  String _query(String basePath, Map<String, String> params) {
+    if (params.isEmpty) return basePath;
+    final queryString = params.entries.map((e) => '${Uri.encodeQueryComponent(e.key)}=${Uri.encodeQueryComponent(e.value)}').join('&');
+    return '$basePath?$queryString';
   }
 
   Future<PlatformSettings> getPlatformSettings() async {

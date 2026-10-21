@@ -10,6 +10,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/andipatti/feedmate/services/api/internal/domain/devicepairing"
+	"github.com/andipatti/feedmate/services/api/internal/domain/identity"
 	"github.com/andipatti/feedmate/services/api/internal/domain/platformadmin"
 	"github.com/andipatti/feedmate/services/api/internal/reqctx"
 )
@@ -130,6 +132,21 @@ func tenantDetailJSON(d *platformadmin.TenantDetail) map[string]interface{} {
 	out := tenantSummaryJSON(d.TenantSummary)
 	out["address_line1"] = d.AddressLine1
 	out["state_code"] = d.StateCode
+	if d.GSTIN != nil {
+		out["gstin"] = *d.GSTIN
+	}
+	if d.FSSAILicenseNo != nil {
+		out["fssai_license_no"] = *d.FSSAILicenseNo
+	}
+	if d.AddressLine2 != nil {
+		out["address_line2"] = *d.AddressLine2
+	}
+	if d.District != nil {
+		out["district"] = *d.District
+	}
+	if d.PostalCode != nil {
+		out["postal_code"] = *d.PostalCode
+	}
 	if d.Phone != nil {
 		out["phone"] = *d.Phone
 	}
@@ -203,6 +220,55 @@ func (h *PlatformHandlers) CreateTenant(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	WriteJSON(w, http.StatusCreated, map[string]string{"tenant_id": tenantID.String(), "owner_user_id": ownerUserID.String()})
+}
+
+type updateTenantRequest struct {
+	LegalName      string `json:"legal_name"`
+	TradeName      string `json:"trade_name,omitempty"`
+	GSTIN          string `json:"gstin,omitempty"`
+	FSSAILicenseNo string `json:"fssai_license_no,omitempty"`
+	AddressLine1   string `json:"address_line1"`
+	AddressLine2   string `json:"address_line2,omitempty"`
+	City           string `json:"city"`
+	District       string `json:"district,omitempty"`
+	StateCode      string `json:"state_code"`
+	PostalCode     string `json:"postal_code,omitempty"`
+	Phone          string `json:"phone,omitempty"`
+	Email          string `json:"email,omitempty"`
+}
+
+// UpdateTenant corrects a tenant's legal/contact identity fields — the
+// full-edit capability CreateTenant alone never provided.
+func (h *PlatformHandlers) UpdateTenant(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid tenant id")
+		return
+	}
+	var req updateTenantRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid request body")
+		return
+	}
+	err = h.Platform.UpdateTenant(r.Context(), id, platformadmin.UpdateTenantInput{
+		LegalName: req.LegalName, TradeName: req.TradeName, GSTIN: req.GSTIN, FSSAILicenseNo: req.FSSAILicenseNo,
+		AddressLine1: req.AddressLine1, AddressLine2: req.AddressLine2, City: req.City,
+		District: req.District, StateCode: req.StateCode, PostalCode: req.PostalCode,
+		Phone: req.Phone, Email: req.Email,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, platformadmin.ErrValidation):
+			WriteError(w, reqID, CodeValidation, err.Error())
+		case errors.Is(err, platformadmin.ErrNotFound):
+			WriteError(w, reqID, CodeNotFound, "tenant not found")
+		default:
+			WriteError(w, reqID, CodeInternal, "failed to update tenant: "+err.Error())
+		}
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 type setTenantStatusRequest struct {
@@ -475,4 +541,333 @@ func (h *PlatformHandlers) UpdatePlatformSettings(w http.ResponseWriter, r *http
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// --- Tenant user management from platform admin — closes the gap that
+// required hand-written SQL against production this session for a tenant
+// owner's forgotten password. ---
+
+func (h *PlatformHandlers) ListTenantUsers(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	tenantID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid tenant id")
+		return
+	}
+	query := r.URL.Query().Get("q")
+	limit, offset := parsePlatformLimitOffset(r)
+	page, err := h.Platform.ListTenantUsers(r.Context(), tenantID, query, limit, offset)
+	if err != nil {
+		WriteError(w, reqID, CodeInternal, "failed to list tenant users: "+err.Error())
+		return
+	}
+	out := make([]map[string]interface{}, 0, len(page.Users))
+	for _, u := range page.Users {
+		out = append(out, userSummaryToJSON(u))
+	}
+	WriteJSON(w, http.StatusOK, map[string]interface{}{"users": out, "total": page.Total})
+}
+
+func (h *PlatformHandlers) GetTenantUser(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	tenantID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid tenant id")
+		return
+	}
+	userID, err := uuid.Parse(chi.URLParam(r, "userId"))
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid user id")
+		return
+	}
+	detail, err := h.Platform.GetTenantUserDetail(r.Context(), tenantID, userID)
+	if err != nil {
+		if errors.Is(err, identity.ErrNotFound) {
+			WriteError(w, reqID, CodeNotFound, "user not found")
+			return
+		}
+		WriteError(w, reqID, CodeInternal, "failed to fetch user: "+err.Error())
+		return
+	}
+	resp := userSummaryToJSON(detail.User)
+	roleIDs := make([]string, 0, len(detail.RoleIDs))
+	for _, id := range detail.RoleIDs {
+		roleIDs = append(roleIDs, id.String())
+	}
+	resp["role_ids"] = roleIDs
+	WriteJSON(w, http.StatusOK, resp)
+}
+
+func (h *PlatformHandlers) CreateTenantUser(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	tenantID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid tenant id")
+		return
+	}
+	var req createUserRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid request body")
+		return
+	}
+	var roleIDs []uuid.UUID
+	for _, s := range req.RoleIDs {
+		rid, err := uuid.Parse(s)
+		if err != nil {
+			WriteError(w, reqID, CodeValidation, "role_ids must all be valid UUIDs")
+			return
+		}
+		roleIDs = append(roleIDs, rid)
+	}
+	userID, err := h.Platform.CreateTenantUser(r.Context(), tenantID, identity.CreateUserInput{
+		Username: req.Username, Password: req.Password, DisplayName: req.DisplayName,
+		Phone: req.Phone, Email: req.Email, RoleIDs: roleIDs,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, platformadmin.ErrValidation):
+			WriteError(w, reqID, CodeValidation, err.Error())
+		case errors.Is(err, identity.ErrUsernameTaken):
+			WriteError(w, reqID, CodeConflict, err.Error())
+		default:
+			WriteError(w, reqID, CodeInternal, "failed to create user: "+err.Error())
+		}
+		return
+	}
+	WriteJSON(w, http.StatusCreated, map[string]string{"id": userID.String()})
+}
+
+func (h *PlatformHandlers) UpdateTenantUser(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	tenantID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid tenant id")
+		return
+	}
+	userID, err := uuid.Parse(chi.URLParam(r, "userId"))
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid user id")
+		return
+	}
+	var req updateUserRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid request body")
+		return
+	}
+	if err := h.Platform.UpdateTenantUser(r.Context(), tenantID, userID, identity.UpdateUserInput{
+		DisplayName: req.DisplayName, Phone: req.Phone, Email: req.Email,
+	}); err != nil {
+		switch {
+		case errors.Is(err, platformadmin.ErrValidation):
+			WriteError(w, reqID, CodeValidation, err.Error())
+		case errors.Is(err, identity.ErrNotFound):
+			WriteError(w, reqID, CodeNotFound, "user not found")
+		default:
+			WriteError(w, reqID, CodeInternal, "failed to update user: "+err.Error())
+		}
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *PlatformHandlers) SetTenantUserStatus(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	tenantID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid tenant id")
+		return
+	}
+	userID, err := uuid.Parse(chi.URLParam(r, "userId"))
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid user id")
+		return
+	}
+	var req setUserStatusRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid request body")
+		return
+	}
+	if err := h.Platform.SetTenantUserStatus(r.Context(), tenantID, userID, req.Active); err != nil {
+		if errors.Is(err, identity.ErrNotFound) {
+			WriteError(w, reqID, CodeNotFound, "user not found")
+			return
+		}
+		WriteError(w, reqID, CodeInternal, "failed to update user status: "+err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ResetTenantUserPassword generates a brand-new password server-side and
+// returns it exactly once — the platform admin reads it off-screen and
+// relays it to the tenant out of band. This is the proper replacement for
+// the hand-written SQL password resets this session had to perform
+// directly against production.
+func (h *PlatformHandlers) ResetTenantUserPassword(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	claims, ok := reqctx.Claims(r.Context())
+	if !ok {
+		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		return
+	}
+	tenantID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid tenant id")
+		return
+	}
+	userID, err := uuid.Parse(chi.URLParam(r, "userId"))
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid user id")
+		return
+	}
+	newPassword, err := h.Platform.ResetTenantUserPassword(r.Context(), tenantID, userID, claims.UserID)
+	if err != nil {
+		WriteError(w, reqID, CodeInternal, "failed to reset password: "+err.Error())
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]string{"new_password": newPassword})
+}
+
+func (h *PlatformHandlers) ListTenantUserRoles(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	tenantID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid tenant id")
+		return
+	}
+	roles, err := h.Platform.ListTenantUserRoles(r.Context(), tenantID)
+	if err != nil {
+		WriteError(w, reqID, CodeInternal, "failed to list roles: "+err.Error())
+		return
+	}
+	out := make([]map[string]interface{}, 0, len(roles))
+	for _, role := range roles {
+		row := map[string]interface{}{"id": role.ID.String(), "name": role.Name, "is_system_role": role.IsSystemRole}
+		if role.Description != nil {
+			row["description"] = *role.Description
+		}
+		out = append(out, row)
+	}
+	WriteJSON(w, http.StatusOK, map[string]interface{}{"roles": out})
+}
+
+func (h *PlatformHandlers) SetTenantUserRoles(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	tenantID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid tenant id")
+		return
+	}
+	userID, err := uuid.Parse(chi.URLParam(r, "userId"))
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid user id")
+		return
+	}
+	var req setUserRolesRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid request body")
+		return
+	}
+	var roleIDs []uuid.UUID
+	for _, s := range req.RoleIDs {
+		rid, err := uuid.Parse(s)
+		if err != nil {
+			WriteError(w, reqID, CodeValidation, "role_ids must all be valid UUIDs")
+			return
+		}
+		roleIDs = append(roleIDs, rid)
+	}
+	if err := h.Platform.SetTenantUserRoles(r.Context(), tenantID, userID, roleIDs); err != nil {
+		if errors.Is(err, identity.ErrNotFound) {
+			WriteError(w, reqID, CodeNotFound, "user not found")
+			return
+		}
+		WriteError(w, reqID, CodeInternal, "failed to update user roles: "+err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// --- Tenant device management from platform admin. ---
+
+func (h *PlatformHandlers) ListTenantDevices(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	tenantID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid tenant id")
+		return
+	}
+	query := r.URL.Query().Get("q")
+	limit, offset := parsePlatformLimitOffset(r)
+	page, err := h.Platform.ListTenantDevices(r.Context(), tenantID, query, limit, offset)
+	if err != nil {
+		WriteError(w, reqID, CodeInternal, "failed to list devices: "+err.Error())
+		return
+	}
+	out := make([]map[string]interface{}, 0, len(page.Devices))
+	for _, d := range page.Devices {
+		out = append(out, deviceRowJSON(d))
+	}
+	WriteJSON(w, http.StatusOK, map[string]interface{}{"devices": out, "total": page.Total})
+}
+
+func (h *PlatformHandlers) RevokeTenantDevice(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	claims, ok := reqctx.Claims(r.Context())
+	if !ok {
+		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		return
+	}
+	tenantID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid tenant id")
+		return
+	}
+	deviceID, err := uuid.Parse(chi.URLParam(r, "deviceId"))
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid device id")
+		return
+	}
+	var req revokeDeviceRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid request body")
+		return
+	}
+	if err := h.Platform.RevokeTenantDevice(r.Context(), tenantID, deviceID, claims.UserID, req.Reason); err != nil {
+		if errors.Is(err, devicepairing.ErrDeviceNotFound) {
+			WriteError(w, reqID, CodeNotFound, "device not found")
+			return
+		}
+		WriteError(w, reqID, CodeInternal, "failed to revoke device: "+err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// GeneratePairingCodeForTenant lets a platform admin generate a device
+// pairing code for any tenant directly — the explicit, named gap this phase
+// closes: tenants repeatedly forget to generate their own, and the
+// workaround until now was hand-inserting a row via SQL directly against
+// production.
+func (h *PlatformHandlers) GeneratePairingCodeForTenant(w http.ResponseWriter, r *http.Request) {
+	reqID := reqctx.RequestID(r.Context())
+	claims, ok := reqctx.Claims(r.Context())
+	if !ok {
+		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		return
+	}
+	tenantID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, reqID, CodeValidation, "invalid tenant id")
+		return
+	}
+	result, err := h.Platform.GeneratePairingCodeForTenant(r.Context(), tenantID, claims.UserID)
+	if err != nil {
+		WriteError(w, reqID, CodeInternal, "failed to generate pairing code: "+err.Error())
+		return
+	}
+	WriteJSON(w, http.StatusCreated, map[string]string{
+		"code":       result.Code,
+		"expires_at": result.ExpiresAt.Format("2006-01-02T15:04:05Z07:00"),
+	})
 }

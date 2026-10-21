@@ -47,21 +47,27 @@ func (h *DeviceHandlers) List(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]map[string]interface{}, 0, len(page.Devices))
 	for _, d := range page.Devices {
-		row := map[string]interface{}{
-			"id":             d.ID.String(),
-			"device_uuid":    d.DeviceUUID.String(),
-			"display_name":   d.DisplayName,
-			"platform":       d.Platform,
-			"status":         d.Status,
-			"security_state": d.SecurityState,
-			"registered_at":  d.RegisteredAt.Format(time.RFC3339),
-		}
-		if d.LastSeenAt != nil {
-			row["last_seen_at"] = d.LastSeenAt.Format(time.RFC3339)
-		}
-		out = append(out, row)
+		out = append(out, deviceRowJSON(d))
 	}
 	WriteJSON(w, http.StatusOK, map[string]interface{}{"devices": out, "total": page.Total})
+}
+
+// deviceRowJSON is shared with platform_handlers.go's tenant-device listing
+// (same shape, platform admin just reaches a different tenant's rows).
+func deviceRowJSON(d devicepairing.Device) map[string]interface{} {
+	row := map[string]interface{}{
+		"id":             d.ID.String(),
+		"device_uuid":    d.DeviceUUID.String(),
+		"display_name":   d.DisplayName,
+		"platform":       d.Platform,
+		"status":         d.Status,
+		"security_state": d.SecurityState,
+		"registered_at":  d.RegisteredAt.Format(time.RFC3339),
+	}
+	if d.LastSeenAt != nil {
+		row["last_seen_at"] = d.LastSeenAt.Format(time.RFC3339)
+	}
+	return row
 }
 
 type revokeDeviceRequest struct {

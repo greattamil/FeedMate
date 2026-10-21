@@ -9,8 +9,11 @@ package platformadmin
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
+	"math/big"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,6 +21,7 @@ import (
 
 	"github.com/andipatti/feedmate/services/api/internal/auth"
 	"github.com/andipatti/feedmate/services/api/internal/dbctx"
+	"github.com/andipatti/feedmate/services/api/internal/domain/devicepairing"
 	"github.com/andipatti/feedmate/services/api/internal/domain/identity"
 )
 
@@ -247,6 +251,290 @@ func (s *Service) CreateTenant(ctx context.Context, in CreateTenantInput) (tenan
 		return uuid.Nil, uuid.Nil, err
 	}
 	return tenantID, ownerUserID, nil
+}
+
+// UpdateTenant corrects a tenant's legal/contact identity fields after
+// creation — CreateTenant is the only way these were ever set before this,
+// with no way to fix a typo or update an address afterward.
+func (s *Service) UpdateTenant(ctx context.Context, id uuid.UUID, in UpdateTenantInput) error {
+	if in.LegalName == "" {
+		return fmt.Errorf("%w: legal_name is required", ErrValidation)
+	}
+	if in.AddressLine1 == "" || in.City == "" || in.StateCode == "" {
+		return fmt.Errorf("%w: address_line1, city, and state_code are required", ErrValidation)
+	}
+	return s.db.WithAdminTx(ctx, func(tx pgx.Tx) error {
+		return UpdateTenant(ctx, tx, id, in)
+	})
+}
+
+// --- Tenant user management (platform admin acting on one tenant's own
+// staff accounts, without impersonating a tenant user or needing one to be
+// logged in — see dbctx.WithAdminTenantTx's doc comment for why admin_mode
+// must stay off here). Each method is a thin wrapper around identity
+// package's repository-level functions (not identity.Service, which
+// hardcodes the app_user pool via WithTenantTx) replicating the same thin
+// validation identity.Service's own methods already do. ---
+
+func (s *Service) ListTenantUsers(ctx context.Context, tenantID uuid.UUID, query string, limit, offset int) (*identity.UserListPage, error) {
+	var page identity.UserListPage
+	err := s.db.WithAdminTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
+		users, total, err := identity.ListUsers(ctx, tx, query, limit, offset)
+		if err != nil {
+			return err
+		}
+		page.Users = users
+		page.Total = total
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &page, nil
+}
+
+func (s *Service) GetTenantUserDetail(ctx context.Context, tenantID, userID uuid.UUID) (*identity.UserDetail, error) {
+	var detail identity.UserDetail
+	err := s.db.WithAdminTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
+		user, err := identity.GetUserSummaryByID(ctx, tx, userID)
+		if err != nil {
+			return err
+		}
+		detail.User = *user
+		roleIDs, err := identity.ListRolesForUser(ctx, tx, userID)
+		if err != nil {
+			return err
+		}
+		detail.RoleIDs = roleIDs
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &detail, nil
+}
+
+// CreateTenantUser registers a new staff account for a tenant — the same
+// shape as identity.Service.CreateUser, reachable without that tenant's own
+// user being logged in.
+func (s *Service) CreateTenantUser(ctx context.Context, tenantID uuid.UUID, in identity.CreateUserInput) (uuid.UUID, error) {
+	if in.Username == "" {
+		return uuid.Nil, fmt.Errorf("%w: username is required", ErrValidation)
+	}
+	if in.DisplayName == "" {
+		return uuid.Nil, fmt.Errorf("%w: display_name is required", ErrValidation)
+	}
+	if len(in.Password) < 8 {
+		return uuid.Nil, fmt.Errorf("%w: password must be at least 8 characters", ErrValidation)
+	}
+	hash, err := auth.HashPassword(in.Password, s.bcryptCost)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("hash password: %w", err)
+	}
+
+	var userID uuid.UUID
+	err = s.db.WithAdminTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
+		if _, err := identity.FindUserByUsername(ctx, tx, in.Username); err == nil {
+			return identity.ErrUsernameTaken
+		} else if !errors.Is(err, identity.ErrNotFound) {
+			return err
+		}
+		id, err := identity.InsertUser(ctx, tx, tenantID, in.Username, hash, in.DisplayName, in.Phone, in.Email)
+		if err != nil {
+			return fmt.Errorf("insert user: %w", err)
+		}
+		for _, roleID := range in.RoleIDs {
+			if err := identity.AssignRole(ctx, tx, tenantID, id, roleID); err != nil {
+				return fmt.Errorf("assign role %s: %w", roleID, err)
+			}
+		}
+		userID = id
+		return nil
+	})
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return userID, nil
+}
+
+func (s *Service) UpdateTenantUser(ctx context.Context, tenantID, userID uuid.UUID, in identity.UpdateUserInput) error {
+	if in.DisplayName == "" {
+		return fmt.Errorf("%w: display_name is required", ErrValidation)
+	}
+	return s.db.WithAdminTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
+		return identity.UpdateUser(ctx, tx, userID, in.DisplayName, in.Phone, in.Email)
+	})
+}
+
+func (s *Service) SetTenantUserStatus(ctx context.Context, tenantID, userID uuid.UUID, active bool) error {
+	status := "ACTIVE"
+	if !active {
+		status = "DISABLED"
+	}
+	return s.db.WithAdminTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
+		return identity.SetUserStatus(ctx, tx, userID, status)
+	})
+}
+
+// generateTempPassword produces a random, readable one-time password for a
+// platform-admin-initiated reset — same alphabet style as
+// devicepairing.GenerateCode (no visually ambiguous characters), but longer
+// since this is a password a human types once then should change, not a
+// short code read aloud between two screens.
+func generateTempPassword() (string, error) {
+	const alphabet = "23456789ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz"
+	const length = 14
+	var b strings.Builder
+	for i := 0; i < length; i++ {
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(alphabet))))
+		if err != nil {
+			return "", fmt.Errorf("generate temp password: %w", err)
+		}
+		b.WriteByte(alphabet[n.Int64()])
+	}
+	return b.String(), nil
+}
+
+// ResetTenantUserPassword overwrites a staff account's password with a
+// freshly generated one and returns it exactly once — the caller (HTTP
+// handler) must show it to the platform admin and never log or persist it
+// elsewhere, the same "shown once" discipline as a device pairing code.
+// This closes the exact gap that required hand-written SQL password resets
+// against production earlier this session.
+func (s *Service) ResetTenantUserPassword(ctx context.Context, tenantID, userID, platformAdminID uuid.UUID) (string, error) {
+	newPassword, err := generateTempPassword()
+	if err != nil {
+		return "", err
+	}
+	hash, err := auth.HashPassword(newPassword, s.bcryptCost)
+	if err != nil {
+		return "", fmt.Errorf("hash password: %w", err)
+	}
+	err = s.db.WithAdminTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
+		if err := identity.SetPasswordHash(ctx, tx, userID, hash); err != nil {
+			return err
+		}
+		return InsertCrossTenantAuditLog(ctx, tx, tenantID, platformAdminID, "USER_PASSWORD_RESET_BY_PLATFORM_ADMIN", "user", &userID, "", nil)
+	})
+	if err != nil {
+		return "", err
+	}
+	return newPassword, nil
+}
+
+func (s *Service) ListTenantUserRoles(ctx context.Context, tenantID uuid.UUID) ([]identity.Role, error) {
+	var roles []identity.Role
+	err := s.db.WithAdminTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
+		var err error
+		roles, err = identity.ListRoles(ctx, tx)
+		return err
+	})
+	return roles, err
+}
+
+func (s *Service) SetTenantUserRoles(ctx context.Context, tenantID, userID uuid.UUID, roleIDs []uuid.UUID) error {
+	return s.db.WithAdminTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
+		if _, err := identity.GetUserByID(ctx, tx, userID); err != nil {
+			return err
+		}
+		existing, err := identity.ListRolesForUser(ctx, tx, userID)
+		if err != nil {
+			return err
+		}
+		desired := make(map[uuid.UUID]bool, len(roleIDs))
+		for _, id := range roleIDs {
+			desired[id] = true
+		}
+		current := make(map[uuid.UUID]bool, len(existing))
+		for _, id := range existing {
+			current[id] = true
+		}
+		for _, id := range existing {
+			if !desired[id] {
+				if err := identity.RevokeRole(ctx, tx, userID, id); err != nil {
+					return err
+				}
+			}
+		}
+		for _, id := range roleIDs {
+			if !current[id] {
+				if err := identity.AssignRole(ctx, tx, tenantID, userID, id); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+}
+
+// --- Tenant device management (same WithAdminTenantTx mechanism as user
+// management above). ---
+
+func (s *Service) ListTenantDevices(ctx context.Context, tenantID uuid.UUID, query string, limit, offset int) (*devicepairing.DeviceListPage, error) {
+	var page devicepairing.DeviceListPage
+	err := s.db.WithAdminTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
+		devices, total, err := devicepairing.ListDevices(ctx, tx, query, limit, offset)
+		if err != nil {
+			return err
+		}
+		page.Devices = devices
+		page.Total = total
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &page, nil
+}
+
+// RevokeTenantDevice is devicepairing.Service.RevokeDevice's platform-admin
+// counterpart — same effect (status REVOKED, every refresh token
+// invalidated) but attributed to a platform admin rather than a tenant
+// user, since there is no tenant actorUserID to record here.
+func (s *Service) RevokeTenantDevice(ctx context.Context, tenantID, deviceID, platformAdminID uuid.UUID, reason string) error {
+	return s.db.WithAdminTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
+		device, err := devicepairing.GetDeviceByID(ctx, tx, deviceID)
+		if err != nil {
+			return err
+		}
+		if err := devicepairing.SetDeviceStatus(ctx, tx, deviceID, "REVOKED"); err != nil {
+			return err
+		}
+		if err := devicepairing.RevokeAllSessionsForDevice(ctx, tx, deviceID); err != nil {
+			return err
+		}
+		return InsertCrossTenantAuditLog(ctx, tx, tenantID, platformAdminID, "DEVICE_REVOKED", "device", &deviceID, reason,
+			map[string]interface{}{"display_name": device.DisplayName, "previous_status": device.Status})
+	})
+}
+
+// GeneratePairingCodeForTenant is devicepairing.Service.GeneratePairingCode's
+// platform-admin counterpart — the explicit, named gap this phase closes:
+// tenants repeatedly forget to generate their own pairing code, and this
+// session's workaround until now was hand-inserting a row via SQL directly
+// against production. Runs under WithAdminTx (not WithAdminTenantTx) since
+// this is a genuinely cross-tenant write with no prior tenant session to
+// scope to — the insert supplies tenantID as a column value, which
+// device_pairing_codes' admin_cross_tenant RLS policy permits unconditionally
+// under admin_mode.
+func (s *Service) GeneratePairingCodeForTenant(ctx context.Context, tenantID, platformAdminID uuid.UUID) (*devicepairing.GenerateResult, error) {
+	code, err := devicepairing.GenerateCode()
+	if err != nil {
+		return nil, err
+	}
+	expiresAt := time.Now().Add(devicepairing.CodeTTL)
+
+	err = s.db.WithAdminTx(ctx, func(tx pgx.Tx) error {
+		if _, err := devicepairing.InsertCodeByPlatformAdmin(ctx, tx, tenantID, platformAdminID, code, expiresAt); err != nil {
+			return fmt.Errorf("insert pairing code: %w", err)
+		}
+		return InsertCrossTenantAuditLog(ctx, tx, tenantID, platformAdminID, "DEVICE_PAIRING_CODE_GENERATED_BY_PLATFORM_ADMIN", "device_pairing_code", nil, "",
+			map[string]interface{}{"expires_at": expiresAt})
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &devicepairing.GenerateResult{Code: code, ExpiresAt: expiresAt}, nil
 }
 
 // indianFinancialYear returns the Apr 1–Mar 31 financial year containing t,

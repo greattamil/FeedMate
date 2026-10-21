@@ -10,9 +10,9 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	decimalpgx "github.com/jackc/pgx-shopspring-decimal"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	decimalpgx "github.com/jackc/pgx-shopspring-decimal"
 )
 
 // DB holds two genuinely separate connection pools, matching the two
@@ -159,4 +159,48 @@ func (d *DB) WithAdminTx(ctx context.Context, fn func(tx pgx.Tx) error) error {
 // that do not need explicit transaction control from the caller.
 func (d *DB) WithTenantReadTx(ctx context.Context, tenantID uuid.UUID, fn func(tx pgx.Tx) error) error {
 	return d.WithTenantTx(ctx, tenantID, fn)
+}
+
+// WithAdminTenantTx runs fn on the app_admin pool (elevated DB role, no
+// tenant user needed) with ONLY app.tenant_id set to tenantID —
+// deliberately NOT app.admin_mode. This lets trusted platform-admin code
+// reuse existing tenant-scoped repository functions (identity.ListUsers,
+// devicepairing.ListDevices, etc.) that carry no explicit tenant_id
+// parameter of their own and rely entirely on RLS's tenant_isolation policy
+// for scoping, for exactly one chosen tenant, without impersonating a
+// tenant user or requiring one to exist/be logged in.
+//
+// admin_mode must stay off here: every RLS policy in this schema is
+// PERMISSIVE (OR-combined, confirmed in migration 0012 — no RESTRICTIVE
+// policy exists), and admin_cross_tenant's USING/WITH CHECK clause is
+// `admin_mode = 'on'` with NO tenant_id condition at all. Turning
+// admin_mode on here would OR that unconditional policy in on top of
+// tenant_isolation and defeat the entire point of this helper — it would
+// return/modify EVERY tenant's rows, not just the one requested, for any
+// repository function that has no explicit tenant_id WHERE clause of its
+// own (most of them, by design — they trust RLS). Only
+// tenant_isolation's `tenant_id = app.tenant_id` check must be left active.
+//
+// For operations that must write a NEW tenant_id value with no prior
+// tenant context at all (e.g. a platform admin generating a device pairing
+// code for a tenant that has no active session), use WithAdminTx instead —
+// that is the one case admin_mode is actually meant for.
+func (d *DB) WithAdminTenantTx(ctx context.Context, tenantID uuid.UUID, fn func(tx pgx.Tx) error) error {
+	tx, err := d.AdminPool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `SELECT set_config('app.tenant_id', $1, true)`, tenantID.String()); err != nil {
+		return fmt.Errorf("set tenant context: %w", err)
+	}
+
+	if err := fn(tx); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
+	}
+	return nil
 }

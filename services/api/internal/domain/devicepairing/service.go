@@ -21,8 +21,11 @@ var (
 )
 
 const (
-	codeTTL     = 10 * time.Minute
-	codeLength  = 8
+	// CodeTTL is exported so platform-admin-generated codes (see
+	// platformadmin.Service.GeneratePairingCodeForTenant) use the identical
+	// lifetime as a tenant-generated one.
+	CodeTTL    = 10 * time.Minute
+	codeLength = 8
 	// Excludes visually ambiguous characters (0/O, 1/I/L) since a human reads
 	// this code aloud or copies it between two physical devices.
 	codeAlphabet = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"
@@ -36,7 +39,11 @@ func NewService(db *dbctx.DB) *Service {
 	return &Service{db: db}
 }
 
-func generateCode() (string, error) {
+// GenerateCode produces a short-lived, single-use pairing code string (the
+// code generation half only — callers are responsible for persisting it).
+// Exported so platform-admin code can generate the same shape of code
+// without duplicating the alphabet/length choice.
+func GenerateCode() (string, error) {
 	var b strings.Builder
 	for i := 0; i < codeLength; i++ {
 		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(codeAlphabet))))
@@ -59,11 +66,11 @@ type GenerateResult struct {
 // must be treated like a temporary password (shown once, not logged, not
 // persisted client-side beyond the pairing screen).
 func (s *Service) GeneratePairingCode(ctx context.Context, tenantID, userID uuid.UUID) (*GenerateResult, error) {
-	code, err := generateCode()
+	code, err := GenerateCode()
 	if err != nil {
 		return nil, err
 	}
-	expiresAt := time.Now().Add(codeTTL)
+	expiresAt := time.Now().Add(CodeTTL)
 
 	err = s.db.WithTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
 		_, err := InsertCode(ctx, tx, tenantID, userID, code, expiresAt)

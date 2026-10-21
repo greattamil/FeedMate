@@ -103,7 +103,12 @@ func ListTenants(ctx context.Context, tx pgx.Tx) ([]TenantSummary, error) {
 // platform admin's tenant detail/edit screen.
 type TenantDetail struct {
 	TenantSummary
+	GSTIN          *string
+	FSSAILicenseNo *string
 	AddressLine1   string
+	AddressLine2   *string
+	District       *string
+	PostalCode     *string
 	StateCode      string
 	Phone          *string
 	Email          *string
@@ -115,14 +120,16 @@ type TenantDetail struct {
 
 func GetTenant(ctx context.Context, tx pgx.Tx, id uuid.UUID) (*TenantDetail, error) {
 	row := tx.QueryRow(ctx, `
-		SELECT id, legal_name, trade_name, address_line1, city, state_code, phone, email, status,
+		SELECT id, legal_name, trade_name, gstin, fssai_license_no,
+		       address_line1, address_line2, city, district, state_code, postal_code, phone, email, status,
 		       plan_code, plan_expires_at, app_display_name, logo_url, primary_color, created_at,
 		       (SELECT count(*) FROM users u WHERE u.tenant_id = tenants.id) AS user_count
 		FROM tenants WHERE id = $1
 	`, id)
 	var d TenantDetail
 	if err := row.Scan(
-		&d.ID, &d.LegalName, &d.TradeName, &d.AddressLine1, &d.City, &d.StateCode, &d.Phone, &d.Email, &d.Status,
+		&d.ID, &d.LegalName, &d.TradeName, &d.GSTIN, &d.FSSAILicenseNo,
+		&d.AddressLine1, &d.AddressLine2, &d.City, &d.District, &d.StateCode, &d.PostalCode, &d.Phone, &d.Email, &d.Status,
 		&d.PlanCode, &d.PlanExpiresAt, &d.AppDisplayName, &d.LogoURL, &d.PrimaryColor, &d.CreatedAt, &d.UserCount,
 	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -136,6 +143,45 @@ func GetTenant(ctx context.Context, tx pgx.Tx, id uuid.UUID) (*TenantDetail, err
 	}
 	d.Features = features
 	return &d, nil
+}
+
+// UpdateTenantInput is every tenant-identity field a platform admin can
+// correct after creation — unlike SetTenantStatus/SetTenantPlan/
+// SetTenantBranding/SetTenantFeature (narrow, single-purpose), this covers
+// the legal/contact fields CreateTenant sets once at provisioning time and
+// nothing since has been able to edit.
+type UpdateTenantInput struct {
+	LegalName      string
+	TradeName      string
+	GSTIN          string
+	FSSAILicenseNo string
+	AddressLine1   string
+	AddressLine2   string
+	City           string
+	District       string
+	StateCode      string
+	PostalCode     string
+	Phone          string
+	Email          string
+}
+
+func UpdateTenant(ctx context.Context, tx pgx.Tx, id uuid.UUID, in UpdateTenantInput) error {
+	tag, err := tx.Exec(ctx, `
+		UPDATE tenants SET
+			legal_name = $2, trade_name = $3, gstin = $4, fssai_license_no = $5,
+			address_line1 = $6, address_line2 = $7, city = $8, district = $9, state_code = $10, postal_code = $11,
+			phone = $12, email = $13, updated_at = now()
+		WHERE id = $1
+	`, id, in.LegalName, nullIfEmpty(in.TradeName), nullIfEmpty(in.GSTIN), nullIfEmpty(in.FSSAILicenseNo),
+		in.AddressLine1, nullIfEmpty(in.AddressLine2), in.City, nullIfEmpty(in.District), in.StateCode, nullIfEmpty(in.PostalCode),
+		nullIfEmpty(in.Phone), nullIfEmpty(in.Email))
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func listTenantFeatures(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) (map[string]bool, error) {
@@ -286,6 +332,19 @@ func InsertOwnerUser(ctx context.Context, tx pgx.Tx, tenantID, roleID uuid.UUID,
 		return uuid.Nil, err
 	}
 	return userID, nil
+}
+
+// InsertCrossTenantAuditLog records a platform admin's action against a
+// specific tenant's resources (password reset, device revoke, pairing-code
+// generation, user create/edit) — attributed by actor_platform_admin_id
+// rather than actor_user_id, since a platform admin is never a row in
+// `users` (see migration 0026). afterJSON may be nil.
+func InsertCrossTenantAuditLog(ctx context.Context, tx pgx.Tx, tenantID, platformAdminID uuid.UUID, actionCode, entityType string, entityID *uuid.UUID, reason string, afterJSON interface{}) error {
+	_, err := tx.Exec(ctx, `
+		INSERT INTO audit_logs (tenant_id, actor_platform_admin_id, action_code, entity_type, entity_id, reason, after_json)
+		VALUES ($1,$2,$3,$4,$5,$6,$7)
+	`, tenantID, platformAdminID, actionCode, entityType, entityID, nullIfEmpty(reason), afterJSON)
+	return err
 }
 
 func nullIfEmpty(s string) *string {

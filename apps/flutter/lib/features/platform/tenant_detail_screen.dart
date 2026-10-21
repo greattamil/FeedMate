@@ -8,11 +8,17 @@ import '../../core/theme/app_decorations.dart';
 import '../../core/theme/app_typography.dart';
 import 'platform_api.dart';
 import 'platform_api_client.dart';
+import 'tenant_devices_tab.dart';
+import 'tenant_users_tab.dart';
 
 /// The platform admin's full control surface for one tenant: suspend/
 /// reactivate, plan tier + expiry, whitelabel branding, and feature-flag
-/// toggles — everything a shop's own Owner has no access to change about
-/// their own account.
+/// toggles on the Overview tab — everything a shop's own Owner has no
+/// access to change about their own account — plus Users and Devices tabs
+/// that give the platform owner a safe UI for the lockout-recovery tasks
+/// that used to require SSHing into production and hand-writing SQL
+/// (resetting a forgotten password, generating a pairing code for a
+/// tenant who forgot to generate their own).
 class TenantDetailScreen extends StatefulWidget {
   final String tenantId;
   const TenantDetailScreen({super.key, required this.tenantId});
@@ -26,15 +32,23 @@ class TenantDetailScreen extends StatefulWidget {
 // list is just a convenience — SetTenantFeature accepts any code.
 const _knownFeatureCodes = ['advanced_reports', 'multi_location', 'sms_reminders', 'whatsapp_invoices'];
 
-class _TenantDetailScreenState extends State<TenantDetailScreen> {
+class _TenantDetailScreenState extends State<TenantDetailScreen> with SingleTickerProviderStateMixin {
   TenantDetail? _detail;
   bool _loading = true;
   String? _error;
+  late final TabController _tabController;
 
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 3, vsync: this);
     _load();
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -146,6 +160,32 @@ class _TenantDetailScreenState extends State<TenantDetailScreen> {
     await _run(() => api.setTenantFeature(widget.tenantId, code, enabled));
   }
 
+  Future<void> _editTenant() async {
+    final detail = _detail;
+    if (detail == null) return;
+    final result = await showDialog<_TenantEditResult>(
+      context: context,
+      builder: (context) => _TenantEditDialog(detail: detail),
+    );
+    if (result == null) return;
+    final api = PlatformApi(context.read<PlatformApiClient>());
+    await _run(() => api.updateTenant(
+          widget.tenantId,
+          legalName: result.legalName,
+          tradeName: result.tradeName,
+          gstin: result.gstin,
+          fssaiLicenseNo: result.fssaiLicenseNo,
+          addressLine1: result.addressLine1,
+          addressLine2: result.addressLine2,
+          city: result.city,
+          district: result.district,
+          stateCode: result.stateCode,
+          postalCode: result.postalCode,
+          phone: result.phone,
+          email: result.email,
+        ));
+  }
+
   Color _statusColor(String status) {
     switch (status) {
       case 'ACTIVE':
@@ -167,6 +207,29 @@ class _TenantDetailScreenState extends State<TenantDetailScreen> {
         foregroundColor: AppColors.textPrimary,
         elevation: 0,
         title: Text(detail?.legalName ?? 'Tenant', style: AppTypography.headline),
+        actions: [
+          if (detail != null)
+            IconButton(
+              key: const Key('tenant_edit_button'),
+              onPressed: _editTenant,
+              icon: const Icon(Icons.edit_outlined),
+              tooltip: 'Edit Tenant',
+            ),
+        ],
+        bottom: detail == null
+            ? null
+            : TabBar(
+                key: const Key('tenant_detail_tabs'),
+                controller: _tabController,
+                labelColor: AppColors.primary,
+                unselectedLabelColor: AppColors.textSecondary,
+                indicatorColor: AppColors.primary,
+                tabs: const [
+                  Tab(text: 'Overview'),
+                  Tab(text: 'Users'),
+                  Tab(text: 'Devices'),
+                ],
+              ),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
@@ -179,38 +242,49 @@ class _TenantDetailScreenState extends State<TenantDetailScreen> {
                 )
               : detail == null
                   ? const SizedBox.shrink()
-                  : SingleChildScrollView(
-                      padding: EdgeInsets.all(context.responsive(mobile: 16.0, desktop: 24.0)),
-                      child: Center(
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: ResponsiveBreakpoints.maxContentWidth),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              _headerCard(detail),
-                              const SizedBox(height: 16),
-                              context.isDesktop
-                                  ? IntrinsicHeight(
-                                      child: Row(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Expanded(child: _sideColumn(detail)),
-                                          const SizedBox(width: 16),
-                                          Expanded(flex: 2, child: _mainColumn(detail)),
-                                        ],
-                                      ),
-                                    )
-                                  // Mobile: the actionable "control panel" (status/
-                                  // plan/usage) comes first — a platform admin's
-                                  // most common reason to open this screen (suspend
-                                  // a tenant, check their plan) must not require
-                                  // scrolling past branding/feature-flag cards first.
-                                  : Column(children: [_sideColumn(detail), const SizedBox(height: 16), _mainColumn(detail)]),
-                            ],
-                          ),
-                        ),
-                      ),
+                  : TabBarView(
+                      controller: _tabController,
+                      children: [
+                        _buildOverviewTab(detail),
+                        TenantUsersTab(tenantId: widget.tenantId),
+                        TenantDevicesTab(tenantId: widget.tenantId),
+                      ],
                     ),
+    );
+  }
+
+  Widget _buildOverviewTab(TenantDetail detail) {
+    return SingleChildScrollView(
+      padding: EdgeInsets.all(context.responsive(mobile: 16.0, desktop: 24.0)),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: ResponsiveBreakpoints.maxContentWidth),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _headerCard(detail),
+              const SizedBox(height: 16),
+              context.isDesktop
+                  ? IntrinsicHeight(
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(child: _sideColumn(detail)),
+                          const SizedBox(width: 16),
+                          Expanded(flex: 2, child: _mainColumn(detail)),
+                        ],
+                      ),
+                    )
+                  // Mobile: the actionable "control panel" (status/
+                  // plan/usage) comes first — a platform admin's
+                  // most common reason to open this screen (suspend
+                  // a tenant, check their plan) must not require
+                  // scrolling past branding/feature-flag cards first.
+                  : Column(children: [_sideColumn(detail), const SizedBox(height: 16), _mainColumn(detail)]),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -518,6 +592,220 @@ class _BrandingDialogState extends State<_BrandingDialog> {
             'logo_url': _logoController.text.trim(),
             'primary_color': _colorController.text.trim(),
           }),
+          child: const Text('Save'),
+        ),
+      ],
+    );
+  }
+}
+
+class _TenantEditResult {
+  final String legalName;
+  final String? tradeName;
+  final String? gstin;
+  final String? fssaiLicenseNo;
+  final String addressLine1;
+  final String? addressLine2;
+  final String city;
+  final String? district;
+  final String stateCode;
+  final String? postalCode;
+  final String? phone;
+  final String? email;
+
+  _TenantEditResult({
+    required this.legalName,
+    this.tradeName,
+    this.gstin,
+    this.fssaiLicenseNo,
+    required this.addressLine1,
+    this.addressLine2,
+    required this.city,
+    this.district,
+    required this.stateCode,
+    this.postalCode,
+    this.phone,
+    this.email,
+  });
+}
+
+/// Full registration edit: legal/trade name, tax registrations, address,
+/// and contact details — the fix for the owner having to hand-write SQL
+/// to correct a tenant's GSTIN or address.
+class _TenantEditDialog extends StatefulWidget {
+  final TenantDetail detail;
+  const _TenantEditDialog({required this.detail});
+
+  @override
+  State<_TenantEditDialog> createState() => _TenantEditDialogState();
+}
+
+class _TenantEditDialogState extends State<_TenantEditDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _legalNameController;
+  late final TextEditingController _tradeNameController;
+  late final TextEditingController _gstinController;
+  late final TextEditingController _fssaiController;
+  late final TextEditingController _addressLine1Controller;
+  late final TextEditingController _addressLine2Controller;
+  late final TextEditingController _cityController;
+  late final TextEditingController _districtController;
+  late final TextEditingController _stateCodeController;
+  late final TextEditingController _postalCodeController;
+  late final TextEditingController _phoneController;
+  late final TextEditingController _emailController;
+
+  @override
+  void initState() {
+    super.initState();
+    final detail = widget.detail;
+    _legalNameController = TextEditingController(text: detail.legalName);
+    _tradeNameController = TextEditingController(text: detail.tradeName ?? '');
+    _gstinController = TextEditingController(text: detail.gstin ?? '');
+    _fssaiController = TextEditingController(text: detail.fssaiLicenseNo ?? '');
+    _addressLine1Controller = TextEditingController(text: detail.addressLine1);
+    _addressLine2Controller = TextEditingController(text: detail.addressLine2 ?? '');
+    _cityController = TextEditingController(text: detail.city);
+    _districtController = TextEditingController(text: detail.district ?? '');
+    _stateCodeController = TextEditingController(text: detail.stateCode);
+    _postalCodeController = TextEditingController(text: detail.postalCode ?? '');
+    _phoneController = TextEditingController(text: detail.phone ?? '');
+    _emailController = TextEditingController(text: detail.email ?? '');
+  }
+
+  @override
+  void dispose() {
+    _legalNameController.dispose();
+    _tradeNameController.dispose();
+    _gstinController.dispose();
+    _fssaiController.dispose();
+    _addressLine1Controller.dispose();
+    _addressLine2Controller.dispose();
+    _cityController.dispose();
+    _districtController.dispose();
+    _stateCodeController.dispose();
+    _postalCodeController.dispose();
+    _phoneController.dispose();
+    _emailController.dispose();
+    super.dispose();
+  }
+
+  String? _orNull(TextEditingController c) => c.text.trim().isEmpty ? null : c.text.trim();
+
+  void _submit() {
+    if (!_formKey.currentState!.validate()) return;
+    Navigator.of(context).pop(_TenantEditResult(
+      legalName: _legalNameController.text.trim(),
+      tradeName: _orNull(_tradeNameController),
+      gstin: _orNull(_gstinController),
+      fssaiLicenseNo: _orNull(_fssaiController),
+      addressLine1: _addressLine1Controller.text.trim(),
+      addressLine2: _orNull(_addressLine2Controller),
+      city: _cityController.text.trim(),
+      district: _orNull(_districtController),
+      stateCode: _stateCodeController.text.trim(),
+      postalCode: _orNull(_postalCodeController),
+      phone: _orNull(_phoneController),
+      email: _orNull(_emailController),
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Edit Tenant'),
+      content: Form(
+        key: _formKey,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                key: const Key('tenant_edit_legal_name_field'),
+                controller: _legalNameController,
+                decoration: const InputDecoration(labelText: 'Legal Name'),
+                validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                key: const Key('tenant_edit_trade_name_field'),
+                controller: _tradeNameController,
+                decoration: const InputDecoration(labelText: 'Trade Name (optional)'),
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                key: const Key('tenant_edit_gstin_field'),
+                controller: _gstinController,
+                decoration: const InputDecoration(labelText: 'GSTIN (optional)'),
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                key: const Key('tenant_edit_fssai_field'),
+                controller: _fssaiController,
+                decoration: const InputDecoration(labelText: 'FSSAI License No. (optional)'),
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                key: const Key('tenant_edit_address_line1_field'),
+                controller: _addressLine1Controller,
+                decoration: const InputDecoration(labelText: 'Address Line 1'),
+                validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                key: const Key('tenant_edit_address_line2_field'),
+                controller: _addressLine2Controller,
+                decoration: const InputDecoration(labelText: 'Address Line 2 (optional)'),
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                key: const Key('tenant_edit_city_field'),
+                controller: _cityController,
+                decoration: const InputDecoration(labelText: 'City'),
+                validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                key: const Key('tenant_edit_district_field'),
+                controller: _districtController,
+                decoration: const InputDecoration(labelText: 'District (optional)'),
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                key: const Key('tenant_edit_state_code_field'),
+                controller: _stateCodeController,
+                decoration: const InputDecoration(labelText: 'State Code'),
+                validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                key: const Key('tenant_edit_postal_code_field'),
+                controller: _postalCodeController,
+                decoration: const InputDecoration(labelText: 'Postal Code (optional)'),
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                key: const Key('tenant_edit_phone_field'),
+                controller: _phoneController,
+                decoration: const InputDecoration(labelText: 'Phone (optional)'),
+                keyboardType: TextInputType.phone,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                key: const Key('tenant_edit_email_field'),
+                controller: _emailController,
+                decoration: const InputDecoration(labelText: 'Email (optional)'),
+                keyboardType: TextInputType.emailAddress,
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
+        FilledButton(
+          key: const Key('tenant_edit_submit'),
+          onPressed: _submit,
           child: const Text('Save'),
         ),
       ],

@@ -39,8 +39,13 @@ class TenantSummary {
 }
 
 class TenantDetail extends TenantSummary {
+  final String? gstin;
+  final String? fssaiLicenseNo;
   final String addressLine1;
+  final String? addressLine2;
+  final String? district;
   final String stateCode;
+  final String? postalCode;
   final String? phone;
   final String? email;
   final String? appDisplayName;
@@ -58,8 +63,13 @@ class TenantDetail extends TenantSummary {
     super.planExpiresAt,
     required super.userCount,
     required super.createdAt,
+    this.gstin,
+    this.fssaiLicenseNo,
     required this.addressLine1,
+    this.addressLine2,
+    this.district,
     required this.stateCode,
+    this.postalCode,
     this.phone,
     this.email,
     this.appDisplayName,
@@ -80,14 +90,159 @@ class TenantDetail extends TenantSummary {
       planExpiresAt: summary.planExpiresAt,
       userCount: summary.userCount,
       createdAt: summary.createdAt,
+      gstin: json['gstin'] as String?,
+      fssaiLicenseNo: json['fssai_license_no'] as String?,
       addressLine1: json['address_line1'] as String,
+      addressLine2: json['address_line2'] as String?,
+      district: json['district'] as String?,
       stateCode: json['state_code'] as String,
+      postalCode: json['postal_code'] as String?,
       phone: json['phone'] as String?,
       email: json['email'] as String?,
       appDisplayName: json['app_display_name'] as String?,
       logoUrl: json['logo_url'] as String?,
       primaryColor: json['primary_color'] as String?,
       features: (json['features'] as Map<String, dynamic>? ?? {}).map((k, v) => MapEntry(k, v as bool)),
+    );
+  }
+}
+
+/// A staff account inside one tenant, as seen by a platform admin — the
+/// same shape the tenant's own staff directory sees (see StaffSummary in
+/// features/staff/staff_api.dart), just reached through the platform-admin
+/// control plane instead of a logged-in tenant session.
+class PlatformTenantUser {
+  final String id;
+  final String username;
+  final String displayName;
+  final String? phone;
+  final String? email;
+  final String status;
+  final DateTime? lastLoginAt;
+
+  PlatformTenantUser({
+    required this.id,
+    required this.username,
+    required this.displayName,
+    this.phone,
+    this.email,
+    required this.status,
+    this.lastLoginAt,
+  });
+
+  factory PlatformTenantUser.fromJson(Map<String, dynamic> json) {
+    return PlatformTenantUser(
+      id: json['id'] as String,
+      username: json['username'] as String,
+      displayName: json['display_name'] as String,
+      phone: json['phone'] as String?,
+      email: json['email'] as String?,
+      status: json['status'] as String,
+      lastLoginAt: json['last_login_at'] == null ? null : DateTime.parse(json['last_login_at'] as String),
+    );
+  }
+}
+
+class PlatformTenantUserDetail extends PlatformTenantUser {
+  final List<String> roleIds;
+
+  PlatformTenantUserDetail({
+    required super.id,
+    required super.username,
+    required super.displayName,
+    super.phone,
+    super.email,
+    required super.status,
+    super.lastLoginAt,
+    required this.roleIds,
+  });
+
+  factory PlatformTenantUserDetail.fromJson(Map<String, dynamic> json) {
+    final user = PlatformTenantUser.fromJson(json);
+    return PlatformTenantUserDetail(
+      id: user.id,
+      username: user.username,
+      displayName: user.displayName,
+      phone: user.phone,
+      email: user.email,
+      status: user.status,
+      lastLoginAt: user.lastLoginAt,
+      roleIds: (json['role_ids'] as List<dynamic>? ?? []).cast<String>(),
+    );
+  }
+}
+
+/// A role a tenant user can be assigned — same shape as the tenant-side
+/// Role (features/staff/staff_api.dart), surfaced here because a platform
+/// admin's role picker calls the platform-scoped roles endpoint instead.
+class PlatformRole {
+  final String id;
+  final String name;
+  final String? description;
+  final bool isSystemRole;
+
+  PlatformRole({required this.id, required this.name, this.description, required this.isSystemRole});
+
+  factory PlatformRole.fromJson(Map<String, dynamic> json) {
+    return PlatformRole(
+      id: json['id'] as String,
+      name: json['name'] as String,
+      description: json['description'] as String?,
+      isSystemRole: json['is_system_role'] as bool? ?? false,
+    );
+  }
+}
+
+/// A device registered to a tenant, as seen by a platform admin — same
+/// shape as the tenant-side RegisteredDevice (core/device_api.dart).
+class PlatformDevice {
+  final String id;
+  final String deviceUuid;
+  final String displayName;
+  final String platform;
+  final String status;
+  final String securityState;
+  final DateTime registeredAt;
+  final DateTime? lastSeenAt;
+
+  PlatformDevice({
+    required this.id,
+    required this.deviceUuid,
+    required this.displayName,
+    required this.platform,
+    required this.status,
+    required this.securityState,
+    required this.registeredAt,
+    this.lastSeenAt,
+  });
+
+  factory PlatformDevice.fromJson(Map<String, dynamic> json) {
+    return PlatformDevice(
+      id: json['id'] as String,
+      deviceUuid: json['device_uuid'] as String,
+      displayName: json['display_name'] as String,
+      platform: json['platform'] as String,
+      status: json['status'] as String,
+      securityState: json['security_state'] as String,
+      registeredAt: DateTime.parse(json['registered_at'] as String),
+      lastSeenAt: json['last_seen_at'] == null ? null : DateTime.parse(json['last_seen_at'] as String),
+    );
+  }
+}
+
+/// A freshly generated device-pairing code — a one-time bearer credential
+/// valid for exactly 10 minutes, shown once and never persisted (mirrors
+/// the tenant-side PairingCodeResult in core/device_api.dart).
+class PairingCodeResult {
+  final String code;
+  final DateTime expiresAt;
+
+  PairingCodeResult({required this.code, required this.expiresAt});
+
+  factory PairingCodeResult.fromJson(Map<String, dynamic> json) {
+    return PairingCodeResult(
+      code: json['code'] as String,
+      expiresAt: DateTime.parse(json['expires_at'] as String),
     );
   }
 }
@@ -253,6 +408,142 @@ class PlatformApi {
       if (logoUrl != null) 'logo_url': logoUrl,
       if (primaryColor != null) 'primary_color': primaryColor,
     });
+  }
+
+  /// Full tenant profile edit — legal/trade name, tax registrations,
+  /// address, and contact details. This is the fix for the owner having to
+  /// hand-write SQL to correct a tenant's GSTIN or address: everything a
+  /// tenant's own Owner can't touch about their own registration record.
+  Future<void> updateTenant(
+    String id, {
+    required String legalName,
+    String? tradeName,
+    String? gstin,
+    String? fssaiLicenseNo,
+    required String addressLine1,
+    String? addressLine2,
+    required String city,
+    String? district,
+    required String stateCode,
+    String? postalCode,
+    String? phone,
+    String? email,
+  }) async {
+    await client.putAuthed('/api/v1/platform/tenants/$id', {
+      'legal_name': legalName,
+      if (tradeName != null) 'trade_name': tradeName,
+      if (gstin != null) 'gstin': gstin,
+      if (fssaiLicenseNo != null) 'fssai_license_no': fssaiLicenseNo,
+      'address_line1': addressLine1,
+      if (addressLine2 != null) 'address_line2': addressLine2,
+      'city': city,
+      if (district != null) 'district': district,
+      'state_code': stateCode,
+      if (postalCode != null) 'postal_code': postalCode,
+      if (phone != null) 'phone': phone,
+      if (email != null) 'email': email,
+    });
+  }
+
+  /// Lists a tenant's own staff accounts — the first step in the owner
+  /// lockout fix: a platform admin can now see who exists before resetting
+  /// a password or flipping a status, instead of guessing at the DB.
+  Future<({List<PlatformTenantUser> users, int total})> listTenantUsers(
+    String id, {
+    String query = '',
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    final response = await client.getAuthed(
+      '/api/v1/platform/tenants/$id/users?q=${Uri.encodeQueryComponent(query)}&limit=$limit&offset=$offset',
+    );
+    final users = (response['users'] as List<dynamic>).map((u) => PlatformTenantUser.fromJson(u as Map<String, dynamic>)).toList();
+    return (users: users, total: response['total'] as int);
+  }
+
+  Future<String> createTenantUser(
+    String id, {
+    required String username,
+    required String password,
+    required String displayName,
+    String? phone,
+    String? email,
+    List<String> roleIds = const [],
+  }) async {
+    final response = await client.postAuthed('/api/v1/platform/tenants/$id/users', {
+      'username': username,
+      'password': password,
+      'display_name': displayName,
+      if (phone != null && phone.isNotEmpty) 'phone': phone,
+      if (email != null && email.isNotEmpty) 'email': email,
+      if (roleIds.isNotEmpty) 'role_ids': roleIds,
+    });
+    return response['id'] as String;
+  }
+
+  Future<PlatformTenantUserDetail> getTenantUser(String id, String userId) async {
+    final response = await client.getAuthed('/api/v1/platform/tenants/$id/users/$userId');
+    return PlatformTenantUserDetail.fromJson(response);
+  }
+
+  Future<void> updateTenantUser(String id, String userId, {required String displayName, String? phone, String? email}) async {
+    await client.putAuthed('/api/v1/platform/tenants/$id/users/$userId', {
+      'display_name': displayName,
+      if (phone != null && phone.isNotEmpty) 'phone': phone,
+      if (email != null && email.isNotEmpty) 'email': email,
+    });
+  }
+
+  Future<void> setTenantUserStatus(String id, String userId, bool active) async {
+    await client.postAuthed('/api/v1/platform/tenants/$id/users/$userId/status', {'active': active});
+  }
+
+  /// Server-generates a brand-new password and returns it exactly once —
+  /// this is the direct replacement for the owner SSHing in and
+  /// hand-writing a password-reset SQL statement. The caller must show it
+  /// to the admin immediately; it's never retrievable again afterwards.
+  Future<String> resetTenantUserPassword(String id, String userId) async {
+    final response = await client.postAuthed('/api/v1/platform/tenants/$id/users/$userId/reset-password', {});
+    return response['new_password'] as String;
+  }
+
+  Future<List<PlatformRole>> listTenantRoles(String id) async {
+    final response = await client.getAuthed('/api/v1/platform/tenants/$id/roles');
+    return (response['roles'] as List<dynamic>).map((r) => PlatformRole.fromJson(r as Map<String, dynamic>)).toList();
+  }
+
+  Future<void> setTenantUserRoles(String id, String userId, List<String> roleIds) async {
+    await client.putAuthed('/api/v1/platform/tenants/$id/users/$userId/roles', {'role_ids': roleIds});
+  }
+
+  /// Lists a tenant's registered devices — the other half of the owner
+  /// lockout fix: a platform admin can see devices to revoke a lost one or
+  /// generate a pairing code on the owner's behalf.
+  Future<({List<PlatformDevice> devices, int total})> listTenantDevices(
+    String id, {
+    String query = '',
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    final response = await client.getAuthed(
+      '/api/v1/platform/tenants/$id/devices?q=${Uri.encodeQueryComponent(query)}&limit=$limit&offset=$offset',
+    );
+    final devices = (response['devices'] as List<dynamic>).map((d) => PlatformDevice.fromJson(d as Map<String, dynamic>)).toList();
+    return (devices: devices, total: response['total'] as int);
+  }
+
+  Future<void> revokeTenantDevice(String id, String deviceId, {String? reason}) async {
+    await client.postAuthed('/api/v1/platform/tenants/$id/devices/$deviceId/revoke', {
+      if (reason != null && reason.isNotEmpty) 'reason': reason,
+    });
+  }
+
+  /// Generates a device-pairing code on behalf of a tenant that forgot to
+  /// generate their own — the whole reason this feature exists: the owner
+  /// reads this code over the phone to whoever is setting up the device.
+  Future<PairingCodeResult> generateTenantPairingCode(String id) async {
+    final response = await client.postAuthed('/api/v1/platform/tenants/$id/devices/pairing-codes', {});
+    return PairingCodeResult.fromJson(response);
   }
 }
 

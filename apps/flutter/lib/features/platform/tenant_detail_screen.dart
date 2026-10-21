@@ -8,6 +8,7 @@ import '../../core/theme/app_decorations.dart';
 import '../../core/theme/app_typography.dart';
 import 'platform_api.dart';
 import 'platform_api_client.dart';
+import 'tenant_billing_tab.dart';
 import 'tenant_devices_tab.dart';
 import 'tenant_users_tab.dart';
 
@@ -41,7 +42,7 @@ class _TenantDetailScreenState extends State<TenantDetailScreen> with SingleTick
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
     _load();
   }
 
@@ -228,6 +229,7 @@ class _TenantDetailScreenState extends State<TenantDetailScreen> with SingleTick
                   Tab(text: 'Overview'),
                   Tab(text: 'Users'),
                   Tab(text: 'Devices'),
+                  Tab(text: 'Billing'),
                 ],
               ),
       ),
@@ -248,6 +250,7 @@ class _TenantDetailScreenState extends State<TenantDetailScreen> with SingleTick
                         _buildOverviewTab(detail),
                         TenantUsersTab(tenantId: widget.tenantId),
                         TenantDevicesTab(tenantId: widget.tenantId),
+                        TenantBillingTab(tenantId: widget.tenantId),
                       ],
                     ),
     );

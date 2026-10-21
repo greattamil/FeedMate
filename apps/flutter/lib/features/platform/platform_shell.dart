@@ -11,6 +11,7 @@ import 'platform_audit_log_screen.dart';
 import 'platform_error_log_screen.dart';
 import 'platform_login_screen.dart';
 import 'platform_settings_screen.dart';
+import 'subscription_plans_screen.dart';
 import 'tenant_list_screen.dart';
 
 class _PlatformTab {
@@ -69,6 +70,14 @@ class _PlatformShellState extends State<PlatformShell> {
       label: 'Error Log',
       color: AppColors.danger,
       gradient: AppColors.gradientRose,
+    ),
+    _PlatformTab(
+      screen: SubscriptionPlansScreen(),
+      icon: Icons.workspace_premium_outlined,
+      selectedIcon: Icons.workspace_premium_rounded,
+      label: 'Plans',
+      color: AppColors.warning,
+      gradient: AppColors.gradientEmerald,
     ),
     _PlatformTab(
       screen: PlatformSettingsScreen(),

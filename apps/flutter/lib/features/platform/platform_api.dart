@@ -1,3 +1,7 @@
+import 'package:decimal/decimal.dart';
+import 'package:uuid/uuid.dart';
+
+import '../../core/api_error.dart';
 import 'platform_api_client.dart';
 
 class TenantSummary {
@@ -311,6 +315,148 @@ class PlatformErrorLogEntry {
   }
 }
 
+/// A row in the subscription-plan catalogue (services/api/internal/httpapi
+/// /subscription_handlers.go) — price + grace period a tenant subscription
+/// is billed and enforced against.
+class SubscriptionPlan {
+  final String id;
+  final String code;
+  final String name;
+  final Decimal price;
+  final String currencyCode;
+  final String billingPeriod;
+  final int gracePeriodDays;
+  final bool active;
+
+  SubscriptionPlan({
+    required this.id,
+    required this.code,
+    required this.name,
+    required this.price,
+    required this.currencyCode,
+    required this.billingPeriod,
+    required this.gracePeriodDays,
+    required this.active,
+  });
+
+  factory SubscriptionPlan.fromJson(Map<String, dynamic> json) {
+    return SubscriptionPlan(
+      id: json['id'] as String,
+      code: json['code'] as String,
+      name: json['name'] as String,
+      price: Decimal.parse(json['price'] as String),
+      currencyCode: json['currency_code'] as String,
+      billingPeriod: json['billing_period'] as String,
+      gracePeriodDays: json['grace_period_days'] as int,
+      active: json['active'] as bool,
+    );
+  }
+}
+
+/// A tenant's current subscription — which plan, the active billing period,
+/// and its ACTIVE/PAST_DUE/SUSPENDED/CANCELLED status. [getTenantSubscription]
+/// returns null (not an error) when the tenant has no subscription assigned
+/// yet, which is the normal state for any tenant created before this
+/// feature shipped or never assigned a plan.
+class TenantSubscription {
+  final String id;
+  final String tenantId;
+  final String planId;
+  final String planCode;
+  final String planName;
+  final Decimal planPrice;
+  final String status;
+  final DateTime currentPeriodStart;
+  final DateTime currentPeriodEnd;
+  final int effectiveGracePeriodDays;
+  final int? gracePeriodDaysOverride;
+  final DateTime? pastDueSince;
+
+  TenantSubscription({
+    required this.id,
+    required this.tenantId,
+    required this.planId,
+    required this.planCode,
+    required this.planName,
+    required this.planPrice,
+    required this.status,
+    required this.currentPeriodStart,
+    required this.currentPeriodEnd,
+    required this.effectiveGracePeriodDays,
+    this.gracePeriodDaysOverride,
+    this.pastDueSince,
+  });
+
+  factory TenantSubscription.fromJson(Map<String, dynamic> json) {
+    return TenantSubscription(
+      id: json['id'] as String,
+      tenantId: json['tenant_id'] as String,
+      planId: json['plan_id'] as String,
+      planCode: json['plan_code'] as String,
+      planName: json['plan_name'] as String,
+      planPrice: Decimal.parse(json['plan_price'] as String),
+      status: json['status'] as String,
+      currentPeriodStart: DateTime.parse(json['current_period_start'] as String),
+      currentPeriodEnd: DateTime.parse(json['current_period_end'] as String),
+      effectiveGracePeriodDays: json['effective_grace_period_days'] as int,
+      gracePeriodDaysOverride: json['grace_period_days_override'] as int?,
+      pastDueSince: json['past_due_since'] == null ? null : DateTime.parse(json['past_due_since'] as String),
+    );
+  }
+}
+
+/// A manually-recorded subscription payment — there is no payment gateway
+/// here, the platform admin collects money out of band (UPI/bank/cash) and
+/// just records that it happened.
+class SubscriptionPayment {
+  final String id;
+  final Decimal amount;
+  final DateTime periodStart;
+  final DateTime periodEnd;
+  final String method;
+  final String? reference;
+  final String? notes;
+  final DateTime paidAt;
+
+  SubscriptionPayment({
+    required this.id,
+    required this.amount,
+    required this.periodStart,
+    required this.periodEnd,
+    required this.method,
+    this.reference,
+    this.notes,
+    required this.paidAt,
+  });
+
+  factory SubscriptionPayment.fromJson(Map<String, dynamic> json) {
+    return SubscriptionPayment(
+      id: json['id'] as String,
+      amount: Decimal.parse(json['amount'] as String),
+      periodStart: DateTime.parse(json['period_start'] as String),
+      periodEnd: DateTime.parse(json['period_end'] as String),
+      method: json['method'] as String,
+      reference: json['reference'] as String?,
+      notes: json['notes'] as String?,
+      paidAt: DateTime.parse(json['paid_at'] as String),
+    );
+  }
+}
+
+class RecordSubscriptionPaymentResult {
+  final String paymentId;
+  final bool duplicate;
+
+  RecordSubscriptionPaymentResult({required this.paymentId, required this.duplicate});
+
+  factory RecordSubscriptionPaymentResult.fromJson(Map<String, dynamic> json) {
+    return RecordSubscriptionPaymentResult(
+      paymentId: json['payment_id'] as String,
+      duplicate: json['duplicate'] as bool? ?? false,
+    );
+  }
+}
+
 /// Wraps every platform-admin endpoint (services/api/internal/httpapi
 /// /platform_handlers.go). All business logic (bootstrap sequencing,
 /// suspension enforcement) lives server-side — this only shapes requests.
@@ -545,6 +691,105 @@ class PlatformApi {
     final response = await client.postAuthed('/api/v1/platform/tenants/$id/devices/pairing-codes', {});
     return PairingCodeResult.fromJson(response);
   }
+
+  /// The subscription-plan catalogue, in the order the server returns it.
+  Future<List<SubscriptionPlan>> listPlans() async {
+    final response = await client.getAuthed('/api/v1/platform/plans');
+    return (response['plans'] as List<dynamic>).map((p) => SubscriptionPlan.fromJson(p as Map<String, dynamic>)).toList();
+  }
+
+  Future<String> createPlan({
+    required String code,
+    required String name,
+    required Decimal price,
+    required int gracePeriodDays,
+  }) async {
+    final response = await client.postAuthed('/api/v1/platform/plans', {
+      'code': code,
+      'name': name,
+      'price': price.toString(),
+      'grace_period_days': gracePeriodDays,
+    });
+    return response['id'] as String;
+  }
+
+  /// Code is immutable once a plan is created (UpdatePlan's request has no
+  /// code field server-side), so this never sends one.
+  Future<void> updatePlan(
+    String id, {
+    required String name,
+    required Decimal price,
+    required int gracePeriodDays,
+    required bool active,
+  }) async {
+    await client.putAuthed('/api/v1/platform/plans/$id', {
+      'name': name,
+      'price': price.toString(),
+      'grace_period_days': gracePeriodDays,
+      'active': active,
+    });
+  }
+
+  /// Returns null — not an error — when the tenant has no subscription
+  /// assigned yet. That's the normal state for any tenant that existed
+  /// before this feature or hasn't had a plan assigned, so callers show an
+  /// empty/setup state rather than an error for a 404 here.
+  Future<TenantSubscription?> getTenantSubscription(String id) async {
+    try {
+      final response = await client.getAuthed('/api/v1/platform/tenants/$id/subscription');
+      return TenantSubscription.fromJson(response);
+    } on ApiError catch (e) {
+      if (e.statusCode == 404) return null;
+      rethrow;
+    }
+  }
+
+  /// Assigns or changes a tenant's plan — used both for first-time
+  /// assignment and for switching plans later. Omitting [periodStart]
+  /// means "starting today".
+  Future<void> setTenantSubscriptionPlan(String id, String planId, {DateTime? periodStart}) async {
+    await client.putAuthed('/api/v1/platform/tenants/$id/subscription/plan', {
+      'plan_id': planId,
+      if (periodStart != null) 'period_start': _dateOnly(periodStart),
+    });
+  }
+
+  /// Records a payment collected out of band (UPI/bank/cash) against a
+  /// tenant's subscription — auto-reactivates a suspended tenant
+  /// server-side. Requires an assigned plan (404 otherwise).
+  Future<RecordSubscriptionPaymentResult> recordSubscriptionPayment(
+    String id, {
+    required Decimal amount,
+    required String method,
+    String? reference,
+    String? notes,
+  }) async {
+    final response = await client.postAuthed('/api/v1/platform/tenants/$id/subscription/payments', {
+      'amount': amount.toString(),
+      'method': method,
+      if (reference != null && reference.isNotEmpty) 'reference': reference,
+      if (notes != null && notes.isNotEmpty) 'notes': notes,
+      // A fresh idempotency key per submission, same pattern as the
+      // tenant-side manual receipt dialog (features/customers/receipt_api.dart)
+      // — guards against a lost response being retried, not a deliberate
+      // double-tap.
+      'idempotency_key': const Uuid().v4(),
+    });
+    return RecordSubscriptionPaymentResult.fromJson(response);
+  }
+
+  Future<({List<SubscriptionPayment> payments, int total})> listBillingHistory(
+    String id, {
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    final response = await client.getAuthed('/api/v1/platform/tenants/$id/subscription/payments?limit=$limit&offset=$offset');
+    final payments = (response['payments'] as List<dynamic>).map((p) => SubscriptionPayment.fromJson(p as Map<String, dynamic>)).toList();
+    return (payments: payments, total: response['total'] as int);
+  }
+
+  String _dateOnly(DateTime d) =>
+      '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 }
 
 /// The platform-wide default branding — the single source of truth every

@@ -21,10 +21,9 @@ type DeviceHandlers struct {
 // List returns registered devices newest-first, optionally filtered by a
 // substring match on display name via the `q` query param.
 func (h *DeviceHandlers) List(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	query := r.URL.Query().Get("q")
@@ -42,7 +41,7 @@ func (h *DeviceHandlers) List(w http.ResponseWriter, r *http.Request) {
 	}
 	page, err := h.DevicePairing.ListDevices(r.Context(), claims.TenantID, query, limit, offset)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to list devices: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to list devices: "+err.Error())
 		return
 	}
 	out := make([]map[string]interface{}, 0, len(page.Devices))
@@ -78,28 +77,27 @@ type revokeDeviceRequest struct {
 // devicepairing.Service.RevokeDevice's doc comment): flips its status to
 // REVOKED and invalidates every one of its still-valid refresh tokens.
 func (h *DeviceHandlers) Revoke(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid device id")
+		WriteError(w, r, CodeValidation, "invalid device id")
 		return
 	}
 	var req revokeDeviceRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	if err := h.DevicePairing.RevokeDevice(r.Context(), claims.TenantID, id, claims.UserID, req.Reason); err != nil {
 		if errors.Is(err, devicepairing.ErrDeviceNotFound) {
-			WriteError(w, reqID, CodeNotFound, "device not found")
+			WriteError(w, r, CodeNotFound, "device not found")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to revoke device: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to revoke device: "+err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -108,15 +106,14 @@ func (h *DeviceHandlers) Revoke(w http.ResponseWriter, r *http.Request) {
 // GeneratePairingCode is called by an authenticated user holding
 // device.manage, from a device already paired to the tenant.
 func (h *DeviceHandlers) GeneratePairingCode(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	result, err := h.DevicePairing.GeneratePairingCode(r.Context(), claims.TenantID, claims.UserID)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to generate pairing code: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to generate pairing code: "+err.Error())
 		return
 	}
 	WriteJSON(w, http.StatusCreated, map[string]string{
@@ -138,19 +135,18 @@ type registerDeviceRequest struct {
 // GeneratePairingCode) and communicated out of band (read aloud, shown on
 // screen, etc.) — never trust device_uuid/display_name alone.
 func (h *DeviceHandlers) RegisterDevice(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	var req registerDeviceRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	deviceUUID, err := uuid.Parse(req.DeviceUUID)
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "device_uuid must be a valid UUID")
+		WriteError(w, r, CodeValidation, "device_uuid must be a valid UUID")
 		return
 	}
 	if req.DisplayName == "" {
-		WriteError(w, reqID, CodeValidation, "display_name is required")
+		WriteError(w, r, CodeValidation, "display_name is required")
 		return
 	}
 	platform := req.Platform
@@ -162,11 +158,11 @@ func (h *DeviceHandlers) RegisterDevice(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		switch {
 		case errors.Is(err, devicepairing.ErrCodeInvalid):
-			WriteError(w, reqID, CodeValidation, "pairing code is invalid, expired, or already used")
+			WriteError(w, r, CodeValidation, "pairing code is invalid, expired, or already used")
 		case errors.Is(err, devicepairing.ErrValidation):
-			WriteError(w, reqID, CodeValidation, err.Error())
+			WriteError(w, r, CodeValidation, err.Error())
 		default:
-			WriteError(w, reqID, CodeInternal, "failed to register device: "+err.Error())
+			WriteError(w, r, CodeInternal, "failed to register device: "+err.Error())
 		}
 		return
 	}

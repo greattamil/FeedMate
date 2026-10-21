@@ -14,6 +14,7 @@ import (
 	"github.com/andipatti/feedmate/services/api/internal/domain/accounting"
 	"github.com/andipatti/feedmate/services/api/internal/domain/customer"
 	"github.com/andipatti/feedmate/services/api/internal/domain/inventory"
+	"github.com/andipatti/feedmate/services/api/internal/reqctx"
 )
 
 var ErrValidation = errors.New("validation error")
@@ -153,7 +154,7 @@ func (s *Service) PostContra(ctx context.Context, tenantID, deviceID, userID uui
 			CustomerID: req.CustomerID, DocumentType: "CONTRA", DocumentID: header.ID,
 			Debit: decimal.Zero, Credit: totalValue,
 			Description: fmt.Sprintf("Contra/buy-back %s", contraNumber),
-			DeviceID: &deviceID, CreatedByUserID: &userID,
+			DeviceID:    &deviceID, CreatedByUserID: &userID,
 		}); err != nil {
 			return fmt.Errorf("post customer ledger entry: %w", err)
 		}
@@ -162,10 +163,11 @@ func (s *Service) PostContra(ctx context.Context, tenantID, deviceID, userID uui
 			return fmt.Errorf("post journal: %w", err)
 		}
 
+		reqID, ip, ua := reqctx.AuditFields(ctx)
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO audit_logs (tenant_id, actor_user_id, actor_device_id, action_code, entity_type, entity_id, after_json)
-			VALUES ($1,$2,$3,'CONTRA_APPROVED','contra_transaction',$4,$5)
-		`, tenantID, userID, deviceID, header.ID, map[string]interface{}{"contra_number": contraNumber, "total_value": totalValue.String()}); err != nil {
+			INSERT INTO audit_logs (tenant_id, actor_user_id, actor_device_id, action_code, entity_type, entity_id, after_json, request_id, ip_address, user_agent)
+			VALUES ($1,$2,$3,'CONTRA_APPROVED','contra_transaction',$4,$5,$6,$7,$8)
+		`, tenantID, userID, deviceID, header.ID, map[string]interface{}{"contra_number": contraNumber, "total_value": totalValue.String()}, reqID, ip, ua); err != nil {
 			return fmt.Errorf("write audit log: %w", err)
 		}
 

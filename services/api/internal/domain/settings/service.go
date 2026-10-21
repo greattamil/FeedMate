@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/andipatti/feedmate/services/api/internal/dbctx"
+	"github.com/andipatti/feedmate/services/api/internal/reqctx"
 )
 
 var ErrValidation = errors.New("validation error")
@@ -83,10 +84,11 @@ func (s *Service) UpdateStoreProfile(ctx context.Context, tenantID, userID uuid.
 		if err := UpdateReceiptText(ctx, tx, tenantID, p.ReceiptHeader, p.ReceiptFooter, p.LogoDataURI); err != nil {
 			return fmt.Errorf("update receipt text: %w", err)
 		}
+		reqID, ip, ua := reqctx.AuditFields(ctx)
 		_, err = tx.Exec(ctx, `
-			INSERT INTO audit_logs (tenant_id, actor_user_id, action_code, entity_type, entity_id, before_json, after_json)
-			VALUES ($1,$2,'TENANT_SETTINGS_UPDATED','tenant',$1,$3,$4)
-		`, tenantID, userID, profileToAuditJSON(before), profileToAuditJSON(p))
+			INSERT INTO audit_logs (tenant_id, actor_user_id, action_code, entity_type, entity_id, before_json, after_json, request_id, ip_address, user_agent)
+			VALUES ($1,$2,'TENANT_SETTINGS_UPDATED','tenant',$1,$3,$4,$5,$6,$7)
+		`, tenantID, userID, profileToAuditJSON(before), profileToAuditJSON(p), reqID, ip, ua)
 		return err
 	})
 }

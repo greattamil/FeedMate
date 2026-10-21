@@ -18,6 +18,7 @@ import (
 
 	"github.com/andipatti/feedmate/services/api/internal/dbctx"
 	"github.com/andipatti/feedmate/services/api/internal/domain/inventory"
+	"github.com/andipatti/feedmate/services/api/internal/reqctx"
 )
 
 var (
@@ -145,10 +146,11 @@ func (s *Service) PostCount(ctx context.Context, tenantID, stockCountID, userID,
 			"lines_adjusted":  result.LinesAdjusted,
 			"net_value_delta": result.NetValueDelta.StringFixed(2),
 		}
+		reqID, ip, ua := reqctx.AuditFields(ctx)
 		_, err = tx.Exec(ctx, `
-			INSERT INTO audit_logs (tenant_id, actor_user_id, action_code, entity_type, entity_id, after_json)
-			VALUES ($1,$2,'STOCK_COUNT_POSTED','stock_count',$3,$4)
-		`, tenantID, userID, stockCountID, auditPayload)
+			INSERT INTO audit_logs (tenant_id, actor_user_id, action_code, entity_type, entity_id, after_json, request_id, ip_address, user_agent)
+			VALUES ($1,$2,'STOCK_COUNT_POSTED','stock_count',$3,$4,$5,$6,$7)
+		`, tenantID, userID, stockCountID, auditPayload, reqID, ip, ua)
 		return err
 	})
 	if err != nil {

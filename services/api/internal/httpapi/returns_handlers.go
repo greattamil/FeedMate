@@ -32,26 +32,25 @@ type postReturnRequest struct {
 }
 
 func (h *ReturnsHandlers) PostReturn(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 
 	var req postReturnRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	if len(req.Lines) == 0 {
-		WriteError(w, reqID, CodeValidation, "at least one line is required")
+		WriteError(w, r, CodeValidation, "at least one line is required")
 		return
 	}
 
 	invoiceID, err := uuid.Parse(req.OriginalInvoiceID)
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "original_invoice_id must be a valid UUID")
+		WriteError(w, r, CodeValidation, "original_invoice_id must be a valid UUID")
 		return
 	}
 
@@ -60,19 +59,19 @@ func (h *ReturnsHandlers) PostReturn(w http.ResponseWriter, r *http.Request) {
 	for _, l := range req.Lines {
 		lineID, err := uuid.Parse(l.OriginalLineID)
 		if err != nil {
-			WriteError(w, reqID, CodeValidation, "line original_line_id must be a valid UUID")
+			WriteError(w, r, CodeValidation, "line original_line_id must be a valid UUID")
 			return
 		}
 		qty, err := decimal.NewFromString(l.Quantity)
 		if err != nil {
-			WriteError(w, reqID, CodeValidation, "line quantity must be a valid decimal")
+			WriteError(w, r, CodeValidation, "line quantity must be a valid decimal")
 			return
 		}
 		line := returns.ReturnLineInput{OriginalLineID: lineID, Quantity: qty, ConditionStatus: l.ConditionStatus}
 		if l.RestockLocationID != nil {
 			locID, err := uuid.Parse(*l.RestockLocationID)
 			if err != nil {
-				WriteError(w, reqID, CodeValidation, "restock_location_id must be a valid UUID")
+				WriteError(w, r, CodeValidation, "restock_location_id must be a valid UUID")
 				return
 			}
 			line.RestockLocationID = &locID
@@ -84,11 +83,11 @@ func (h *ReturnsHandlers) PostReturn(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, returns.ErrValidation), errors.Is(err, returns.ErrExceedsSoldQuantity), errors.Is(err, returns.ErrOriginalInvoiceState):
-			WriteError(w, reqID, CodeValidation, err.Error())
+			WriteError(w, r, CodeValidation, err.Error())
 		case errors.Is(err, accounting.ErrNoActiveFinancialYear):
-			WriteError(w, reqID, CodeConflict, "no active financial year is configured for this shop")
+			WriteError(w, r, CodeConflict, "no active financial year is configured for this shop")
 		default:
-			WriteError(w, reqID, CodeInternal, "failed to post return: "+err.Error())
+			WriteError(w, r, CodeInternal, "failed to post return: "+err.Error())
 		}
 		return
 	}

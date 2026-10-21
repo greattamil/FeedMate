@@ -24,27 +24,26 @@ func parseDateParam(r *http.Request, name string, def time.Time) (time.Time, err
 }
 
 func (h *ReportsHandlers) SalesSummary(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	today := time.Now().UTC().Truncate(24 * time.Hour)
 	dateFrom, err := parseDateParam(r, "date_from", today)
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "date_from must be YYYY-MM-DD")
+		WriteError(w, r, CodeValidation, "date_from must be YYYY-MM-DD")
 		return
 	}
 	dateTo, err := parseDateParam(r, "date_to", today)
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "date_to must be YYYY-MM-DD")
+		WriteError(w, r, CodeValidation, "date_to must be YYYY-MM-DD")
 		return
 	}
 
 	summary, err := h.Reports.SalesSummary(r.Context(), claims.TenantID, dateFrom, dateTo)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to compute sales summary: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to compute sales summary: "+err.Error())
 		return
 	}
 	WriteJSON(w, http.StatusOK, salesSummaryJSON(summary))
@@ -70,17 +69,16 @@ func salesSummaryJSON(summary *reports.SalesSummary) map[string]interface{} {
 }
 
 func (h *ReportsHandlers) StockOnHand(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	var locationID *uuid.UUID
 	if v := r.URL.Query().Get("location_id"); v != "" {
 		id, err := uuid.Parse(v)
 		if err != nil {
-			WriteError(w, reqID, CodeValidation, "location_id must be a valid UUID")
+			WriteError(w, r, CodeValidation, "location_id must be a valid UUID")
 			return
 		}
 		locationID = &id
@@ -88,7 +86,7 @@ func (h *ReportsHandlers) StockOnHand(w http.ResponseWriter, r *http.Request) {
 
 	lines, err := h.Reports.StockOnHand(r.Context(), claims.TenantID, locationID)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to compute stock on hand: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to compute stock on hand: "+err.Error())
 		return
 	}
 
@@ -115,17 +113,16 @@ func (h *ReportsHandlers) StockOnHand(w http.ResponseWriter, r *http.Request) {
 // screen (product list, POS catalog) that wants to show real stock rather
 // than nothing.
 func (h *ReportsHandlers) StockSummary(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	var locationID *uuid.UUID
 	if v := r.URL.Query().Get("location_id"); v != "" {
 		id, err := uuid.Parse(v)
 		if err != nil {
-			WriteError(w, reqID, CodeValidation, "location_id must be a valid UUID")
+			WriteError(w, r, CodeValidation, "location_id must be a valid UUID")
 			return
 		}
 		locationID = &id
@@ -133,7 +130,7 @@ func (h *ReportsHandlers) StockSummary(w http.ResponseWriter, r *http.Request) {
 
 	lines, err := h.Reports.StockSummary(r.Context(), claims.TenantID, locationID)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to compute stock summary: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to compute stock summary: "+err.Error())
 		return
 	}
 
@@ -177,15 +174,14 @@ func (h *ReportsHandlers) StockSummary(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ReportsHandlers) CustomerBalances(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	balances, err := h.Reports.CustomerBalances(r.Context(), claims.TenantID)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to compute customer balances: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to compute customer balances: "+err.Error())
 		return
 	}
 	out := make([]map[string]interface{}, 0, len(balances))
@@ -201,27 +197,26 @@ func (h *ReportsHandlers) CustomerBalances(w http.ResponseWriter, r *http.Reques
 }
 
 func (h *ReportsHandlers) EODHistory(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	today := time.Now().UTC().Truncate(24 * time.Hour)
 	dateFrom, err := parseDateParam(r, "date_from", today.AddDate(0, 0, -30))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "date_from must be YYYY-MM-DD")
+		WriteError(w, r, CodeValidation, "date_from must be YYYY-MM-DD")
 		return
 	}
 	dateTo, err := parseDateParam(r, "date_to", today)
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "date_to must be YYYY-MM-DD")
+		WriteError(w, r, CodeValidation, "date_to must be YYYY-MM-DD")
 		return
 	}
 
 	history, err := h.Reports.EODHistory(r.Context(), claims.TenantID, dateFrom, dateTo)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to fetch EOD history: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to fetch EOD history: "+err.Error())
 		return
 	}
 	out := make([]map[string]interface{}, 0, len(history))
@@ -251,16 +246,15 @@ func (h *ReportsHandlers) EODHistory(w http.ResponseWriter, r *http.Request) {
 // standalone /reports/* endpoints read; this is not a second,
 // independently-maintained aggregate.
 func (h *ReportsHandlers) DashboardOverview(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 
 	overview, err := h.Reports.DashboardOverview(r.Context(), claims.TenantID)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to compute dashboard overview: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to compute dashboard overview: "+err.Error())
 		return
 	}
 

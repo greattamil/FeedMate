@@ -39,15 +39,14 @@ func storeProfileToJSON(p settings.StoreProfile) map[string]interface{} {
 }
 
 func (h *SettingsHandlers) GetStoreProfile(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	p, err := h.Settings.GetStoreProfile(r.Context(), claims.TenantID)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to load store profile: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to load store profile: "+err.Error())
 		return
 	}
 	WriteJSON(w, http.StatusOK, storeProfileToJSON(p))
@@ -73,15 +72,14 @@ type updateStoreProfileRequest struct {
 }
 
 func (h *SettingsHandlers) UpdateStoreProfile(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	var req updateStoreProfileRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	p := settings.StoreProfile{
@@ -104,15 +102,15 @@ func (h *SettingsHandlers) UpdateStoreProfile(w http.ResponseWriter, r *http.Req
 	}
 	if err := h.Settings.UpdateStoreProfile(r.Context(), claims.TenantID, claims.UserID, p); err != nil {
 		if errors.Is(err, settings.ErrValidation) {
-			WriteError(w, reqID, CodeValidation, err.Error())
+			WriteError(w, r, CodeValidation, err.Error())
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to update store profile: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to update store profile: "+err.Error())
 		return
 	}
 	updated, err := h.Settings.GetStoreProfile(r.Context(), claims.TenantID)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to reload store profile: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to reload store profile: "+err.Error())
 		return
 	}
 	WriteJSON(w, http.StatusOK, storeProfileToJSON(updated))

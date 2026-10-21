@@ -114,20 +114,36 @@ func main() {
 	settingsHandlers := &httpapi.SettingsHandlers{Settings: settingsSvc}
 	platformHandlers := &httpapi.PlatformHandlers{Platform: platformSvc, Subscription: subscriptionSvc}
 
-	// Every CodeInternal response's real (pre-sanitization) detail is
-	// persisted here so the platform admin's error log screen can show more
-	// than "check docker logs" — see httpapi.SetErrorSink's doc comment.
-	// Fire-and-forget on its own short-lived context: a broken error-log
-	// write must never fail or slow down the request that triggered it.
-	httpapi.SetErrorSink(func(requestID string, statusCode int, message string) {
+	// Full debug-level detail for every error response — not just
+	// CodeInternal — is persisted here so the platform admin's error log
+	// screen can show more than "check docker logs" — see
+	// httpapi.SetErrorSink's doc comment. Fire-and-forget on its own
+	// short-lived context: a broken error-log write must never fail or
+	// slow down the request that triggered it.
+	httpapi.SetErrorSink(func(detail httpapi.ErrorLogDetail) {
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			var reqIDPtr *uuid.UUID
-			if id, err := uuid.Parse(requestID); err == nil {
+			if id, err := uuid.Parse(detail.RequestID); err == nil {
 				reqIDPtr = &id
 			}
-			if err := platformSvc.RecordError(ctx, reqIDPtr, statusCode, message); err != nil {
+			parseUUIDPtr := func(s *string) *uuid.UUID {
+				if s == nil {
+					return nil
+				}
+				if id, err := uuid.Parse(*s); err == nil {
+					return &id
+				}
+				return nil
+			}
+			in := platformadmin.RecordErrorInput{
+				RequestID: reqIDPtr, StatusCode: detail.StatusCode, Code: detail.Code, Message: detail.Message,
+				Method: detail.Method, Path: detail.Path, QueryParams: detail.QueryParams, RequestBody: detail.RequestBody,
+				IPAddress: detail.IP, UserAgent: detail.UserAgent, StackTrace: detail.StackTrace,
+				TenantID: parseUUIDPtr(detail.TenantID), ActorUserID: parseUUIDPtr(detail.ActorUserID), ActorPlatformAdminID: parseUUIDPtr(detail.ActorPlatformAdminID),
+			}
+			if err := platformSvc.RecordError(ctx, in); err != nil {
 				slog.Error("failed to persist error log", "error", err)
 			}
 		}()
@@ -135,6 +151,8 @@ func main() {
 
 	r := chi.NewRouter()
 	r.Use(appmw.RequestID)
+	r.Use(appmw.CaptureRequestMeta)
+	r.Use(appmw.BufferRequestBody)
 	r.Use(appmw.Recoverer)
 	r.Use(appmw.CORS)
 

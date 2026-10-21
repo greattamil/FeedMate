@@ -24,10 +24,9 @@ type ProcurementHandlers struct {
 // list), optionally filtered by a substring match on GRN number or
 // supplier name via the `q` query param, paginated via `limit`/`offset`.
 func (h *ProcurementHandlers) ListGRNs(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	query := r.URL.Query().Get("q")
@@ -45,7 +44,7 @@ func (h *ProcurementHandlers) ListGRNs(w http.ResponseWriter, r *http.Request) {
 	}
 	page, err := h.Procurement.ListGRNs(r.Context(), claims.TenantID, query, limit, offset)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to list GRNs: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to list GRNs: "+err.Error())
 		return
 	}
 	out := make([]map[string]interface{}, 0, len(page.GRNs))
@@ -70,24 +69,23 @@ func (h *ProcurementHandlers) ListGRNs(w http.ResponseWriter, r *http.Request) {
 // GetGRNDetail returns the full history view of one posted GRN: header
 // (with supplier display name) and lines.
 func (h *ProcurementHandlers) GetGRNDetail(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid GRN id")
+		WriteError(w, r, CodeValidation, "invalid GRN id")
 		return
 	}
 	detail, err := h.Procurement.GetGRNDetail(r.Context(), claims.TenantID, id)
 	if err != nil {
 		if errors.Is(err, procurement.ErrNotFound) {
-			WriteError(w, reqID, CodeNotFound, "GRN not found")
+			WriteError(w, r, CodeNotFound, "GRN not found")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to fetch GRN: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to fetch GRN: "+err.Error())
 		return
 	}
 
@@ -145,13 +143,13 @@ type grnLineRequest struct {
 }
 
 type postGRNRequest struct {
-	SupplierID          string           `json:"supplier_id"`
-	PurchaseOrderID     string           `json:"purchase_order_id,omitempty"`
-	SupplierDocumentNo  string           `json:"supplier_document_no,omitempty"`
-	VehicleNo           string           `json:"vehicle_no,omitempty"`
-	Lines               []grnLineRequest `json:"lines"`
-	OverrideTare        bool             `json:"override_tare,omitempty"`
-	OverrideTareReason  string           `json:"override_tare_reason,omitempty"`
+	SupplierID         string           `json:"supplier_id"`
+	PurchaseOrderID    string           `json:"purchase_order_id,omitempty"`
+	SupplierDocumentNo string           `json:"supplier_document_no,omitempty"`
+	VehicleNo          string           `json:"vehicle_no,omitempty"`
+	Lines              []grnLineRequest `json:"lines"`
+	OverrideTare       bool             `json:"override_tare,omitempty"`
+	OverrideTareReason string           `json:"override_tare_reason,omitempty"`
 }
 
 func parseDate(s *string) (*time.Time, error) {
@@ -166,26 +164,25 @@ func parseDate(s *string) (*time.Time, error) {
 }
 
 func (h *ProcurementHandlers) PostGRN(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 
 	var req postGRNRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	if len(req.Lines) == 0 {
-		WriteError(w, reqID, CodeValidation, "at least one line is required")
+		WriteError(w, r, CodeValidation, "at least one line is required")
 		return
 	}
 
 	supplierID, err := uuid.Parse(req.SupplierID)
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "supplier_id must be a valid UUID")
+		WriteError(w, r, CodeValidation, "supplier_id must be a valid UUID")
 		return
 	}
 
@@ -193,7 +190,7 @@ func (h *ProcurementHandlers) PostGRN(w http.ResponseWriter, r *http.Request) {
 	if req.PurchaseOrderID != "" {
 		poID, err := uuid.Parse(req.PurchaseOrderID)
 		if err != nil {
-			WriteError(w, reqID, CodeValidation, "purchase_order_id must be a valid UUID")
+			WriteError(w, r, CodeValidation, "purchase_order_id must be a valid UUID")
 			return
 		}
 		svcReq.PurchaseOrderID = &poID
@@ -214,11 +211,11 @@ func (h *ProcurementHandlers) PostGRN(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if !hasPermission {
-			WriteError(w, reqID, CodeForbidden, "missing required permission: grn.override_tare")
+			WriteError(w, r, CodeForbidden, "missing required permission: grn.override_tare")
 			return
 		}
 		if req.OverrideTareReason == "" {
-			WriteError(w, reqID, CodeValidation, "override_tare_reason is required when override_tare is true")
+			WriteError(w, r, CodeValidation, "override_tare_reason is required when override_tare is true")
 			return
 		}
 		svcReq.TareOverride.Requested = true
@@ -228,37 +225,37 @@ func (h *ProcurementHandlers) PostGRN(w http.ResponseWriter, r *http.Request) {
 	for _, l := range req.Lines {
 		productID, err := uuid.Parse(l.ProductID)
 		if err != nil {
-			WriteError(w, reqID, CodeValidation, "line product_id must be a valid UUID")
+			WriteError(w, r, CodeValidation, "line product_id must be a valid UUID")
 			return
 		}
 		uomID, err := uuid.Parse(l.UOMID)
 		if err != nil {
-			WriteError(w, reqID, CodeValidation, "line uom_id must be a valid UUID")
+			WriteError(w, r, CodeValidation, "line uom_id must be a valid UUID")
 			return
 		}
 		locationID, err := uuid.Parse(l.LocationID)
 		if err != nil {
-			WriteError(w, reqID, CodeValidation, "line location_id must be a valid UUID")
+			WriteError(w, r, CodeValidation, "line location_id must be a valid UUID")
 			return
 		}
 		qty, err := decimal.NewFromString(l.ReceivedQty)
 		if err != nil {
-			WriteError(w, reqID, CodeValidation, "received_qty must be a valid decimal")
+			WriteError(w, r, CodeValidation, "received_qty must be a valid decimal")
 			return
 		}
 		unitCost, err := decimal.NewFromString(l.UnitCost)
 		if err != nil {
-			WriteError(w, reqID, CodeValidation, "unit_cost must be a valid decimal")
+			WriteError(w, r, CodeValidation, "unit_cost must be a valid decimal")
 			return
 		}
 		manufactureDate, err := parseDate(l.ManufactureDate)
 		if err != nil {
-			WriteError(w, reqID, CodeValidation, "manufacture_date must be YYYY-MM-DD")
+			WriteError(w, r, CodeValidation, "manufacture_date must be YYYY-MM-DD")
 			return
 		}
 		expiryDate, err := parseDate(l.ExpiryDate)
 		if err != nil {
-			WriteError(w, reqID, CodeValidation, "expiry_date must be YYYY-MM-DD")
+			WriteError(w, r, CodeValidation, "expiry_date must be YYYY-MM-DD")
 			return
 		}
 
@@ -270,7 +267,7 @@ func (h *ProcurementHandlers) PostGRN(w http.ResponseWriter, r *http.Request) {
 		if l.TaxProfileID != nil {
 			taxProfileID, err := uuid.Parse(*l.TaxProfileID)
 			if err != nil {
-				WriteError(w, reqID, CodeValidation, "tax_profile_id must be a valid UUID")
+				WriteError(w, r, CodeValidation, "tax_profile_id must be a valid UUID")
 				return
 			}
 			line.TaxProfileID = &taxProfileID
@@ -278,7 +275,7 @@ func (h *ProcurementHandlers) PostGRN(w http.ResponseWriter, r *http.Request) {
 		if l.GrossWeightKg != nil {
 			gross, err := decimal.NewFromString(*l.GrossWeightKg)
 			if err != nil {
-				WriteError(w, reqID, CodeValidation, "gross_weight_kg must be a valid decimal")
+				WriteError(w, r, CodeValidation, "gross_weight_kg must be a valid decimal")
 				return
 			}
 			line.GrossWeightKg = &gross
@@ -286,7 +283,7 @@ func (h *ProcurementHandlers) PostGRN(w http.ResponseWriter, r *http.Request) {
 		if l.MeasuredTareKg != nil {
 			tare, err := decimal.NewFromString(*l.MeasuredTareKg)
 			if err != nil {
-				WriteError(w, reqID, CodeValidation, "measured_tare_kg must be a valid decimal")
+				WriteError(w, r, CodeValidation, "measured_tare_kg must be a valid decimal")
 				return
 			}
 			line.MeasuredTareKg = &tare
@@ -294,7 +291,7 @@ func (h *ProcurementHandlers) PostGRN(w http.ResponseWriter, r *http.Request) {
 		if l.StandardTarePerBagKg != nil {
 			tarePerBag, err := decimal.NewFromString(*l.StandardTarePerBagKg)
 			if err != nil {
-				WriteError(w, reqID, CodeValidation, "standard_tare_per_bag_kg must be a valid decimal")
+				WriteError(w, r, CodeValidation, "standard_tare_per_bag_kg must be a valid decimal")
 				return
 			}
 			line.StandardTarePerBagKg = &tarePerBag
@@ -308,13 +305,13 @@ func (h *ProcurementHandlers) PostGRN(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, procurement.ErrValidation), errors.Is(err, procurement.ErrTareNegativeNet):
-			WriteError(w, reqID, CodeValidation, err.Error())
+			WriteError(w, r, CodeValidation, err.Error())
 		case errors.Is(err, procurement.ErrTareExceedsThreshold):
-			WriteError(w, reqID, CodeConflict, err.Error())
+			WriteError(w, r, CodeConflict, err.Error())
 		case errors.Is(err, accounting.ErrNoActiveFinancialYear):
-			WriteError(w, reqID, CodeConflict, "no active financial year is configured for this shop")
+			WriteError(w, r, CodeConflict, "no active financial year is configured for this shop")
 		default:
-			WriteError(w, reqID, CodeInternal, "failed to post GRN: "+err.Error())
+			WriteError(w, r, CodeInternal, "failed to post GRN: "+err.Error())
 		}
 		return
 	}

@@ -551,24 +551,26 @@ func indianFinancialYear(t time.Time) (start, end time.Time, label string) {
 	return start, end, label
 }
 
-func (s *Service) ListAuditLogsAllTenants(ctx context.Context, limit, offset int) ([]AuditLogEntry, error) {
+func (s *Service) ListAuditLogsAllTenants(ctx context.Context, filter AuditLogFilter, limit, offset int) ([]AuditLogEntry, int, error) {
 	var out []AuditLogEntry
+	var total int
 	err := s.db.WithAdminTx(ctx, func(tx pgx.Tx) error {
 		var err error
-		out, err = ListAuditLogsAllTenants(ctx, tx, limit, offset)
+		out, total, err = ListAuditLogsAllTenants(ctx, tx, filter, limit, offset)
 		return err
 	})
-	return out, err
+	return out, total, err
 }
 
-func (s *Service) ListErrorLogs(ctx context.Context, limit, offset int) ([]ErrorLogEntry, error) {
+func (s *Service) ListErrorLogs(ctx context.Context, filter ErrorLogFilter, limit, offset int) ([]ErrorLogEntry, int, error) {
 	var out []ErrorLogEntry
+	var total int
 	err := s.db.WithAdminTx(ctx, func(tx pgx.Tx) error {
 		var err error
-		out, err = ListErrorLogs(ctx, tx, limit, offset)
+		out, total, err = ListErrorLogs(ctx, tx, filter, limit, offset)
 		return err
 	})
-	return out, err
+	return out, total, err
 }
 
 func (s *Service) GetPlatformSettings(ctx context.Context) (*PlatformSettings, error) {
@@ -651,12 +653,12 @@ func (s *Service) ResolveBranding(ctx context.Context, deviceUUID *uuid.UUID) (*
 	return out, nil
 }
 
-// RecordError persists one CodeInternal response's detail (see
+// RecordError persists full debug-level detail for one error response (see
 // httpapi.SetErrorSink) using a short-lived, independent context — this must
 // never block or fail the request that triggered it, so main.go wires it
 // through a small wrapper that swallows errors after logging them.
-func (s *Service) RecordError(ctx context.Context, requestID *uuid.UUID, statusCode int, message string) error {
+func (s *Service) RecordError(ctx context.Context, in RecordErrorInput) error {
 	return s.db.WithAdminTx(ctx, func(tx pgx.Tx) error {
-		return InsertErrorLog(ctx, tx, requestID, statusCode, message)
+		return InsertErrorLog(ctx, tx, in)
 	})
 }

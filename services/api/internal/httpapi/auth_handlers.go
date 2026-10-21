@@ -8,7 +8,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/andipatti/feedmate/services/api/internal/domain/identity"
-	"github.com/andipatti/feedmate/services/api/internal/reqctx"
 )
 
 type AuthHandlers struct {
@@ -33,20 +32,19 @@ type tokenResponse struct {
 }
 
 func (h *AuthHandlers) Login(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	var req loginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	deviceUUID, err := uuid.Parse(req.DeviceUUID)
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "device_uuid must be a valid UUID",
+		WriteError(w, r, CodeValidation, "device_uuid must be a valid UUID",
 			ValidationDetail{Field: "device_uuid", Message: "must be a valid UUID"})
 		return
 	}
 	if req.Username == "" || req.Password == "" {
-		WriteError(w, reqID, CodeValidation, "username and password are required")
+		WriteError(w, r, CodeValidation, "username and password are required")
 		return
 	}
 
@@ -54,15 +52,15 @@ func (h *AuthHandlers) Login(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, identity.ErrInvalidCredentials):
-			WriteError(w, reqID, CodeUnauthorized, "invalid username or password")
+			WriteError(w, r, CodeUnauthorized, "invalid username or password")
 		case errors.Is(err, identity.ErrAccountLocked):
-			WriteError(w, reqID, CodeForbidden, "account temporarily locked due to repeated failed logins")
+			WriteError(w, r, CodeForbidden, "account temporarily locked due to repeated failed logins")
 		case errors.Is(err, identity.ErrDeviceNotActive):
-			WriteError(w, reqID, CodeForbidden, "device is not registered or not active")
+			WriteError(w, r, CodeForbidden, "device is not registered or not active")
 		case errors.Is(err, identity.ErrTenantNotActive):
-			WriteError(w, reqID, CodeForbidden, "this account has been suspended — contact support")
+			WriteError(w, r, CodeForbidden, "this account has been suspended — contact support")
 		default:
-			WriteError(w, reqID, CodeInternal, "login failed: "+err.Error())
+			WriteError(w, r, CodeInternal, "login failed: "+err.Error())
 		}
 		return
 	}
@@ -85,21 +83,20 @@ type refreshRequest struct {
 }
 
 func (h *AuthHandlers) Refresh(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	var req refreshRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	tenantID, err := uuid.Parse(req.TenantID)
 	if err != nil || req.RefreshToken == "" {
-		WriteError(w, reqID, CodeValidation, "tenant_id and refresh_token are required")
+		WriteError(w, r, CodeValidation, "tenant_id and refresh_token are required")
 		return
 	}
 
 	result, err := h.Identity.Refresh(r.Context(), tenantID, req.RefreshToken)
 	if err != nil {
-		WriteError(w, reqID, CodeUnauthorized, "refresh token invalid or expired")
+		WriteError(w, r, CodeUnauthorized, "refresh token invalid or expired")
 		return
 	}
 
@@ -121,19 +118,18 @@ type logoutRequest struct {
 }
 
 func (h *AuthHandlers) Logout(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	var req logoutRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	tenantID, err := uuid.Parse(req.TenantID)
 	if err != nil || req.RefreshToken == "" {
-		WriteError(w, reqID, CodeValidation, "tenant_id and refresh_token are required")
+		WriteError(w, r, CodeValidation, "tenant_id and refresh_token are required")
 		return
 	}
 	if err := h.Identity.Logout(r.Context(), tenantID, req.RefreshToken); err != nil {
-		WriteError(w, reqID, CodeInternal, "logout failed: "+err.Error())
+		WriteError(w, r, CodeInternal, "logout failed: "+err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

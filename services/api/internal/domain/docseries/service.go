@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/andipatti/feedmate/services/api/internal/dbctx"
+	"github.com/andipatti/feedmate/services/api/internal/reqctx"
 )
 
 var (
@@ -75,10 +76,11 @@ func (s *Service) CreateFinancialYear(ctx context.Context, tenantID, userID uuid
 			return fmt.Errorf("insert financial year: %w", err)
 		}
 		id = newID
+		reqID, ip, ua := reqctx.AuditFields(ctx)
 		_, err = tx.Exec(ctx, `
-			INSERT INTO audit_logs (tenant_id, actor_user_id, action_code, entity_type, entity_id, after_json)
-			VALUES ($1,$2,'FINANCIAL_YEAR_OPENED','financial_year',$3,$4)
-		`, tenantID, userID, id, map[string]interface{}{"label": label, "start_date": startDate.Format("2006-01-02"), "end_date": endDate.Format("2006-01-02")})
+			INSERT INTO audit_logs (tenant_id, actor_user_id, action_code, entity_type, entity_id, after_json, request_id, ip_address, user_agent)
+			VALUES ($1,$2,'FINANCIAL_YEAR_OPENED','financial_year',$3,$4,$5,$6,$7)
+		`, tenantID, userID, id, map[string]interface{}{"label": label, "start_date": startDate.Format("2006-01-02"), "end_date": endDate.Format("2006-01-02")}, reqID, ip, ua)
 		return err
 	})
 	if err != nil {
@@ -92,10 +94,11 @@ func (s *Service) CloseFinancialYear(ctx context.Context, tenantID, userID, fina
 		if err := CloseFinancialYear(ctx, tx, financialYearID); err != nil {
 			return err
 		}
+		reqID, ip, ua := reqctx.AuditFields(ctx)
 		_, err := tx.Exec(ctx, `
-			INSERT INTO audit_logs (tenant_id, actor_user_id, action_code, entity_type, entity_id)
-			VALUES ($1,$2,'FINANCIAL_YEAR_CLOSED','financial_year',$3)
-		`, tenantID, userID, financialYearID)
+			INSERT INTO audit_logs (tenant_id, actor_user_id, action_code, entity_type, entity_id, request_id, ip_address, user_agent)
+			VALUES ($1,$2,'FINANCIAL_YEAR_CLOSED','financial_year',$3,$4,$5,$6)
+		`, tenantID, userID, financialYearID, reqID, ip, ua)
 		return err
 	})
 }
@@ -138,10 +141,11 @@ func (s *Service) CreateDocumentSeries(ctx context.Context, tenantID, userID, fi
 			return fmt.Errorf("insert document series: %w", err)
 		}
 		id = newID
+		reqID, ip, ua := reqctx.AuditFields(ctx)
 		_, err = tx.Exec(ctx, `
-			INSERT INTO audit_logs (tenant_id, actor_user_id, action_code, entity_type, entity_id, after_json)
-			VALUES ($1,$2,'DOCUMENT_SERIES_CREATED','document_series',$3,$4)
-		`, tenantID, userID, id, map[string]interface{}{"document_type": documentType, "prefix": prefix, "starting_number": startingNumber, "padding": padding})
+			INSERT INTO audit_logs (tenant_id, actor_user_id, action_code, entity_type, entity_id, after_json, request_id, ip_address, user_agent)
+			VALUES ($1,$2,'DOCUMENT_SERIES_CREATED','document_series',$3,$4,$5,$6,$7)
+		`, tenantID, userID, id, map[string]interface{}{"document_type": documentType, "prefix": prefix, "starting_number": startingNumber, "padding": padding}, reqID, ip, ua)
 		return err
 	})
 	if err != nil {
@@ -194,10 +198,11 @@ func (s *Service) SeedDefaultSeries(ctx context.Context, tenantID, userID, finan
 			for _, c := range created {
 				payload = append(payload, c.DocumentType)
 			}
+			reqID, ip, ua := reqctx.AuditFields(ctx)
 			if _, err := tx.Exec(ctx, `
-				INSERT INTO audit_logs (tenant_id, actor_user_id, action_code, entity_type, entity_id, after_json)
-				VALUES ($1,$2,'DOCUMENT_SERIES_SEEDED','financial_year',$3,$4)
-			`, tenantID, userID, financialYearID, map[string]interface{}{"document_types": payload}); err != nil {
+				INSERT INTO audit_logs (tenant_id, actor_user_id, action_code, entity_type, entity_id, after_json, request_id, ip_address, user_agent)
+				VALUES ($1,$2,'DOCUMENT_SERIES_SEEDED','financial_year',$3,$4,$5,$6,$7)
+			`, tenantID, userID, financialYearID, map[string]interface{}{"document_types": payload}, reqID, ip, ua); err != nil {
 				return err
 			}
 		}

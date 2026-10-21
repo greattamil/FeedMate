@@ -30,28 +30,28 @@ func claimsFromRequest(r *http.Request) (*auth.AccessClaims, bool) {
 // — Update never lets the SKU change (see product.repository.Update's doc
 // comment), so productRequest.SKU is simply ignored when decoding a PUT body.
 type productRequest struct {
-	SKU                  string   `json:"sku"`
-	Name                 string   `json:"name"`
-	LocalNameTa          string   `json:"local_name_ta,omitempty"`
-	CategoryID           string   `json:"category_id,omitempty"`
-	BrandID              string   `json:"brand_id,omitempty"`
-	DefaultSaleUOMID     string   `json:"default_sale_uom_id"`
-	DefaultPurchaseUOMID string   `json:"default_purchase_uom_id"`
-	BaseInventoryUOMID   string   `json:"base_inventory_uom_id"`
-	HSNCode              string   `json:"hsn_code,omitempty"`
-	TaxProfileID         string   `json:"tax_profile_id,omitempty"`
-	PackSize             string   `json:"pack_size,omitempty"`
-	StandardWeightKg     string   `json:"standard_weight_kg,omitempty"`
-	MRP                  string   `json:"mrp,omitempty"`
-	SellingPrice         string   `json:"selling_price,omitempty"`
-	ReorderLevel         string   `json:"reorder_level,omitempty"`
-	ReorderTarget        string   `json:"reorder_target,omitempty"`
-	MinPriceFloor        string   `json:"min_price_floor,omitempty"`
-	BatchRequired        bool     `json:"batch_required"`
-	ExpiryRequired       bool     `json:"expiry_required"`
-	LooseSaleAllowed     bool     `json:"loose_sale_allowed"`
-	ScaleRequired        bool     `json:"scale_required"`
-	ProductType          string   `json:"product_type,omitempty"`
+	SKU                  string `json:"sku"`
+	Name                 string `json:"name"`
+	LocalNameTa          string `json:"local_name_ta,omitempty"`
+	CategoryID           string `json:"category_id,omitempty"`
+	BrandID              string `json:"brand_id,omitempty"`
+	DefaultSaleUOMID     string `json:"default_sale_uom_id"`
+	DefaultPurchaseUOMID string `json:"default_purchase_uom_id"`
+	BaseInventoryUOMID   string `json:"base_inventory_uom_id"`
+	HSNCode              string `json:"hsn_code,omitempty"`
+	TaxProfileID         string `json:"tax_profile_id,omitempty"`
+	PackSize             string `json:"pack_size,omitempty"`
+	StandardWeightKg     string `json:"standard_weight_kg,omitempty"`
+	MRP                  string `json:"mrp,omitempty"`
+	SellingPrice         string `json:"selling_price,omitempty"`
+	ReorderLevel         string `json:"reorder_level,omitempty"`
+	ReorderTarget        string `json:"reorder_target,omitempty"`
+	MinPriceFloor        string `json:"min_price_floor,omitempty"`
+	BatchRequired        bool   `json:"batch_required"`
+	ExpiryRequired       bool   `json:"expiry_required"`
+	LooseSaleAllowed     bool   `json:"loose_sale_allowed"`
+	ScaleRequired        bool   `json:"scale_required"`
+	ProductType          string `json:"product_type,omitempty"`
 	// A pointer, unlike the other booleans above: a plain bool can't tell
 	// "the caller explicitly turned alerts off" apart from "the caller
 	// doesn't know this field exists yet" (e.g. an older client build), and
@@ -66,13 +66,13 @@ type productRequest struct {
 // toProduct converts the wire request into a product.Product, validating
 // every UUID/decimal field. On error it writes the response itself and
 // returns ok=false, so callers can just `if !ok { return }`.
-func (req *productRequest) toProduct(w http.ResponseWriter, reqID string) (product.Product, bool) {
+func (req *productRequest) toProduct(w http.ResponseWriter, r *http.Request) (product.Product, bool) {
 	var p product.Product
 	saleUOM, err1 := uuid.Parse(req.DefaultSaleUOMID)
 	purchaseUOM, err2 := uuid.Parse(req.DefaultPurchaseUOMID)
 	baseUOM, err3 := uuid.Parse(req.BaseInventoryUOMID)
 	if err1 != nil || err2 != nil || err3 != nil {
-		WriteError(w, reqID, CodeValidation, "default_sale_uom_id, default_purchase_uom_id, base_inventory_uom_id must be valid UUIDs")
+		WriteError(w, r, CodeValidation, "default_sale_uom_id, default_purchase_uom_id, base_inventory_uom_id must be valid UUIDs")
 		return p, false
 	}
 	p.Name = req.Name
@@ -91,7 +91,7 @@ func (req *productRequest) toProduct(w http.ResponseWriter, reqID string) (produ
 	if req.CategoryID != "" {
 		id, err := uuid.Parse(req.CategoryID)
 		if err != nil {
-			WriteError(w, reqID, CodeValidation, "category_id must be a valid UUID")
+			WriteError(w, r, CodeValidation, "category_id must be a valid UUID")
 			return p, false
 		}
 		p.CategoryID = &id
@@ -99,7 +99,7 @@ func (req *productRequest) toProduct(w http.ResponseWriter, reqID string) (produ
 	if req.BrandID != "" {
 		id, err := uuid.Parse(req.BrandID)
 		if err != nil {
-			WriteError(w, reqID, CodeValidation, "brand_id must be a valid UUID")
+			WriteError(w, r, CodeValidation, "brand_id must be a valid UUID")
 			return p, false
 		}
 		p.BrandID = &id
@@ -107,7 +107,7 @@ func (req *productRequest) toProduct(w http.ResponseWriter, reqID string) (produ
 	if req.TaxProfileID != "" {
 		id, err := uuid.Parse(req.TaxProfileID)
 		if err != nil {
-			WriteError(w, reqID, CodeValidation, "tax_profile_id must be a valid UUID")
+			WriteError(w, r, CodeValidation, "tax_profile_id must be a valid UUID")
 			return p, false
 		}
 		p.TaxProfileID = &id
@@ -129,7 +129,7 @@ func (req *productRequest) toProduct(w http.ResponseWriter, reqID string) (produ
 	for _, f := range decimalFields {
 		d, err := parseOptionalDecimal(f.raw)
 		if err != nil {
-			WriteError(w, reqID, CodeValidation, f.errMsg)
+			WriteError(w, r, CodeValidation, f.errMsg)
 			return p, false
 		}
 		*f.field = d
@@ -254,24 +254,23 @@ func parseOptionalDecimal(s string) (*decimal.Decimal, error) {
 }
 
 func (h *ProductHandlers) Create(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := claimsFromRequest(r)
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 
 	var req productRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	if req.SKU == "" {
-		WriteError(w, reqID, CodeValidation, "sku is required")
+		WriteError(w, r, CodeValidation, "sku is required")
 		return
 	}
 
-	p, ok := req.toProduct(w, reqID)
+	p, ok := req.toProduct(w, r)
 	if !ok {
 		return
 	}
@@ -281,36 +280,35 @@ func (h *ProductHandlers) Create(w http.ResponseWriter, r *http.Request) {
 		Product: p, Barcodes: req.Barcodes, Aliases: req.Aliases,
 	})
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to create product: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to create product: "+err.Error())
 		return
 	}
 	WriteJSON(w, http.StatusCreated, toProductResponse(created))
 }
 
 func (h *ProductHandlers) Update(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := claimsFromRequest(r)
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid product id")
+		WriteError(w, r, CodeValidation, "invalid product id")
 		return
 	}
 
 	var req productRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	if req.Name == "" {
-		WriteError(w, reqID, CodeValidation, "name is required")
+		WriteError(w, r, CodeValidation, "name is required")
 		return
 	}
 
-	p, ok := req.toProduct(w, reqID)
+	p, ok := req.toProduct(w, r)
 	if !ok {
 		return
 	}
@@ -320,10 +318,10 @@ func (h *ProductHandlers) Update(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		if errors.Is(err, product.ErrNotFound) {
-			WriteError(w, reqID, CodeNotFound, "product not found")
+			WriteError(w, r, CodeNotFound, "product not found")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to update product: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to update product: "+err.Error())
 		return
 	}
 	WriteJSON(w, http.StatusOK, toProductResponse(updated))
@@ -337,53 +335,51 @@ type setProductStatusRequest struct {
 // remove one from sale/receipt workflows (see product.repository.SetActive's
 // doc comment for why a real DELETE is never offered).
 func (h *ProductHandlers) SetStatus(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := claimsFromRequest(r)
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid product id")
+		WriteError(w, r, CodeValidation, "invalid product id")
 		return
 	}
 	var req setProductStatusRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	updated, err := h.Product.SetActive(r.Context(), claims.TenantID, id, req.Active)
 	if err != nil {
 		if errors.Is(err, product.ErrNotFound) {
-			WriteError(w, reqID, CodeNotFound, "product not found")
+			WriteError(w, r, CodeNotFound, "product not found")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to update product status: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to update product status: "+err.Error())
 		return
 	}
 	WriteJSON(w, http.StatusOK, toProductResponse(updated))
 }
 
 func (h *ProductHandlers) Get(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := claimsFromRequest(r)
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid product id")
+		WriteError(w, r, CodeValidation, "invalid product id")
 		return
 	}
 	d, err := h.Product.GetDetail(r.Context(), claims.TenantID, id)
 	if err != nil {
 		if errors.Is(err, product.ErrNotFound) {
-			WriteError(w, reqID, CodeNotFound, "product not found")
+			WriteError(w, r, CodeNotFound, "product not found")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to fetch product: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to fetch product: "+err.Error())
 		return
 	}
 	WriteJSON(w, http.StatusOK, toProductDetailResponse(d))
@@ -393,10 +389,9 @@ func (h *ProductHandlers) Get(w http.ResponseWriter, r *http.Request) {
 // ranks fuzzy matches for point-of-sale lookup): paginated, filterable by
 // category and active status, sorted by name.
 func (h *ProductHandlers) List(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := claimsFromRequest(r)
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	opts := product.ListOptions{
@@ -406,7 +401,7 @@ func (h *ProductHandlers) List(w http.ResponseWriter, r *http.Request) {
 	if v := r.URL.Query().Get("category_id"); v != "" {
 		id, err := uuid.Parse(v)
 		if err != nil {
-			WriteError(w, reqID, CodeValidation, "category_id must be a valid UUID")
+			WriteError(w, r, CodeValidation, "category_id must be a valid UUID")
 			return
 		}
 		opts.CategoryID = &id
@@ -424,7 +419,7 @@ func (h *ProductHandlers) List(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.Product.List(r.Context(), claims.TenantID, opts)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to list products: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to list products: "+err.Error())
 		return
 	}
 	out := make([]productResponse, 0, len(result.Products))
@@ -435,10 +430,9 @@ func (h *ProductHandlers) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ProductHandlers) Search(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := claimsFromRequest(r)
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	query := r.URL.Query().Get("q")
@@ -446,7 +440,7 @@ func (h *ProductHandlers) Search(w http.ResponseWriter, r *http.Request) {
 	if c := r.URL.Query().Get("category_id"); c != "" {
 		parsed, err := uuid.Parse(c)
 		if err != nil {
-			WriteError(w, reqID, CodeValidation, "invalid category_id")
+			WriteError(w, r, CodeValidation, "invalid category_id")
 			return
 		}
 		categoryID = &parsed
@@ -467,7 +461,7 @@ func (h *ProductHandlers) Search(w http.ResponseWriter, r *http.Request) {
 
 	results, err := h.Product.Search(r.Context(), claims.TenantID, query, categoryID, limit)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "search failed: "+err.Error())
+		WriteError(w, r, CodeInternal, "search failed: "+err.Error())
 		return
 	}
 

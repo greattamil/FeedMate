@@ -11,13 +11,14 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/andipatti/feedmate/services/api/internal/dbctx"
+	"github.com/andipatti/feedmate/services/api/internal/reqctx"
 )
 
 var (
-	ErrValidation      = errors.New("validation error")
-	ErrSessionExists   = errors.New("an EOD session already exists for this business date")
-	ErrSessionNotOpen  = errors.New("EOD session is not open")
-	ErrNotClosed       = errors.New("EOD session is not closed")
+	ErrValidation     = errors.New("validation error")
+	ErrSessionExists  = errors.New("an EOD session already exists for this business date")
+	ErrSessionNotOpen = errors.New("EOD session is not open")
+	ErrNotClosed      = errors.New("EOD session is not closed")
 )
 
 type Service struct {
@@ -186,10 +187,11 @@ func (s *Service) CloseSession(ctx context.Context, tenantID, userID uuid.UUID, 
 		if reasonPtr != nil {
 			auditPayload["variance_reason"] = *reasonPtr
 		}
+		reqID, ip, ua := reqctx.AuditFields(ctx)
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO audit_logs (tenant_id, actor_user_id, action_code, entity_type, entity_id, after_json)
-			VALUES ($1,$2,'EOD_CLOSED','eod_session',$3,$4)
-		`, tenantID, userID, session.ID, auditPayload); err != nil {
+			INSERT INTO audit_logs (tenant_id, actor_user_id, action_code, entity_type, entity_id, after_json, request_id, ip_address, user_agent)
+			VALUES ($1,$2,'EOD_CLOSED','eod_session',$3,$4,$5,$6,$7)
+		`, tenantID, userID, session.ID, auditPayload, reqID, ip, ua); err != nil {
 			return fmt.Errorf("write audit log: %w", err)
 		}
 
@@ -224,10 +226,11 @@ func (s *Service) ReopenSession(ctx context.Context, tenantID, userID uuid.UUID,
 		if err := ReopenSession(ctx, tx, session.ID, userID, reason); err != nil {
 			return fmt.Errorf("reopen session: %w", err)
 		}
+		reqID, ip, ua := reqctx.AuditFields(ctx)
 		_, err = tx.Exec(ctx, `
-			INSERT INTO audit_logs (tenant_id, actor_user_id, action_code, entity_type, entity_id, reason)
-			VALUES ($1,$2,'EOD_REOPENED','eod_session',$3,$4)
-		`, tenantID, userID, session.ID, reason)
+			INSERT INTO audit_logs (tenant_id, actor_user_id, action_code, entity_type, entity_id, reason, request_id, ip_address, user_agent)
+			VALUES ($1,$2,'EOD_REOPENED','eod_session',$3,$4,$5,$6,$7)
+		`, tenantID, userID, session.ID, reason, reqID, ip, ua)
 		return err
 	})
 }

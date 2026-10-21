@@ -51,15 +51,14 @@ func supplierToJSON(s *supplier.Supplier) map[string]interface{} {
 }
 
 func (h *SupplierHandlers) Create(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	var req createSupplierRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 
@@ -69,10 +68,10 @@ func (h *SupplierHandlers) Create(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		if errors.Is(err, supplier.ErrValidation) {
-			WriteError(w, reqID, CodeValidation, err.Error())
+			WriteError(w, r, CodeValidation, err.Error())
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to create supplier: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to create supplier: "+err.Error())
 		return
 	}
 	WriteJSON(w, http.StatusCreated, supplierToJSON(created))
@@ -90,20 +89,19 @@ type updateSupplierRequest struct {
 // Update revises a supplier's editable fields. supplier_code is immutable
 // and not accepted here — see supplier.Update's doc comment.
 func (h *SupplierHandlers) Update(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid supplier id")
+		WriteError(w, r, CodeValidation, "invalid supplier id")
 		return
 	}
 	var req updateSupplierRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 
@@ -113,14 +111,14 @@ func (h *SupplierHandlers) Update(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		if errors.Is(err, supplier.ErrValidation) {
-			WriteError(w, reqID, CodeValidation, err.Error())
+			WriteError(w, r, CodeValidation, err.Error())
 			return
 		}
 		if errors.Is(err, supplier.ErrNotFound) {
-			WriteError(w, reqID, CodeNotFound, "supplier not found")
+			WriteError(w, r, CodeNotFound, "supplier not found")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to update supplier: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to update supplier: "+err.Error())
 		return
 	}
 	WriteJSON(w, http.StatusOK, supplierToJSON(updated))
@@ -133,45 +131,43 @@ type setSupplierStatusRequest struct {
 // SetStatus activates or deactivates a supplier — never a hard delete, since
 // historical GRN/payment rows reference it (mirrors ProductHandlers.SetStatus).
 func (h *SupplierHandlers) SetStatus(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid supplier id")
+		WriteError(w, r, CodeValidation, "invalid supplier id")
 		return
 	}
 	var req setSupplierStatusRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	updated, err := h.Supplier.SetActive(r.Context(), claims.TenantID, id, req.Active)
 	if err != nil {
 		if errors.Is(err, supplier.ErrNotFound) {
-			WriteError(w, reqID, CodeNotFound, "supplier not found")
+			WriteError(w, r, CodeNotFound, "supplier not found")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to update supplier status: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to update supplier status: "+err.Error())
 		return
 	}
 	WriteJSON(w, http.StatusOK, supplierToJSON(updated))
 }
 
 func (h *SupplierHandlers) List(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	query := r.URL.Query().Get("q")
 	suppliers, err := h.Supplier.List(r.Context(), claims.TenantID, query, 50)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to list suppliers: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to list suppliers: "+err.Error())
 		return
 	}
 	out := make([]map[string]interface{}, 0, len(suppliers))
@@ -184,24 +180,23 @@ func (h *SupplierHandlers) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *SupplierHandlers) Get(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid supplier id")
+		WriteError(w, r, CodeValidation, "invalid supplier id")
 		return
 	}
 	s, balance, err := h.Supplier.GetByID(r.Context(), claims.TenantID, id)
 	if err != nil {
 		if errors.Is(err, supplier.ErrNotFound) {
-			WriteError(w, reqID, CodeNotFound, "supplier not found")
+			WriteError(w, r, CodeNotFound, "supplier not found")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to fetch supplier: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to fetch supplier: "+err.Error())
 		return
 	}
 	resp := supplierToJSON(s)
@@ -210,15 +205,14 @@ func (h *SupplierHandlers) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *SupplierHandlers) Ledger(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid supplier id")
+		WriteError(w, r, CodeValidation, "invalid supplier id")
 		return
 	}
 	limit := 100
@@ -230,10 +224,10 @@ func (h *SupplierHandlers) Ledger(w http.ResponseWriter, r *http.Request) {
 	entries, err := h.Supplier.ListLedger(r.Context(), claims.TenantID, id, limit)
 	if err != nil {
 		if errors.Is(err, supplier.ErrNotFound) {
-			WriteError(w, reqID, CodeNotFound, "supplier not found")
+			WriteError(w, r, CodeNotFound, "supplier not found")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to fetch ledger: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to fetch ledger: "+err.Error())
 		return
 	}
 	out := make([]map[string]interface{}, 0, len(entries))

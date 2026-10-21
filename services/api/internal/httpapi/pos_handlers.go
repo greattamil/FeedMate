@@ -26,10 +26,9 @@ type POSHandlers struct {
 // invoice number or customer name via the `q` query param, paginated via
 // `limit`/`offset`.
 func (h *POSHandlers) ListInvoices(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	query := r.URL.Query().Get("q")
@@ -47,7 +46,7 @@ func (h *POSHandlers) ListInvoices(w http.ResponseWriter, r *http.Request) {
 	}
 	page, err := h.POS.ListInvoices(r.Context(), claims.TenantID, query, limit, offset)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to list invoices: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to list invoices: "+err.Error())
 		return
 	}
 	out := make([]map[string]interface{}, 0, len(page.Invoices))
@@ -73,24 +72,23 @@ func (h *POSHandlers) ListInvoices(w http.ResponseWriter, r *http.Request) {
 // GetInvoiceDetail returns the full reprint view of one past sale: header,
 // lines, and how it was actually paid for.
 func (h *POSHandlers) GetInvoiceDetail(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid invoice id")
+		WriteError(w, r, CodeValidation, "invalid invoice id")
 		return
 	}
 	detail, err := h.POS.GetInvoiceDetail(r.Context(), claims.TenantID, id)
 	if err != nil {
 		if errors.Is(err, pos.ErrNotFound) {
-			WriteError(w, reqID, CodeNotFound, "invoice not found")
+			WriteError(w, r, CodeNotFound, "invoice not found")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to fetch invoice: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to fetch invoice: "+err.Error())
 		return
 	}
 
@@ -202,24 +200,23 @@ func (h *POSHandlers) GetInvoiceDetail(w http.ResponseWriter, r *http.Request) {
 // lines with remaining-eligible-to-return quantities, for the returns
 // screen's line picker.
 func (h *POSHandlers) GetInvoiceForReturn(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	invoiceNumber := r.URL.Query().Get("number")
 	if invoiceNumber == "" {
-		WriteError(w, reqID, CodeValidation, "query parameter 'number' is required")
+		WriteError(w, r, CodeValidation, "query parameter 'number' is required")
 		return
 	}
 	result, err := h.POS.GetInvoiceForReturn(r.Context(), claims.TenantID, invoiceNumber)
 	if err != nil {
 		if errors.Is(err, pos.ErrNotFound) {
-			WriteError(w, reqID, CodeNotFound, "invoice not found")
+			WriteError(w, r, CodeNotFound, "invoice not found")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to fetch invoice: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to fetch invoice: "+err.Error())
 		return
 	}
 
@@ -279,31 +276,30 @@ type finalizeResponse struct {
 }
 
 func (h *POSHandlers) FinalizeInvoice(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 
 	var req finalizeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 
 	clientTxID, err := uuid.Parse(req.ClientTransactionID)
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "client_transaction_id must be a valid UUID")
+		WriteError(w, r, CodeValidation, "client_transaction_id must be a valid UUID")
 		return
 	}
 	locationID, err := uuid.Parse(req.LocationID)
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "location_id must be a valid UUID")
+		WriteError(w, r, CodeValidation, "location_id must be a valid UUID")
 		return
 	}
 	if len(req.Lines) == 0 {
-		WriteError(w, reqID, CodeValidation, "at least one line is required")
+		WriteError(w, r, CodeValidation, "at least one line is required")
 		return
 	}
 
@@ -315,7 +311,7 @@ func (h *POSHandlers) FinalizeInvoice(w http.ResponseWriter, r *http.Request) {
 	if req.CustomerID != "" {
 		customerID, err := uuid.Parse(req.CustomerID)
 		if err != nil {
-			WriteError(w, reqID, CodeValidation, "customer_id must be a valid UUID")
+			WriteError(w, r, CodeValidation, "customer_id must be a valid UUID")
 			return
 		}
 		svcReq.CustomerID = &customerID
@@ -324,19 +320,19 @@ func (h *POSHandlers) FinalizeInvoice(w http.ResponseWriter, r *http.Request) {
 	for _, l := range req.Lines {
 		productID, err := uuid.Parse(l.ProductID)
 		if err != nil {
-			WriteError(w, reqID, CodeValidation, "line product_id must be a valid UUID")
+			WriteError(w, r, CodeValidation, "line product_id must be a valid UUID")
 			return
 		}
 		qty, err := decimal.NewFromString(l.Quantity)
 		if err != nil {
-			WriteError(w, reqID, CodeValidation, "line quantity must be a valid decimal")
+			WriteError(w, r, CodeValidation, "line quantity must be a valid decimal")
 			return
 		}
 		discount := decimal.Zero
 		if l.DiscountAmount != "" {
 			discount, err = decimal.NewFromString(l.DiscountAmount)
 			if err != nil {
-				WriteError(w, reqID, CodeValidation, "discount_amount must be a valid decimal")
+				WriteError(w, r, CodeValidation, "discount_amount must be a valid decimal")
 				return
 			}
 		}
@@ -344,7 +340,7 @@ func (h *POSHandlers) FinalizeInvoice(w http.ResponseWriter, r *http.Request) {
 		if l.UnitPriceOverride != nil {
 			price, err := decimal.NewFromString(*l.UnitPriceOverride)
 			if err != nil {
-				WriteError(w, reqID, CodeValidation, "unit_price_override must be a valid decimal")
+				WriteError(w, r, CodeValidation, "unit_price_override must be a valid decimal")
 				return
 			}
 			line.UnitPriceOverride = &price
@@ -355,7 +351,7 @@ func (h *POSHandlers) FinalizeInvoice(w http.ResponseWriter, r *http.Request) {
 	for _, t := range req.Tenders {
 		amount, err := decimal.NewFromString(t.Amount)
 		if err != nil {
-			WriteError(w, reqID, CodeValidation, "tender amount must be a valid decimal")
+			WriteError(w, r, CodeValidation, "tender amount must be a valid decimal")
 			return
 		}
 		svcReq.Tenders = append(svcReq.Tenders, pos.Tender{Method: t.Method, Amount: amount})
@@ -373,11 +369,11 @@ func (h *POSHandlers) FinalizeInvoice(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if !hasPermission {
-			WriteError(w, reqID, CodeForbidden, "missing required permission: credit.override")
+			WriteError(w, r, CodeForbidden, "missing required permission: credit.override")
 			return
 		}
 		if req.OverrideReason == "" {
-			WriteError(w, reqID, CodeValidation, "override_reason is required when override_credit_limit is true")
+			WriteError(w, r, CodeValidation, "override_reason is required when override_credit_limit is true")
 			return
 		}
 		svcReq.CreditOverride.Requested = true
@@ -388,15 +384,15 @@ func (h *POSHandlers) FinalizeInvoice(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, pos.ErrValidation), errors.Is(err, pos.ErrTenderMismatch), errors.Is(err, pos.ErrNoTaxProfile):
-			WriteError(w, reqID, CodeValidation, err.Error())
+			WriteError(w, r, CodeValidation, err.Error())
 		case errors.Is(err, inventory.ErrInsufficientStock):
-			WriteError(w, reqID, CodeInsufficientStock, err.Error())
+			WriteError(w, r, CodeInsufficientStock, err.Error())
 		case errors.Is(err, pos.ErrCreditLimitExceeded):
-			WriteError(w, reqID, CodeCreditLimitExceeded, err.Error())
+			WriteError(w, r, CodeCreditLimitExceeded, err.Error())
 		case errors.Is(err, accounting.ErrNoActiveFinancialYear):
-			WriteError(w, reqID, CodeConflict, "no active financial year is configured for this shop")
+			WriteError(w, r, CodeConflict, "no active financial year is configured for this shop")
 		default:
-			WriteError(w, reqID, CodeInternal, "failed to finalize invoice: "+err.Error())
+			WriteError(w, r, CodeInternal, "failed to finalize invoice: "+err.Error())
 		}
 		return
 	}

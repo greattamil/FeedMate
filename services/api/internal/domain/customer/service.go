@@ -10,6 +10,7 @@ import (
 
 	"github.com/andipatti/feedmate/services/api/internal/dbctx"
 	"github.com/andipatti/feedmate/services/api/internal/entitycode"
+	"github.com/andipatti/feedmate/services/api/internal/reqctx"
 )
 
 var ErrValidation = fmt.Errorf("validation error")
@@ -236,10 +237,11 @@ func (s *Service) SetCreditLimit(ctx context.Context, tenantID, customerID, upda
 		if err := SetCreditLimit(ctx, tx, tenantID, customerID, creditLimit, updatedByUserID); err != nil {
 			return err
 		}
+		reqID, ip, ua := reqctx.AuditFields(ctx)
 		_, err := tx.Exec(ctx, `
-			INSERT INTO audit_logs (tenant_id, actor_user_id, action_code, entity_type, entity_id, after_json)
-			VALUES ($1, $2, 'CREDIT_LIMIT_CHANGED', 'customer', $3, $4)
-		`, tenantID, updatedByUserID, customerID, map[string]interface{}{"new_credit_limit": creditLimit.String()})
+			INSERT INTO audit_logs (tenant_id, actor_user_id, action_code, entity_type, entity_id, after_json, request_id, ip_address, user_agent)
+			VALUES ($1, $2, 'CREDIT_LIMIT_CHANGED', 'customer', $3, $4, $5, $6, $7)
+		`, tenantID, updatedByUserID, customerID, map[string]interface{}{"new_credit_limit": creditLimit.String()}, reqID, ip, ua)
 		return err
 	})
 }

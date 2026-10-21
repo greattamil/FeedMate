@@ -421,11 +421,13 @@ func TestErrorLogs_RecordAndList(t *testing.T) {
 	svc := platformadmin.NewService(db, "test_signing_key", 15*time.Minute, 30*24*time.Hour, 4)
 
 	reqID := uuid.New()
-	if err := svc.RecordError(context.Background(), &reqID, 500, "a distinctive test error message "+reqID.String()); err != nil {
+	if err := svc.RecordError(context.Background(), platformadmin.RecordErrorInput{
+		RequestID: &reqID, StatusCode: 500, Message: "a distinctive test error message " + reqID.String(),
+	}); err != nil {
 		t.Fatalf("record error: %v", err)
 	}
 
-	entries, err := svc.ListErrorLogs(context.Background(), 50, 0)
+	entries, _, err := svc.ListErrorLogs(context.Background(), platformadmin.ErrorLogFilter{}, 50, 0)
 	if err != nil {
 		t.Fatalf("list error logs: %v", err)
 	}

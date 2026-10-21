@@ -27,26 +27,25 @@ type createReceiptIntentRequest struct {
 }
 
 func (h *PaymentHandlers) CreateReceiptIntent(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 
 	var req createReceiptIntentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	customerID, err := uuid.Parse(req.CustomerID)
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "customer_id must be a valid UUID")
+		WriteError(w, r, CodeValidation, "customer_id must be a valid UUID")
 		return
 	}
 	amount, err := decimal.NewFromString(req.Amount)
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "amount must be a valid decimal")
+		WriteError(w, r, CodeValidation, "amount must be a valid decimal")
 		return
 	}
 
@@ -55,10 +54,10 @@ func (h *PaymentHandlers) CreateReceiptIntent(w http.ResponseWriter, r *http.Req
 	})
 	if err != nil {
 		if errors.Is(err, payment.ErrValidation) {
-			WriteError(w, reqID, CodeValidation, err.Error())
+			WriteError(w, r, CodeValidation, err.Error())
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to create payment intent: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to create payment intent: "+err.Error())
 		return
 	}
 
@@ -84,26 +83,25 @@ type recordManualReceiptRequest struct {
 // confirmation, the same trust boundary already accepted for a CASH tender
 // at POS checkout.
 func (h *PaymentHandlers) RecordManualReceipt(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 
 	var req recordManualReceiptRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	customerID, err := uuid.Parse(req.CustomerID)
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "customer_id must be a valid UUID")
+		WriteError(w, r, CodeValidation, "customer_id must be a valid UUID")
 		return
 	}
 	amount, err := decimal.NewFromString(req.Amount)
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "amount must be a valid decimal")
+		WriteError(w, r, CodeValidation, "amount must be a valid decimal")
 		return
 	}
 
@@ -114,14 +112,14 @@ func (h *PaymentHandlers) RecordManualReceipt(w http.ResponseWriter, r *http.Req
 	})
 	if err != nil {
 		if errors.Is(err, payment.ErrValidation) {
-			WriteError(w, reqID, CodeValidation, err.Error())
+			WriteError(w, r, CodeValidation, err.Error())
 			return
 		}
 		if errors.Is(err, customer.ErrNotFound) {
-			WriteError(w, reqID, CodeNotFound, "customer not found")
+			WriteError(w, r, CodeNotFound, "customer not found")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to record receipt: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to record receipt: "+err.Error())
 		return
 	}
 
@@ -143,26 +141,25 @@ type recordSupplierPaymentRequest struct {
 // bank transfer confirmed by other means) against a supplier's payable
 // balance — the mirror image of RecordManualReceipt on the payable side.
 func (h *PaymentHandlers) RecordSupplierPayment(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 
 	var req recordSupplierPaymentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	supplierID, err := uuid.Parse(req.SupplierID)
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "supplier_id must be a valid UUID")
+		WriteError(w, r, CodeValidation, "supplier_id must be a valid UUID")
 		return
 	}
 	amount, err := decimal.NewFromString(req.Amount)
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "amount must be a valid decimal")
+		WriteError(w, r, CodeValidation, "amount must be a valid decimal")
 		return
 	}
 
@@ -172,14 +169,14 @@ func (h *PaymentHandlers) RecordSupplierPayment(w http.ResponseWriter, r *http.R
 	})
 	if err != nil {
 		if errors.Is(err, payment.ErrValidation) {
-			WriteError(w, reqID, CodeValidation, err.Error())
+			WriteError(w, r, CodeValidation, err.Error())
 			return
 		}
 		if errors.Is(err, supplier.ErrNotFound) {
-			WriteError(w, reqID, CodeNotFound, "supplier not found")
+			WriteError(w, r, CodeNotFound, "supplier not found")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to record payment: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to record payment: "+err.Error())
 		return
 	}
 
@@ -192,24 +189,23 @@ func (h *PaymentHandlers) RecordSupplierPayment(w http.ResponseWriter, r *http.R
 // GetManualPayment returns a previously-recorded manual receipt/payment so
 // the client can reprint it (e.g. "view receipt" on an old ledger entry).
 func (h *PaymentHandlers) GetManualPayment(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	paymentID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid payment id")
+		WriteError(w, r, CodeValidation, "invalid payment id")
 		return
 	}
 	detail, err := h.Payment.GetManualPayment(r.Context(), claims.TenantID, paymentID)
 	if err != nil {
 		if errors.Is(err, payment.ErrNotFound) {
-			WriteError(w, reqID, CodeNotFound, "payment not found")
+			WriteError(w, r, CodeNotFound, "payment not found")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to fetch payment: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to fetch payment: "+err.Error())
 		return
 	}
 
@@ -228,24 +224,23 @@ func (h *PaymentHandlers) GetManualPayment(w http.ResponseWriter, r *http.Reques
 }
 
 func (h *PaymentHandlers) GetIntentStatus(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	intentID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid intent id")
+		WriteError(w, r, CodeValidation, "invalid intent id")
 		return
 	}
 	status, err := h.Payment.GetIntentStatus(r.Context(), claims.TenantID, intentID)
 	if err != nil {
 		if errors.Is(err, payment.ErrNotFound) {
-			WriteError(w, reqID, CodeNotFound, "payment intent not found")
+			WriteError(w, r, CodeNotFound, "payment intent not found")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to fetch payment status: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to fetch payment status: "+err.Error())
 		return
 	}
 	WriteJSON(w, http.StatusOK, map[string]string{"status": status})
@@ -258,10 +253,9 @@ func (h *PaymentHandlers) GetIntentStatus(w http.ResponseWriter, r *http.Request
 // provider's cryptographic webhook signature (PRD 11.1). It must never be
 // placed behind RequireAuth.
 func (h *PaymentHandlers) SandboxWebhook(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "failed to read request body")
+		WriteError(w, r, CodeValidation, "failed to read request body")
 		return
 	}
 	signature := r.Header.Get("X-Sandbox-Signature")
@@ -269,15 +263,15 @@ func (h *PaymentHandlers) SandboxWebhook(w http.ResponseWriter, r *http.Request)
 	if err := h.Payment.ProcessWebhook(r.Context(), body, signature); err != nil {
 		switch {
 		case errors.Is(err, payment.ErrInvalidSignature):
-			WriteError(w, reqID, CodeUnauthorized, "invalid webhook signature")
+			WriteError(w, r, CodeUnauthorized, "invalid webhook signature")
 		case errors.Is(err, payment.ErrIntentNotFound):
-			WriteError(w, reqID, CodeValidation, "no matching payment intent for this order reference")
+			WriteError(w, r, CodeValidation, "no matching payment intent for this order reference")
 		case errors.Is(err, payment.ErrAmountMismatch):
-			WriteError(w, reqID, CodeValidation, err.Error())
+			WriteError(w, r, CodeValidation, err.Error())
 		case errors.Is(err, payment.ErrValidation):
-			WriteError(w, reqID, CodeValidation, err.Error())
+			WriteError(w, r, CodeValidation, err.Error())
 		default:
-			WriteError(w, reqID, CodeInternal, "failed to process webhook: "+err.Error())
+			WriteError(w, r, CodeInternal, "failed to process webhook: "+err.Error())
 		}
 		return
 	}

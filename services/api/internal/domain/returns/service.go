@@ -15,6 +15,7 @@ import (
 	"github.com/andipatti/feedmate/services/api/internal/domain/customer"
 	"github.com/andipatti/feedmate/services/api/internal/domain/inventory"
 	"github.com/andipatti/feedmate/services/api/internal/domain/pos"
+	"github.com/andipatti/feedmate/services/api/internal/reqctx"
 )
 
 var (
@@ -234,12 +235,13 @@ func (s *Service) PostReturn(ctx context.Context, tenantID, deviceID, userID uui
 			return fmt.Errorf("post journal: %w", err)
 		}
 
+		reqID, ip, ua := reqctx.AuditFields(ctx)
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO audit_logs (tenant_id, actor_user_id, actor_device_id, action_code, entity_type, entity_id, after_json)
-			VALUES ($1,$2,$3,'RETURN_CREATED','sales_return',$4,$5)
+			INSERT INTO audit_logs (tenant_id, actor_user_id, actor_device_id, action_code, entity_type, entity_id, after_json, request_id, ip_address, user_agent)
+			VALUES ($1,$2,$3,'RETURN_CREATED','sales_return',$4,$5,$6,$7,$8)
 		`, tenantID, userID, deviceID, header.ID, map[string]interface{}{
 			"return_number": returnNumber, "total_refund": grandTotal.String(), "refund_method": req.RefundMethod,
-		}); err != nil {
+		}, reqID, ip, ua); err != nil {
 			return fmt.Errorf("write audit log: %w", err)
 		}
 

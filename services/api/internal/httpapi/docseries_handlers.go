@@ -36,15 +36,14 @@ func financialYearToJSON(f docseries.FinancialYear) map[string]interface{} {
 }
 
 func (h *DocSeriesHandlers) ListFinancialYears(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	years, err := h.DocSeries.ListFinancialYears(r.Context(), claims.TenantID)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to list financial years: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to list financial years: "+err.Error())
 		return
 	}
 	out := make([]map[string]interface{}, 0, len(years))
@@ -61,57 +60,55 @@ type createFinancialYearRequest struct {
 }
 
 func (h *DocSeriesHandlers) CreateFinancialYear(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	var req createFinancialYearRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	startDate, err := time.Parse("2006-01-02", req.StartDate)
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "start_date must be YYYY-MM-DD")
+		WriteError(w, r, CodeValidation, "start_date must be YYYY-MM-DD")
 		return
 	}
 	endDate, err := time.Parse("2006-01-02", req.EndDate)
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "end_date must be YYYY-MM-DD")
+		WriteError(w, r, CodeValidation, "end_date must be YYYY-MM-DD")
 		return
 	}
 	id, err := h.DocSeries.CreateFinancialYear(r.Context(), claims.TenantID, claims.UserID, req.Label, startDate, endDate)
 	if err != nil {
 		if errors.Is(err, docseries.ErrValidation) {
-			WriteError(w, reqID, CodeValidation, err.Error())
+			WriteError(w, r, CodeValidation, err.Error())
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to create financial year: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to create financial year: "+err.Error())
 		return
 	}
 	WriteJSON(w, http.StatusCreated, map[string]string{"id": id.String()})
 }
 
 func (h *DocSeriesHandlers) CloseFinancialYear(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid financial year id")
+		WriteError(w, r, CodeValidation, "invalid financial year id")
 		return
 	}
 	if err := h.DocSeries.CloseFinancialYear(r.Context(), claims.TenantID, claims.UserID, id); err != nil {
 		if errors.Is(err, docseries.ErrNotFound) {
-			WriteError(w, reqID, CodeNotFound, "financial year not found")
+			WriteError(w, r, CodeNotFound, "financial year not found")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to close financial year: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to close financial year: "+err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -130,20 +127,19 @@ func documentSeriesToJSON(d docseries.DocumentSeries) map[string]interface{} {
 }
 
 func (h *DocSeriesHandlers) ListDocumentSeries(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	financialYearID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid financial year id")
+		WriteError(w, r, CodeValidation, "invalid financial year id")
 		return
 	}
 	series, err := h.DocSeries.ListDocumentSeries(r.Context(), claims.TenantID, financialYearID)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to list document series: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to list document series: "+err.Error())
 		return
 	}
 	out := make([]map[string]interface{}, 0, len(series))
@@ -161,30 +157,29 @@ type createDocumentSeriesRequest struct {
 }
 
 func (h *DocSeriesHandlers) CreateDocumentSeries(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	financialYearID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid financial year id")
+		WriteError(w, r, CodeValidation, "invalid financial year id")
 		return
 	}
 	var req createDocumentSeriesRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	id, err := h.DocSeries.CreateDocumentSeries(r.Context(), claims.TenantID, claims.UserID, financialYearID,
 		req.DocumentType, req.Prefix, req.StartingNumber, req.Padding)
 	if err != nil {
 		if errors.Is(err, docseries.ErrValidation) {
-			WriteError(w, reqID, CodeValidation, err.Error())
+			WriteError(w, r, CodeValidation, err.Error())
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to create document series: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to create document series: "+err.Error())
 		return
 	}
 	WriteJSON(w, http.StatusCreated, map[string]string{"id": id.String()})
@@ -195,28 +190,27 @@ type setSeriesActiveRequest struct {
 }
 
 func (h *DocSeriesHandlers) SetDocumentSeriesActive(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid document series id")
+		WriteError(w, r, CodeValidation, "invalid document series id")
 		return
 	}
 	var req setSeriesActiveRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	if err := h.DocSeries.SetDocumentSeriesActive(r.Context(), claims.TenantID, id, req.Active); err != nil {
 		if errors.Is(err, docseries.ErrNotFound) {
-			WriteError(w, reqID, CodeNotFound, "document series not found")
+			WriteError(w, r, CodeNotFound, "document series not found")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to update document series status: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to update document series status: "+err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -230,25 +224,24 @@ type seedDefaultSeriesRequest struct {
 // every core document type this app needs (INVOICE/GRN/RETURN/CONTRA/
 // RECEIPT) that doesn't already have one in this financial year.
 func (h *DocSeriesHandlers) SeedDefaultSeries(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	financialYearID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid financial year id")
+		WriteError(w, r, CodeValidation, "invalid financial year id")
 		return
 	}
 	var req seedDefaultSeriesRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	created, err := h.DocSeries.SeedDefaultSeries(r.Context(), claims.TenantID, claims.UserID, financialYearID, req.LabelPrefix)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to seed default series: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to seed default series: "+err.Error())
 		return
 	}
 	out := make([]map[string]interface{}, 0, len(created))

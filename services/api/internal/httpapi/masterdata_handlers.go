@@ -22,15 +22,14 @@ type MasterDataHandlers struct {
 }
 
 func (h *MasterDataHandlers) ListCategories(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	categories, err := h.MasterData.ListCategories(r.Context(), claims.TenantID)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to list categories: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to list categories: "+err.Error())
 		return
 	}
 	out := make([]map[string]string, 0, len(categories))
@@ -50,15 +49,14 @@ func categoryJSON(c masterdata.Category) map[string]interface{} {
 // management screen, gated on product.manage like every other
 // master-data mutation endpoint below.
 func (h *MasterDataHandlers) ListAllCategories(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	categories, err := h.MasterData.ListAllCategories(r.Context(), claims.TenantID)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to list categories: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to list categories: "+err.Error())
 		return
 	}
 	out := make([]map[string]interface{}, 0, len(categories))
@@ -74,56 +72,54 @@ type createCategoryRequest struct {
 }
 
 func (h *MasterDataHandlers) UpdateCategory(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid category id")
+		WriteError(w, r, CodeValidation, "invalid category id")
 		return
 	}
 	var req createCategoryRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	if err := h.MasterData.UpdateCategory(r.Context(), claims.TenantID, id, req.Name, req.LocalName); err != nil {
 		if errors.Is(err, masterdata.ErrValidation) {
-			WriteError(w, reqID, CodeValidation, err.Error())
+			WriteError(w, r, CodeValidation, err.Error())
 			return
 		}
 		if errors.Is(err, masterdata.ErrNotFound) {
-			WriteError(w, reqID, CodeNotFound, "category not found")
+			WriteError(w, r, CodeNotFound, "category not found")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to update category: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to update category: "+err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *MasterDataHandlers) CreateCategory(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	var req createCategoryRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	created, err := h.MasterData.CreateCategory(r.Context(), claims.TenantID, req.Name, req.LocalName)
 	if err != nil {
 		if errors.Is(err, masterdata.ErrValidation) {
-			WriteError(w, reqID, CodeValidation, err.Error())
+			WriteError(w, r, CodeValidation, err.Error())
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to create category: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to create category: "+err.Error())
 		return
 	}
 	WriteJSON(w, http.StatusCreated, map[string]string{"id": created.ID.String(), "name": created.Name})
@@ -134,43 +130,41 @@ type setActiveRequest struct {
 }
 
 func (h *MasterDataHandlers) SetCategoryActive(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid category id")
+		WriteError(w, r, CodeValidation, "invalid category id")
 		return
 	}
 	var req setActiveRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	if err := h.MasterData.SetCategoryActive(r.Context(), claims.TenantID, id, req.Active); err != nil {
 		if errors.Is(err, masterdata.ErrNotFound) {
-			WriteError(w, reqID, CodeNotFound, "category not found")
+			WriteError(w, r, CodeNotFound, "category not found")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to update category status: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to update category status: "+err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *MasterDataHandlers) ListBrands(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	brands, err := h.MasterData.ListBrands(r.Context(), claims.TenantID)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to list brands: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to list brands: "+err.Error())
 		return
 	}
 	out := make([]map[string]string, 0, len(brands))
@@ -189,15 +183,14 @@ func brandJSON(b masterdata.Brand) map[string]interface{} {
 // ListAllBrands includes inactive brands — see ListAllCategories's doc
 // comment for why.
 func (h *MasterDataHandlers) ListAllBrands(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	brands, err := h.MasterData.ListAllBrands(r.Context(), claims.TenantID)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to list brands: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to list brands: "+err.Error())
 		return
 	}
 	out := make([]map[string]interface{}, 0, len(brands))
@@ -213,99 +206,95 @@ type createBrandRequest struct {
 }
 
 func (h *MasterDataHandlers) UpdateBrand(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid brand id")
+		WriteError(w, r, CodeValidation, "invalid brand id")
 		return
 	}
 	var req createBrandRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	if err := h.MasterData.UpdateBrand(r.Context(), claims.TenantID, id, req.Name, req.LocalName); err != nil {
 		if errors.Is(err, masterdata.ErrValidation) {
-			WriteError(w, reqID, CodeValidation, err.Error())
+			WriteError(w, r, CodeValidation, err.Error())
 			return
 		}
 		if errors.Is(err, masterdata.ErrNotFound) {
-			WriteError(w, reqID, CodeNotFound, "brand not found")
+			WriteError(w, r, CodeNotFound, "brand not found")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to update brand: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to update brand: "+err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *MasterDataHandlers) CreateBrand(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	var req createBrandRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	created, err := h.MasterData.CreateBrand(r.Context(), claims.TenantID, req.Name, req.LocalName)
 	if err != nil {
 		if errors.Is(err, masterdata.ErrValidation) {
-			WriteError(w, reqID, CodeValidation, err.Error())
+			WriteError(w, r, CodeValidation, err.Error())
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to create brand: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to create brand: "+err.Error())
 		return
 	}
 	WriteJSON(w, http.StatusCreated, map[string]string{"id": created.ID.String(), "name": created.Name})
 }
 
 func (h *MasterDataHandlers) SetBrandActive(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid brand id")
+		WriteError(w, r, CodeValidation, "invalid brand id")
 		return
 	}
 	var req setActiveRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	if err := h.MasterData.SetBrandActive(r.Context(), claims.TenantID, id, req.Active); err != nil {
 		if errors.Is(err, masterdata.ErrNotFound) {
-			WriteError(w, reqID, CodeNotFound, "brand not found")
+			WriteError(w, r, CodeNotFound, "brand not found")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to update brand status: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to update brand status: "+err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *MasterDataHandlers) ListUOMs(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	uoms, err := h.MasterData.ListUOMs(r.Context(), claims.TenantID)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to list UOMs: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to list UOMs: "+err.Error())
 		return
 	}
 	out := make([]map[string]string, 0, len(uoms))
@@ -334,15 +323,14 @@ func taxProfileJSON(t masterdata.TaxProfile) map[string]interface{} {
 // a product create/edit form's picker should offer. Unauthenticated to no
 // permission beyond login, matching categories/brands/UOMs above.
 func (h *MasterDataHandlers) ListTaxProfiles(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	profiles, err := h.MasterData.ListTaxProfiles(r.Context(), claims.TenantID)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to list tax profiles: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to list tax profiles: "+err.Error())
 		return
 	}
 	out := make([]map[string]interface{}, 0, len(profiles))
@@ -356,15 +344,14 @@ func (h *MasterDataHandlers) ListTaxProfiles(w http.ResponseWriter, r *http.Requ
 // dedicated GST/tax-profile management screen, gated on product.manage
 // like every other master-data mutation endpoint below.
 func (h *MasterDataHandlers) ListAllTaxProfiles(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	profiles, err := h.MasterData.ListAllTaxProfiles(r.Context(), claims.TenantID)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to list tax profiles: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to list tax profiles: "+err.Error())
 		return
 	}
 	out := make([]map[string]interface{}, 0, len(profiles))
@@ -386,86 +373,83 @@ type taxProfileRequest struct {
 }
 
 func (h *MasterDataHandlers) CreateTaxProfile(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	var req taxProfileRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	created, err := h.MasterData.CreateTaxProfile(r.Context(), claims.TenantID, req.Code, req.Description, req.SupplyType,
 		req.CGSTRate, req.SGSTRate, req.IGSTRate, req.CessRate, req.PriceInclusive)
 	if err != nil {
 		if errors.Is(err, masterdata.ErrValidation) {
-			WriteError(w, reqID, CodeValidation, err.Error())
+			WriteError(w, r, CodeValidation, err.Error())
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to create tax profile: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to create tax profile: "+err.Error())
 		return
 	}
 	WriteJSON(w, http.StatusCreated, taxProfileJSON(*created))
 }
 
 func (h *MasterDataHandlers) UpdateTaxProfile(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid tax profile id")
+		WriteError(w, r, CodeValidation, "invalid tax profile id")
 		return
 	}
 	var req taxProfileRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	if err := h.MasterData.UpdateTaxProfile(r.Context(), claims.TenantID, id, req.Description, req.SupplyType,
 		req.CGSTRate, req.SGSTRate, req.IGSTRate, req.CessRate, req.PriceInclusive); err != nil {
 		if errors.Is(err, masterdata.ErrValidation) {
-			WriteError(w, reqID, CodeValidation, err.Error())
+			WriteError(w, r, CodeValidation, err.Error())
 			return
 		}
 		if errors.Is(err, masterdata.ErrNotFound) {
-			WriteError(w, reqID, CodeNotFound, "tax profile not found")
+			WriteError(w, r, CodeNotFound, "tax profile not found")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to update tax profile: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to update tax profile: "+err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *MasterDataHandlers) SetTaxProfileActive(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid tax profile id")
+		WriteError(w, r, CodeValidation, "invalid tax profile id")
 		return
 	}
 	var req setActiveRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	if err := h.MasterData.SetTaxProfileActive(r.Context(), claims.TenantID, id, req.Active); err != nil {
 		if errors.Is(err, masterdata.ErrNotFound) {
-			WriteError(w, reqID, CodeNotFound, "tax profile not found")
+			WriteError(w, r, CodeNotFound, "tax profile not found")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to update tax profile status: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to update tax profile status: "+err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

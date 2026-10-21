@@ -16,6 +16,7 @@ import (
 	"github.com/andipatti/feedmate/services/api/internal/domain/inventory"
 	"github.com/andipatti/feedmate/services/api/internal/domain/product"
 	"github.com/andipatti/feedmate/services/api/internal/domain/settings"
+	"github.com/andipatti/feedmate/services/api/internal/reqctx"
 )
 
 var (
@@ -505,18 +506,19 @@ func (s *Service) FinalizeInvoice(ctx context.Context, tenantID, deviceID, userI
 			auditPayload["credit_limit_override"] = true
 			auditPayload["credit_override_reason"] = req.CreditOverride.Reason
 		}
+		reqID, ip, ua := reqctx.AuditFields(ctx)
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO audit_logs (tenant_id, actor_user_id, actor_device_id, action_code, entity_type, entity_id, after_json)
-			VALUES ($1,$2,$3,'INVOICE_FINALIZED','sales_invoice',$4,$5)
-		`, tenantID, userID, deviceID, header.ID, auditPayload); err != nil {
+			INSERT INTO audit_logs (tenant_id, actor_user_id, actor_device_id, action_code, entity_type, entity_id, after_json, request_id, ip_address, user_agent)
+			VALUES ($1,$2,$3,'INVOICE_FINALIZED','sales_invoice',$4,$5,$6,$7,$8)
+		`, tenantID, userID, deviceID, header.ID, auditPayload, reqID, ip, ua); err != nil {
 			return fmt.Errorf("write audit log: %w", err)
 		}
 		if creditOverrideApplied {
 			if _, err := tx.Exec(ctx, `
-				INSERT INTO audit_logs (tenant_id, actor_user_id, actor_device_id, action_code, entity_type, entity_id, reason, after_json)
-				VALUES ($1,$2,$3,'CREDIT_OVERRIDE','sales_invoice',$4,$5,$6)
+				INSERT INTO audit_logs (tenant_id, actor_user_id, actor_device_id, action_code, entity_type, entity_id, reason, after_json, request_id, ip_address, user_agent)
+				VALUES ($1,$2,$3,'CREDIT_OVERRIDE','sales_invoice',$4,$5,$6,$7,$8,$9)
 			`, tenantID, userID, deviceID, header.ID, req.CreditOverride.Reason,
-				map[string]interface{}{"invoice_number": invoiceNumber, "credit_amount": creditAmount.String()}); err != nil {
+				map[string]interface{}{"invoice_number": invoiceNumber, "credit_amount": creditAmount.String()}, reqID, ip, ua); err != nil {
 				return fmt.Errorf("write credit override audit log: %w", err)
 			}
 		}

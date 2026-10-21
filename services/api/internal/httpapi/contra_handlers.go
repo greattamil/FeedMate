@@ -37,25 +37,24 @@ type postContraRequest struct {
 }
 
 func (h *ContraHandlers) PostContra(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 
 	var req postContraRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	if len(req.Lines) == 0 {
-		WriteError(w, reqID, CodeValidation, "at least one line is required")
+		WriteError(w, r, CodeValidation, "at least one line is required")
 		return
 	}
 	customerID, err := uuid.Parse(req.CustomerID)
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "customer_id must be a valid UUID")
+		WriteError(w, r, CodeValidation, "customer_id must be a valid UUID")
 		return
 	}
 
@@ -63,27 +62,27 @@ func (h *ContraHandlers) PostContra(w http.ResponseWriter, r *http.Request) {
 	for _, l := range req.Lines {
 		productID, err := uuid.Parse(l.ProductID)
 		if err != nil {
-			WriteError(w, reqID, CodeValidation, "line product_id must be a valid UUID")
+			WriteError(w, r, CodeValidation, "line product_id must be a valid UUID")
 			return
 		}
 		uomID, err := uuid.Parse(l.UOMID)
 		if err != nil {
-			WriteError(w, reqID, CodeValidation, "line uom_id must be a valid UUID")
+			WriteError(w, r, CodeValidation, "line uom_id must be a valid UUID")
 			return
 		}
 		locationID, err := uuid.Parse(l.LocationID)
 		if err != nil {
-			WriteError(w, reqID, CodeValidation, "line location_id must be a valid UUID")
+			WriteError(w, r, CodeValidation, "line location_id must be a valid UUID")
 			return
 		}
 		qty, err := decimal.NewFromString(l.Quantity)
 		if err != nil {
-			WriteError(w, reqID, CodeValidation, "quantity must be a valid decimal")
+			WriteError(w, r, CodeValidation, "quantity must be a valid decimal")
 			return
 		}
 		price, err := decimal.NewFromString(l.ValuationUnitPrice)
 		if err != nil {
-			WriteError(w, reqID, CodeValidation, "valuation_unit_price must be a valid decimal")
+			WriteError(w, r, CodeValidation, "valuation_unit_price must be a valid decimal")
 			return
 		}
 		line := contra.ContraLineInput{
@@ -93,7 +92,7 @@ func (h *ContraHandlers) PostContra(w http.ResponseWriter, r *http.Request) {
 		if l.ManufactureDate != nil && *l.ManufactureDate != "" {
 			t, err := time.Parse("2006-01-02", *l.ManufactureDate)
 			if err != nil {
-				WriteError(w, reqID, CodeValidation, "manufacture_date must be YYYY-MM-DD")
+				WriteError(w, r, CodeValidation, "manufacture_date must be YYYY-MM-DD")
 				return
 			}
 			line.ManufactureDate = &t
@@ -101,7 +100,7 @@ func (h *ContraHandlers) PostContra(w http.ResponseWriter, r *http.Request) {
 		if l.ExpiryDate != nil && *l.ExpiryDate != "" {
 			t, err := time.Parse("2006-01-02", *l.ExpiryDate)
 			if err != nil {
-				WriteError(w, reqID, CodeValidation, "expiry_date must be YYYY-MM-DD")
+				WriteError(w, r, CodeValidation, "expiry_date must be YYYY-MM-DD")
 				return
 			}
 			line.ExpiryDate = &t
@@ -113,11 +112,11 @@ func (h *ContraHandlers) PostContra(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, contra.ErrValidation):
-			WriteError(w, reqID, CodeValidation, err.Error())
+			WriteError(w, r, CodeValidation, err.Error())
 		case errors.Is(err, accounting.ErrNoActiveFinancialYear):
-			WriteError(w, reqID, CodeConflict, "no active financial year is configured for this shop")
+			WriteError(w, r, CodeConflict, "no active financial year is configured for this shop")
 		default:
-			WriteError(w, reqID, CodeInternal, "failed to post contra transaction: "+err.Error())
+			WriteError(w, r, CodeInternal, "failed to post contra transaction: "+err.Error())
 		}
 		return
 	}

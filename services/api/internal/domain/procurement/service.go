@@ -15,6 +15,7 @@ import (
 	"github.com/andipatti/feedmate/services/api/internal/domain/inventory"
 	"github.com/andipatti/feedmate/services/api/internal/domain/pos"
 	"github.com/andipatti/feedmate/services/api/internal/domain/supplier"
+	"github.com/andipatti/feedmate/services/api/internal/reqctx"
 )
 
 var ErrValidation = errors.New("validation error")
@@ -326,18 +327,19 @@ func (s *Service) PostGRN(ctx context.Context, tenantID, deviceID, userID uuid.U
 			auditPayload["tare_override"] = true
 			auditPayload["tare_override_reason"] = req.TareOverride.Reason
 		}
+		reqID, ip, ua := reqctx.AuditFields(ctx)
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO audit_logs (tenant_id, actor_user_id, actor_device_id, action_code, entity_type, entity_id, after_json)
-			VALUES ($1,$2,$3,'GRN_POSTED','goods_receipt',$4,$5)
-		`, tenantID, userID, deviceID, header.ID, auditPayload); err != nil {
+			INSERT INTO audit_logs (tenant_id, actor_user_id, actor_device_id, action_code, entity_type, entity_id, after_json, request_id, ip_address, user_agent)
+			VALUES ($1,$2,$3,'GRN_POSTED','goods_receipt',$4,$5,$6,$7,$8)
+		`, tenantID, userID, deviceID, header.ID, auditPayload, reqID, ip, ua); err != nil {
 			return fmt.Errorf("write audit log: %w", err)
 		}
 		if anyOverrideUsed {
 			if _, err := tx.Exec(ctx, `
-				INSERT INTO audit_logs (tenant_id, actor_user_id, actor_device_id, action_code, entity_type, entity_id, reason, after_json)
-				VALUES ($1,$2,$3,'TARE_OVERRIDE','goods_receipt',$4,$5,$6)
+				INSERT INTO audit_logs (tenant_id, actor_user_id, actor_device_id, action_code, entity_type, entity_id, reason, after_json, request_id, ip_address, user_agent)
+				VALUES ($1,$2,$3,'TARE_OVERRIDE','goods_receipt',$4,$5,$6,$7,$8,$9)
 			`, tenantID, userID, deviceID, header.ID, req.TareOverride.Reason,
-				map[string]interface{}{"grn_number": grnNumber, "gross_kg": sumGross.String(), "tare_kg": sumTare.String(), "net_kg": sumNet.String()}); err != nil {
+				map[string]interface{}{"grn_number": grnNumber, "gross_kg": sumGross.String(), "tare_kg": sumTare.String(), "net_kg": sumNet.String()}, reqID, ip, ua); err != nil {
 				return fmt.Errorf("write tare override audit log: %w", err)
 			}
 		}

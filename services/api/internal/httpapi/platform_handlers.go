@@ -41,23 +41,22 @@ type platformTokenResponse struct {
 }
 
 func (h *PlatformHandlers) Login(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	var req platformLoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	if req.Username == "" || req.Password == "" {
-		WriteError(w, reqID, CodeValidation, "username and password are required")
+		WriteError(w, r, CodeValidation, "username and password are required")
 		return
 	}
 	result, err := h.Platform.Login(r.Context(), req.Username, req.Password)
 	if err != nil {
 		if errors.Is(err, platformadmin.ErrInvalidCredentials) {
-			WriteError(w, reqID, CodeUnauthorized, "invalid username or password")
+			WriteError(w, r, CodeUnauthorized, "invalid username or password")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "login failed: "+err.Error())
+		WriteError(w, r, CodeInternal, "login failed: "+err.Error())
 		return
 	}
 	WriteJSON(w, http.StatusOK, platformTokenResponse{
@@ -71,15 +70,14 @@ type platformRefreshRequest struct {
 }
 
 func (h *PlatformHandlers) Refresh(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	var req platformRefreshRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.RefreshToken == "" {
-		WriteError(w, reqID, CodeValidation, "refresh_token is required")
+		WriteError(w, r, CodeValidation, "refresh_token is required")
 		return
 	}
 	result, err := h.Platform.Refresh(r.Context(), req.RefreshToken)
 	if err != nil {
-		WriteError(w, reqID, CodeUnauthorized, "refresh token invalid or expired")
+		WriteError(w, r, CodeUnauthorized, "refresh token invalid or expired")
 		return
 	}
 	WriteJSON(w, http.StatusOK, platformTokenResponse{
@@ -89,14 +87,13 @@ func (h *PlatformHandlers) Refresh(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *PlatformHandlers) Logout(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	var req platformRefreshRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.RefreshToken == "" {
-		WriteError(w, reqID, CodeValidation, "refresh_token is required")
+		WriteError(w, r, CodeValidation, "refresh_token is required")
 		return
 	}
 	if err := h.Platform.Logout(r.Context(), req.RefreshToken); err != nil {
-		WriteError(w, reqID, CodeInternal, "logout failed: "+err.Error())
+		WriteError(w, r, CodeInternal, "logout failed: "+err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -118,10 +115,9 @@ func tenantSummaryJSON(t platformadmin.TenantSummary) map[string]interface{} {
 }
 
 func (h *PlatformHandlers) ListTenants(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	tenants, err := h.Platform.ListTenants(r.Context())
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to list tenants: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to list tenants: "+err.Error())
 		return
 	}
 	out := make([]map[string]interface{}, 0, len(tenants))
@@ -170,19 +166,18 @@ func tenantDetailJSON(d *platformadmin.TenantDetail) map[string]interface{} {
 }
 
 func (h *PlatformHandlers) GetTenant(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid tenant id")
+		WriteError(w, r, CodeValidation, "invalid tenant id")
 		return
 	}
 	detail, err := h.Platform.GetTenant(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, platformadmin.ErrNotFound) {
-			WriteError(w, reqID, CodeNotFound, "tenant not found")
+			WriteError(w, r, CodeNotFound, "tenant not found")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to fetch tenant: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to fetch tenant: "+err.Error())
 		return
 	}
 	WriteJSON(w, http.StatusOK, tenantDetailJSON(detail))
@@ -203,10 +198,9 @@ type createTenantRequest struct {
 }
 
 func (h *PlatformHandlers) CreateTenant(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	var req createTenantRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	tenantID, ownerUserID, err := h.Platform.CreateTenant(r.Context(), platformadmin.CreateTenantInput{
@@ -216,10 +210,10 @@ func (h *PlatformHandlers) CreateTenant(w http.ResponseWriter, r *http.Request) 
 	})
 	if err != nil {
 		if errors.Is(err, platformadmin.ErrValidation) {
-			WriteError(w, reqID, CodeValidation, err.Error())
+			WriteError(w, r, CodeValidation, err.Error())
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to create tenant: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to create tenant: "+err.Error())
 		return
 	}
 	WriteJSON(w, http.StatusCreated, map[string]string{"tenant_id": tenantID.String(), "owner_user_id": ownerUserID.String()})
@@ -243,15 +237,14 @@ type updateTenantRequest struct {
 // UpdateTenant corrects a tenant's legal/contact identity fields — the
 // full-edit capability CreateTenant alone never provided.
 func (h *PlatformHandlers) UpdateTenant(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid tenant id")
+		WriteError(w, r, CodeValidation, "invalid tenant id")
 		return
 	}
 	var req updateTenantRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	err = h.Platform.UpdateTenant(r.Context(), id, platformadmin.UpdateTenantInput{
@@ -263,11 +256,11 @@ func (h *PlatformHandlers) UpdateTenant(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		switch {
 		case errors.Is(err, platformadmin.ErrValidation):
-			WriteError(w, reqID, CodeValidation, err.Error())
+			WriteError(w, r, CodeValidation, err.Error())
 		case errors.Is(err, platformadmin.ErrNotFound):
-			WriteError(w, reqID, CodeNotFound, "tenant not found")
+			WriteError(w, r, CodeNotFound, "tenant not found")
 		default:
-			WriteError(w, reqID, CodeInternal, "failed to update tenant: "+err.Error())
+			WriteError(w, r, CodeInternal, "failed to update tenant: "+err.Error())
 		}
 		return
 	}
@@ -279,25 +272,24 @@ type setTenantStatusRequest struct {
 }
 
 func (h *PlatformHandlers) SetTenantStatus(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid tenant id")
+		WriteError(w, r, CodeValidation, "invalid tenant id")
 		return
 	}
 	var req setTenantStatusRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	if err := h.Platform.SetTenantStatus(r.Context(), id, req.Status); err != nil {
 		switch {
 		case errors.Is(err, platformadmin.ErrValidation):
-			WriteError(w, reqID, CodeValidation, err.Error())
+			WriteError(w, r, CodeValidation, err.Error())
 		case errors.Is(err, platformadmin.ErrNotFound):
-			WriteError(w, reqID, CodeNotFound, "tenant not found")
+			WriteError(w, r, CodeNotFound, "tenant not found")
 		default:
-			WriteError(w, reqID, CodeInternal, "failed to update tenant status: "+err.Error())
+			WriteError(w, r, CodeInternal, "failed to update tenant status: "+err.Error())
 		}
 		return
 	}
@@ -310,22 +302,21 @@ type setTenantPlanRequest struct {
 }
 
 func (h *PlatformHandlers) SetTenantPlan(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid tenant id")
+		WriteError(w, r, CodeValidation, "invalid tenant id")
 		return
 	}
 	var req setTenantPlanRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	var expiresAt *time.Time
 	if req.PlanExpiresAt != nil && *req.PlanExpiresAt != "" {
 		t, err := time.Parse(time.RFC3339, *req.PlanExpiresAt)
 		if err != nil {
-			WriteError(w, reqID, CodeValidation, "plan_expires_at must be RFC3339")
+			WriteError(w, r, CodeValidation, "plan_expires_at must be RFC3339")
 			return
 		}
 		expiresAt = &t
@@ -333,11 +324,11 @@ func (h *PlatformHandlers) SetTenantPlan(w http.ResponseWriter, r *http.Request)
 	if err := h.Platform.SetTenantPlan(r.Context(), id, req.PlanCode, expiresAt); err != nil {
 		switch {
 		case errors.Is(err, platformadmin.ErrValidation):
-			WriteError(w, reqID, CodeValidation, err.Error())
+			WriteError(w, r, CodeValidation, err.Error())
 		case errors.Is(err, platformadmin.ErrNotFound):
-			WriteError(w, reqID, CodeNotFound, "tenant not found")
+			WriteError(w, r, CodeNotFound, "tenant not found")
 		default:
-			WriteError(w, reqID, CodeInternal, "failed to update tenant plan: "+err.Error())
+			WriteError(w, r, CodeInternal, "failed to update tenant plan: "+err.Error())
 		}
 		return
 	}
@@ -351,23 +342,22 @@ type setTenantBrandingRequest struct {
 }
 
 func (h *PlatformHandlers) SetTenantBranding(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid tenant id")
+		WriteError(w, r, CodeValidation, "invalid tenant id")
 		return
 	}
 	var req setTenantBrandingRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	if err := h.Platform.SetTenantBranding(r.Context(), id, req.AppDisplayName, req.LogoURL, req.PrimaryColor); err != nil {
 		if errors.Is(err, platformadmin.ErrNotFound) {
-			WriteError(w, reqID, CodeNotFound, "tenant not found")
+			WriteError(w, r, CodeNotFound, "tenant not found")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to update tenant branding: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to update tenant branding: "+err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -379,23 +369,22 @@ type setTenantFeatureRequest struct {
 }
 
 func (h *PlatformHandlers) SetTenantFeature(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid tenant id")
+		WriteError(w, r, CodeValidation, "invalid tenant id")
 		return
 	}
 	var req setTenantFeatureRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	if err := h.Platform.SetTenantFeature(r.Context(), id, req.FeatureCode, req.Enabled); err != nil {
 		if errors.Is(err, platformadmin.ErrValidation) {
-			WriteError(w, reqID, CodeValidation, err.Error())
+			WriteError(w, r, CodeValidation, err.Error())
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to update tenant feature: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to update tenant feature: "+err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -416,60 +405,179 @@ func parsePlatformLimitOffset(r *http.Request) (limit, offset int) {
 	return limit, offset
 }
 
+func parseAuditLogFilter(r *http.Request) platformadmin.AuditLogFilter {
+	var f platformadmin.AuditLogFilter
+	q := r.URL.Query()
+	f.ActionCode = q.Get("action_code")
+	f.EntityType = q.Get("entity_type")
+	f.Query = q.Get("q")
+	if v := q.Get("tenant_id"); v != "" {
+		if id, err := uuid.Parse(v); err == nil {
+			f.TenantID = &id
+		}
+	}
+	if v := q.Get("from"); v != "" {
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			f.From = &t
+		}
+	}
+	if v := q.Get("to"); v != "" {
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			f.To = &t
+		}
+	}
+	return f
+}
+
+func auditLogEntryJSON(e platformadmin.AuditLogEntry) map[string]interface{} {
+	row := map[string]interface{}{
+		"id": e.ID.String(), "action_code": e.ActionCode, "entity_type": e.EntityType,
+		"created_at": e.CreatedAt.Format(time.RFC3339),
+	}
+	if e.TenantID != nil {
+		row["tenant_id"] = e.TenantID.String()
+	}
+	if e.TenantName != nil {
+		row["tenant_name"] = *e.TenantName
+	}
+	if e.ActorUserID != nil {
+		row["actor_user_id"] = e.ActorUserID.String()
+	}
+	if e.ActorName != nil {
+		row["actor_name"] = *e.ActorName
+	}
+	if e.ActorDeviceID != nil {
+		row["actor_device_id"] = e.ActorDeviceID.String()
+	}
+	if e.ActorPlatformAdminID != nil {
+		row["actor_platform_admin_id"] = e.ActorPlatformAdminID.String()
+	}
+	if e.ActorPlatformAdminName != nil {
+		row["actor_platform_admin_name"] = *e.ActorPlatformAdminName
+	}
+	if e.EntityID != nil {
+		row["entity_id"] = e.EntityID.String()
+	}
+	if len(e.BeforeJSON) > 0 {
+		row["before_json"] = json.RawMessage(e.BeforeJSON)
+	}
+	if len(e.AfterJSON) > 0 {
+		row["after_json"] = json.RawMessage(e.AfterJSON)
+	}
+	if e.Reason != nil {
+		row["reason"] = *e.Reason
+	}
+	if e.RequestID != nil {
+		row["request_id"] = e.RequestID.String()
+	}
+	if e.IPAddress != nil {
+		row["ip_address"] = *e.IPAddress
+	}
+	if e.UserAgent != nil {
+		row["user_agent"] = *e.UserAgent
+	}
+	return row
+}
+
 func (h *PlatformHandlers) ListAuditLogs(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	limit, offset := parsePlatformLimitOffset(r)
-	entries, err := h.Platform.ListAuditLogsAllTenants(r.Context(), limit, offset)
+	filter := parseAuditLogFilter(r)
+	entries, total, err := h.Platform.ListAuditLogsAllTenants(r.Context(), filter, limit, offset)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to list audit logs: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to list audit logs: "+err.Error())
 		return
 	}
 	out := make([]map[string]interface{}, 0, len(entries))
 	for _, e := range entries {
-		row := map[string]interface{}{
-			"id": e.ID.String(), "action_code": e.ActionCode, "entity_type": e.EntityType,
-			"created_at": e.CreatedAt.Format(time.RFC3339),
-		}
-		if e.TenantID != nil {
-			row["tenant_id"] = e.TenantID.String()
-		}
-		if e.TenantName != nil {
-			row["tenant_name"] = *e.TenantName
-		}
-		if e.ActorName != nil {
-			row["actor_name"] = *e.ActorName
-		}
-		if e.EntityID != nil {
-			row["entity_id"] = e.EntityID.String()
-		}
-		if e.Reason != nil {
-			row["reason"] = *e.Reason
-		}
-		out = append(out, row)
+		out = append(out, auditLogEntryJSON(e))
 	}
-	WriteJSON(w, http.StatusOK, map[string]interface{}{"entries": out})
+	WriteJSON(w, http.StatusOK, map[string]interface{}{"entries": out, "total": total})
+}
+
+// parseErrorLogFilter reads the optional filter query params for the error
+// log screen — every one is optional, matching parsePlatformLimitOffset's
+// "absent = no filter" convention.
+func parseErrorLogFilter(r *http.Request) platformadmin.ErrorLogFilter {
+	var f platformadmin.ErrorLogFilter
+	q := r.URL.Query()
+	if v := q.Get("status_code"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			f.StatusCode = &n
+		}
+	}
+	f.Code = q.Get("code")
+	f.Method = q.Get("method")
+	f.Query = q.Get("q")
+	if v := q.Get("from"); v != "" {
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			f.From = &t
+		}
+	}
+	if v := q.Get("to"); v != "" {
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			f.To = &t
+		}
+	}
+	return f
+}
+
+func errorLogEntryJSON(e platformadmin.ErrorLogEntry) map[string]interface{} {
+	row := map[string]interface{}{
+		"id": e.ID.String(), "status_code": e.StatusCode, "message": e.Message,
+		"created_at": e.CreatedAt.Format(time.RFC3339),
+	}
+	if e.RequestID != nil {
+		row["request_id"] = e.RequestID.String()
+	}
+	if e.Code != nil {
+		row["code"] = *e.Code
+	}
+	if e.Method != nil {
+		row["method"] = *e.Method
+	}
+	if e.Path != nil {
+		row["path"] = *e.Path
+	}
+	if e.QueryParams != nil {
+		row["query_params"] = *e.QueryParams
+	}
+	if len(e.RequestBody) > 0 {
+		row["request_body"] = json.RawMessage(e.RequestBody)
+	}
+	if e.IPAddress != nil {
+		row["ip_address"] = *e.IPAddress
+	}
+	if e.UserAgent != nil {
+		row["user_agent"] = *e.UserAgent
+	}
+	if e.TenantID != nil {
+		row["tenant_id"] = e.TenantID.String()
+	}
+	if e.ActorUserID != nil {
+		row["actor_user_id"] = e.ActorUserID.String()
+	}
+	if e.ActorPlatformAdminID != nil {
+		row["actor_platform_admin_id"] = e.ActorPlatformAdminID.String()
+	}
+	if e.StackTrace != nil {
+		row["stack_trace"] = *e.StackTrace
+	}
+	return row
 }
 
 func (h *PlatformHandlers) ListErrorLogs(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	limit, offset := parsePlatformLimitOffset(r)
-	entries, err := h.Platform.ListErrorLogs(r.Context(), limit, offset)
+	filter := parseErrorLogFilter(r)
+	entries, total, err := h.Platform.ListErrorLogs(r.Context(), filter, limit, offset)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to list error logs: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to list error logs: "+err.Error())
 		return
 	}
 	out := make([]map[string]interface{}, 0, len(entries))
 	for _, e := range entries {
-		row := map[string]interface{}{
-			"id": e.ID.String(), "status_code": e.StatusCode, "message": e.Message,
-			"created_at": e.CreatedAt.Format(time.RFC3339),
-		}
-		if e.RequestID != nil {
-			row["request_id"] = e.RequestID.String()
-		}
-		out = append(out, row)
+		out = append(out, errorLogEntryJSON(e))
 	}
-	WriteJSON(w, http.StatusOK, map[string]interface{}{"entries": out})
+	WriteJSON(w, http.StatusOK, map[string]interface{}{"entries": out, "total": total})
 }
 
 func brandingJSON(b *platformadmin.EffectiveBranding) map[string]interface{} {
@@ -489,7 +597,6 @@ func brandingJSON(b *platformadmin.EffectiveBranding) map[string]interface{} {
 // override; every one of those cases still returns the platform default,
 // never an error) — see platformadmin.Service.ResolveBranding's doc comment.
 func (h *PlatformHandlers) GetBranding(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	var deviceUUID *uuid.UUID
 	if v := r.URL.Query().Get("device_uuid"); v != "" {
 		if id, err := uuid.Parse(v); err == nil {
@@ -498,17 +605,16 @@ func (h *PlatformHandlers) GetBranding(w http.ResponseWriter, r *http.Request) {
 	}
 	branding, err := h.Platform.ResolveBranding(r.Context(), deviceUUID)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to resolve branding: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to resolve branding: "+err.Error())
 		return
 	}
 	WriteJSON(w, http.StatusOK, brandingJSON(branding))
 }
 
 func (h *PlatformHandlers) GetPlatformSettings(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	settings, err := h.Platform.GetPlatformSettings(r.Context())
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to fetch platform settings: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to fetch platform settings: "+err.Error())
 		return
 	}
 	out := map[string]interface{}{"app_name": settings.AppName, "app_tagline": settings.AppTagline}
@@ -529,18 +635,17 @@ type updatePlatformSettingsRequest struct {
 }
 
 func (h *PlatformHandlers) UpdatePlatformSettings(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	var req updatePlatformSettingsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	if err := h.Platform.UpdatePlatformSettings(r.Context(), req.AppName, req.AppTagline, req.LogoURL, req.PrimaryColor); err != nil {
 		if errors.Is(err, platformadmin.ErrValidation) {
-			WriteError(w, reqID, CodeValidation, err.Error())
+			WriteError(w, r, CodeValidation, err.Error())
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to update platform settings: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to update platform settings: "+err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -551,17 +656,16 @@ func (h *PlatformHandlers) UpdatePlatformSettings(w http.ResponseWriter, r *http
 // owner's forgotten password. ---
 
 func (h *PlatformHandlers) ListTenantUsers(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	tenantID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid tenant id")
+		WriteError(w, r, CodeValidation, "invalid tenant id")
 		return
 	}
 	query := r.URL.Query().Get("q")
 	limit, offset := parsePlatformLimitOffset(r)
 	page, err := h.Platform.ListTenantUsers(r.Context(), tenantID, query, limit, offset)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to list tenant users: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to list tenant users: "+err.Error())
 		return
 	}
 	out := make([]map[string]interface{}, 0, len(page.Users))
@@ -572,24 +676,23 @@ func (h *PlatformHandlers) ListTenantUsers(w http.ResponseWriter, r *http.Reques
 }
 
 func (h *PlatformHandlers) GetTenantUser(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	tenantID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid tenant id")
+		WriteError(w, r, CodeValidation, "invalid tenant id")
 		return
 	}
 	userID, err := uuid.Parse(chi.URLParam(r, "userId"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid user id")
+		WriteError(w, r, CodeValidation, "invalid user id")
 		return
 	}
 	detail, err := h.Platform.GetTenantUserDetail(r.Context(), tenantID, userID)
 	if err != nil {
 		if errors.Is(err, identity.ErrNotFound) {
-			WriteError(w, reqID, CodeNotFound, "user not found")
+			WriteError(w, r, CodeNotFound, "user not found")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to fetch user: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to fetch user: "+err.Error())
 		return
 	}
 	resp := userSummaryToJSON(detail.User)
@@ -602,22 +705,21 @@ func (h *PlatformHandlers) GetTenantUser(w http.ResponseWriter, r *http.Request)
 }
 
 func (h *PlatformHandlers) CreateTenantUser(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	tenantID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid tenant id")
+		WriteError(w, r, CodeValidation, "invalid tenant id")
 		return
 	}
 	var req createUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	var roleIDs []uuid.UUID
 	for _, s := range req.RoleIDs {
 		rid, err := uuid.Parse(s)
 		if err != nil {
-			WriteError(w, reqID, CodeValidation, "role_ids must all be valid UUIDs")
+			WriteError(w, r, CodeValidation, "role_ids must all be valid UUIDs")
 			return
 		}
 		roleIDs = append(roleIDs, rid)
@@ -629,11 +731,11 @@ func (h *PlatformHandlers) CreateTenantUser(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		switch {
 		case errors.Is(err, platformadmin.ErrValidation):
-			WriteError(w, reqID, CodeValidation, err.Error())
+			WriteError(w, r, CodeValidation, err.Error())
 		case errors.Is(err, identity.ErrUsernameTaken):
-			WriteError(w, reqID, CodeConflict, err.Error())
+			WriteError(w, r, CodeConflict, err.Error())
 		default:
-			WriteError(w, reqID, CodeInternal, "failed to create user: "+err.Error())
+			WriteError(w, r, CodeInternal, "failed to create user: "+err.Error())
 		}
 		return
 	}
@@ -641,20 +743,19 @@ func (h *PlatformHandlers) CreateTenantUser(w http.ResponseWriter, r *http.Reque
 }
 
 func (h *PlatformHandlers) UpdateTenantUser(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	tenantID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid tenant id")
+		WriteError(w, r, CodeValidation, "invalid tenant id")
 		return
 	}
 	userID, err := uuid.Parse(chi.URLParam(r, "userId"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid user id")
+		WriteError(w, r, CodeValidation, "invalid user id")
 		return
 	}
 	var req updateUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	if err := h.Platform.UpdateTenantUser(r.Context(), tenantID, userID, identity.UpdateUserInput{
@@ -662,11 +763,11 @@ func (h *PlatformHandlers) UpdateTenantUser(w http.ResponseWriter, r *http.Reque
 	}); err != nil {
 		switch {
 		case errors.Is(err, platformadmin.ErrValidation):
-			WriteError(w, reqID, CodeValidation, err.Error())
+			WriteError(w, r, CodeValidation, err.Error())
 		case errors.Is(err, identity.ErrNotFound):
-			WriteError(w, reqID, CodeNotFound, "user not found")
+			WriteError(w, r, CodeNotFound, "user not found")
 		default:
-			WriteError(w, reqID, CodeInternal, "failed to update user: "+err.Error())
+			WriteError(w, r, CodeInternal, "failed to update user: "+err.Error())
 		}
 		return
 	}
@@ -674,28 +775,27 @@ func (h *PlatformHandlers) UpdateTenantUser(w http.ResponseWriter, r *http.Reque
 }
 
 func (h *PlatformHandlers) SetTenantUserStatus(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	tenantID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid tenant id")
+		WriteError(w, r, CodeValidation, "invalid tenant id")
 		return
 	}
 	userID, err := uuid.Parse(chi.URLParam(r, "userId"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid user id")
+		WriteError(w, r, CodeValidation, "invalid user id")
 		return
 	}
 	var req setUserStatusRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	if err := h.Platform.SetTenantUserStatus(r.Context(), tenantID, userID, req.Active); err != nil {
 		if errors.Is(err, identity.ErrNotFound) {
-			WriteError(w, reqID, CodeNotFound, "user not found")
+			WriteError(w, r, CodeNotFound, "user not found")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to update user status: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to update user status: "+err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -707,40 +807,38 @@ func (h *PlatformHandlers) SetTenantUserStatus(w http.ResponseWriter, r *http.Re
 // the hand-written SQL password resets this session had to perform
 // directly against production.
 func (h *PlatformHandlers) ResetTenantUserPassword(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	tenantID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid tenant id")
+		WriteError(w, r, CodeValidation, "invalid tenant id")
 		return
 	}
 	userID, err := uuid.Parse(chi.URLParam(r, "userId"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid user id")
+		WriteError(w, r, CodeValidation, "invalid user id")
 		return
 	}
 	newPassword, err := h.Platform.ResetTenantUserPassword(r.Context(), tenantID, userID, claims.UserID)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to reset password: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to reset password: "+err.Error())
 		return
 	}
 	WriteJSON(w, http.StatusOK, map[string]string{"new_password": newPassword})
 }
 
 func (h *PlatformHandlers) ListTenantUserRoles(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	tenantID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid tenant id")
+		WriteError(w, r, CodeValidation, "invalid tenant id")
 		return
 	}
 	roles, err := h.Platform.ListTenantUserRoles(r.Context(), tenantID)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to list roles: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to list roles: "+err.Error())
 		return
 	}
 	out := make([]map[string]interface{}, 0, len(roles))
@@ -755,37 +853,36 @@ func (h *PlatformHandlers) ListTenantUserRoles(w http.ResponseWriter, r *http.Re
 }
 
 func (h *PlatformHandlers) SetTenantUserRoles(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	tenantID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid tenant id")
+		WriteError(w, r, CodeValidation, "invalid tenant id")
 		return
 	}
 	userID, err := uuid.Parse(chi.URLParam(r, "userId"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid user id")
+		WriteError(w, r, CodeValidation, "invalid user id")
 		return
 	}
 	var req setUserRolesRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	var roleIDs []uuid.UUID
 	for _, s := range req.RoleIDs {
 		rid, err := uuid.Parse(s)
 		if err != nil {
-			WriteError(w, reqID, CodeValidation, "role_ids must all be valid UUIDs")
+			WriteError(w, r, CodeValidation, "role_ids must all be valid UUIDs")
 			return
 		}
 		roleIDs = append(roleIDs, rid)
 	}
 	if err := h.Platform.SetTenantUserRoles(r.Context(), tenantID, userID, roleIDs); err != nil {
 		if errors.Is(err, identity.ErrNotFound) {
-			WriteError(w, reqID, CodeNotFound, "user not found")
+			WriteError(w, r, CodeNotFound, "user not found")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to update user roles: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to update user roles: "+err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -794,17 +891,16 @@ func (h *PlatformHandlers) SetTenantUserRoles(w http.ResponseWriter, r *http.Req
 // --- Tenant device management from platform admin. ---
 
 func (h *PlatformHandlers) ListTenantDevices(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	tenantID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid tenant id")
+		WriteError(w, r, CodeValidation, "invalid tenant id")
 		return
 	}
 	query := r.URL.Query().Get("q")
 	limit, offset := parsePlatformLimitOffset(r)
 	page, err := h.Platform.ListTenantDevices(r.Context(), tenantID, query, limit, offset)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to list devices: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to list devices: "+err.Error())
 		return
 	}
 	out := make([]map[string]interface{}, 0, len(page.Devices))
@@ -815,33 +911,32 @@ func (h *PlatformHandlers) ListTenantDevices(w http.ResponseWriter, r *http.Requ
 }
 
 func (h *PlatformHandlers) RevokeTenantDevice(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	tenantID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid tenant id")
+		WriteError(w, r, CodeValidation, "invalid tenant id")
 		return
 	}
 	deviceID, err := uuid.Parse(chi.URLParam(r, "deviceId"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid device id")
+		WriteError(w, r, CodeValidation, "invalid device id")
 		return
 	}
 	var req revokeDeviceRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	if err := h.Platform.RevokeTenantDevice(r.Context(), tenantID, deviceID, claims.UserID, req.Reason); err != nil {
 		if errors.Is(err, devicepairing.ErrDeviceNotFound) {
-			WriteError(w, reqID, CodeNotFound, "device not found")
+			WriteError(w, r, CodeNotFound, "device not found")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to revoke device: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to revoke device: "+err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -853,20 +948,19 @@ func (h *PlatformHandlers) RevokeTenantDevice(w http.ResponseWriter, r *http.Req
 // workaround until now was hand-inserting a row via SQL directly against
 // production.
 func (h *PlatformHandlers) GeneratePairingCodeForTenant(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	tenantID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid tenant id")
+		WriteError(w, r, CodeValidation, "invalid tenant id")
 		return
 	}
 	result, err := h.Platform.GeneratePairingCodeForTenant(r.Context(), tenantID, claims.UserID)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to generate pairing code: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to generate pairing code: "+err.Error())
 		return
 	}
 	WriteJSON(w, http.StatusCreated, map[string]string{
@@ -888,10 +982,9 @@ func planJSON(p subscription.Plan) map[string]interface{} {
 }
 
 func (h *PlatformHandlers) ListPlans(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	plans, err := h.Subscription.ListPlans(r.Context())
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to list plans: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to list plans: "+err.Error())
 		return
 	}
 	out := make([]map[string]interface{}, 0, len(plans))
@@ -909,15 +1002,14 @@ type createPlanRequest struct {
 }
 
 func (h *PlatformHandlers) CreatePlan(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	var req createPlanRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	price, err := decimal.NewFromString(req.Price)
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "price must be a valid decimal")
+		WriteError(w, r, CodeValidation, "price must be a valid decimal")
 		return
 	}
 	id, err := h.Subscription.CreatePlan(r.Context(), subscription.CreatePlanInput{
@@ -925,10 +1017,10 @@ func (h *PlatformHandlers) CreatePlan(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		if errors.Is(err, subscription.ErrValidation) {
-			WriteError(w, reqID, CodeValidation, err.Error())
+			WriteError(w, r, CodeValidation, err.Error())
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to create plan: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to create plan: "+err.Error())
 		return
 	}
 	WriteJSON(w, http.StatusCreated, map[string]string{"id": id.String()})
@@ -942,20 +1034,19 @@ type updatePlanRequest struct {
 }
 
 func (h *PlatformHandlers) UpdatePlan(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid plan id")
+		WriteError(w, r, CodeValidation, "invalid plan id")
 		return
 	}
 	var req updatePlanRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	price, err := decimal.NewFromString(req.Price)
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "price must be a valid decimal")
+		WriteError(w, r, CodeValidation, "price must be a valid decimal")
 		return
 	}
 	if err := h.Subscription.UpdatePlan(r.Context(), id, subscription.UpdatePlanInput{
@@ -963,11 +1054,11 @@ func (h *PlatformHandlers) UpdatePlan(w http.ResponseWriter, r *http.Request) {
 	}); err != nil {
 		switch {
 		case errors.Is(err, subscription.ErrValidation):
-			WriteError(w, reqID, CodeValidation, err.Error())
+			WriteError(w, r, CodeValidation, err.Error())
 		case errors.Is(err, subscription.ErrNotFound):
-			WriteError(w, reqID, CodeNotFound, "plan not found")
+			WriteError(w, r, CodeNotFound, "plan not found")
 		default:
-			WriteError(w, reqID, CodeInternal, "failed to update plan: "+err.Error())
+			WriteError(w, r, CodeInternal, "failed to update plan: "+err.Error())
 		}
 		return
 	}
@@ -993,19 +1084,18 @@ func tenantSubscriptionJSON(s *subscription.TenantSubscription) map[string]inter
 }
 
 func (h *PlatformHandlers) GetTenantSubscription(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	tenantID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid tenant id")
+		WriteError(w, r, CodeValidation, "invalid tenant id")
 		return
 	}
 	sub, err := h.Subscription.GetTenantSubscription(r.Context(), tenantID)
 	if err != nil {
 		if errors.Is(err, subscription.ErrNotFound) {
-			WriteError(w, reqID, CodeNotFound, "tenant has no subscription assigned yet")
+			WriteError(w, r, CodeNotFound, "tenant has no subscription assigned yet")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to fetch subscription: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to fetch subscription: "+err.Error())
 		return
 	}
 	WriteJSON(w, http.StatusOK, tenantSubscriptionJSON(sub))
@@ -1017,37 +1107,36 @@ type setTenantSubscriptionPlanRequest struct {
 }
 
 func (h *PlatformHandlers) SetTenantSubscriptionPlan(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	tenantID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid tenant id")
+		WriteError(w, r, CodeValidation, "invalid tenant id")
 		return
 	}
 	var req setTenantSubscriptionPlanRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	planID, err := uuid.Parse(req.PlanID)
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "plan_id must be a valid UUID")
+		WriteError(w, r, CodeValidation, "plan_id must be a valid UUID")
 		return
 	}
 	var periodStart *time.Time
 	if req.PeriodStart != nil && *req.PeriodStart != "" {
 		t, err := time.Parse("2006-01-02", *req.PeriodStart)
 		if err != nil {
-			WriteError(w, reqID, CodeValidation, "period_start must be YYYY-MM-DD")
+			WriteError(w, r, CodeValidation, "period_start must be YYYY-MM-DD")
 			return
 		}
 		periodStart = &t
 	}
 	if err := h.Subscription.SetTenantPlan(r.Context(), tenantID, planID, periodStart); err != nil {
 		if errors.Is(err, subscription.ErrNotFound) {
-			WriteError(w, reqID, CodeNotFound, "plan not found")
+			WriteError(w, r, CodeNotFound, "plan not found")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to set tenant plan: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to set tenant plan: "+err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -1066,25 +1155,24 @@ type recordSubscriptionPaymentRequest struct {
 // transfer/cash) and records it here, the same trust model as the
 // existing customer-receipt feature.
 func (h *PlatformHandlers) RecordSubscriptionPayment(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	tenantID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid tenant id")
+		WriteError(w, r, CodeValidation, "invalid tenant id")
 		return
 	}
 	var req recordSubscriptionPaymentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	amount, err := decimal.NewFromString(req.Amount)
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "amount must be a valid decimal")
+		WriteError(w, r, CodeValidation, "amount must be a valid decimal")
 		return
 	}
 	result, err := h.Subscription.RecordManualPayment(r.Context(), tenantID, subscription.RecordPaymentInput{
@@ -1094,11 +1182,11 @@ func (h *PlatformHandlers) RecordSubscriptionPayment(w http.ResponseWriter, r *h
 	if err != nil {
 		switch {
 		case errors.Is(err, subscription.ErrValidation):
-			WriteError(w, reqID, CodeValidation, err.Error())
+			WriteError(w, r, CodeValidation, err.Error())
 		case errors.Is(err, subscription.ErrNotFound):
-			WriteError(w, reqID, CodeNotFound, "tenant has no subscription assigned yet")
+			WriteError(w, r, CodeNotFound, "tenant has no subscription assigned yet")
 		default:
-			WriteError(w, reqID, CodeInternal, "failed to record payment: "+err.Error())
+			WriteError(w, r, CodeInternal, "failed to record payment: "+err.Error())
 		}
 		return
 	}
@@ -1106,16 +1194,15 @@ func (h *PlatformHandlers) RecordSubscriptionPayment(w http.ResponseWriter, r *h
 }
 
 func (h *PlatformHandlers) ListBillingHistory(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	tenantID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid tenant id")
+		WriteError(w, r, CodeValidation, "invalid tenant id")
 		return
 	}
 	limit, offset := parsePlatformLimitOffset(r)
 	entries, total, err := h.Subscription.ListBillingHistory(r.Context(), tenantID, limit, offset)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to list billing history: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to list billing history: "+err.Error())
 		return
 	}
 	out := make([]map[string]interface{}, 0, len(entries))

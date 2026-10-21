@@ -29,25 +29,24 @@ type openEODRequest struct {
 }
 
 func (h *EODHandlers) OpenSession(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	var req openEODRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	businessDate, err := parseBusinessDate(req.BusinessDate)
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "business_date must be YYYY-MM-DD")
+		WriteError(w, r, CodeValidation, "business_date must be YYYY-MM-DD")
 		return
 	}
 	openingCash, err := decimal.NewFromString(req.OpeningCash)
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "opening_cash must be a valid decimal")
+		WriteError(w, r, CodeValidation, "opening_cash must be a valid decimal")
 		return
 	}
 
@@ -55,11 +54,11 @@ func (h *EODHandlers) OpenSession(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, eod.ErrValidation):
-			WriteError(w, reqID, CodeValidation, err.Error())
+			WriteError(w, r, CodeValidation, err.Error())
 		case errors.Is(err, eod.ErrSessionExists):
-			WriteError(w, reqID, CodeConflict, err.Error())
+			WriteError(w, r, CodeConflict, err.Error())
 		default:
-			WriteError(w, reqID, CodeInternal, "failed to open EOD session: "+err.Error())
+			WriteError(w, r, CodeInternal, "failed to open EOD session: "+err.Error())
 		}
 		return
 	}
@@ -73,25 +72,24 @@ type closeEODRequest struct {
 }
 
 func (h *EODHandlers) CloseSession(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	var req closeEODRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	businessDate, err := parseBusinessDate(req.BusinessDate)
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "business_date must be YYYY-MM-DD")
+		WriteError(w, r, CodeValidation, "business_date must be YYYY-MM-DD")
 		return
 	}
 	actualCash, err := decimal.NewFromString(req.ActualCash)
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "actual_cash must be a valid decimal")
+		WriteError(w, r, CodeValidation, "actual_cash must be a valid decimal")
 		return
 	}
 
@@ -99,11 +97,11 @@ func (h *EODHandlers) CloseSession(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, eod.ErrValidation):
-			WriteError(w, reqID, CodeValidation, err.Error())
+			WriteError(w, r, CodeValidation, err.Error())
 		case errors.Is(err, eod.ErrSessionNotOpen), errors.Is(err, eod.ErrNotFound):
-			WriteError(w, reqID, CodeConflict, err.Error())
+			WriteError(w, r, CodeConflict, err.Error())
 		default:
-			WriteError(w, reqID, CodeInternal, "failed to close EOD session: "+err.Error())
+			WriteError(w, r, CodeInternal, "failed to close EOD session: "+err.Error())
 		}
 		return
 	}
@@ -121,31 +119,30 @@ type reopenEODRequest struct {
 }
 
 func (h *EODHandlers) ReopenSession(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	var req reopenEODRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	businessDate, err := parseBusinessDate(req.BusinessDate)
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "business_date must be YYYY-MM-DD")
+		WriteError(w, r, CodeValidation, "business_date must be YYYY-MM-DD")
 		return
 	}
 
 	if err := h.EOD.ReopenSession(r.Context(), claims.TenantID, claims.UserID, businessDate, req.Reason); err != nil {
 		switch {
 		case errors.Is(err, eod.ErrValidation):
-			WriteError(w, reqID, CodeValidation, err.Error())
+			WriteError(w, r, CodeValidation, err.Error())
 		case errors.Is(err, eod.ErrNotClosed), errors.Is(err, eod.ErrNotFound):
-			WriteError(w, reqID, CodeConflict, err.Error())
+			WriteError(w, r, CodeConflict, err.Error())
 		default:
-			WriteError(w, reqID, CodeInternal, "failed to reopen EOD session: "+err.Error())
+			WriteError(w, r, CodeInternal, "failed to reopen EOD session: "+err.Error())
 		}
 		return
 	}
@@ -165,25 +162,24 @@ type recordCashMovementRequest struct {
 // change added to the drawer. Counts toward expected cash the next time the
 // session is closed (see eod.Service.CloseSession).
 func (h *EODHandlers) RecordCashMovement(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	var req recordCashMovementRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	businessDate, err := parseBusinessDate(req.BusinessDate)
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "business_date must be YYYY-MM-DD")
+		WriteError(w, r, CodeValidation, "business_date must be YYYY-MM-DD")
 		return
 	}
 	amount, err := decimal.NewFromString(req.Amount)
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "amount must be a valid decimal")
+		WriteError(w, r, CodeValidation, "amount must be a valid decimal")
 		return
 	}
 
@@ -191,11 +187,11 @@ func (h *EODHandlers) RecordCashMovement(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		switch {
 		case errors.Is(err, eod.ErrValidation):
-			WriteError(w, reqID, CodeValidation, err.Error())
+			WriteError(w, r, CodeValidation, err.Error())
 		case errors.Is(err, eod.ErrSessionNotOpen), errors.Is(err, eod.ErrNotFound):
-			WriteError(w, reqID, CodeConflict, err.Error())
+			WriteError(w, r, CodeConflict, err.Error())
 		default:
-			WriteError(w, reqID, CodeInternal, "failed to record cash movement: "+err.Error())
+			WriteError(w, r, CodeInternal, "failed to record cash movement: "+err.Error())
 		}
 		return
 	}
@@ -205,24 +201,23 @@ func (h *EODHandlers) RecordCashMovement(w http.ResponseWriter, r *http.Request)
 // ListCashMovements returns the current (or given) business date's manual
 // cash in/out log, newest-first.
 func (h *EODHandlers) ListCashMovements(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	businessDate, err := parseBusinessDate(r.URL.Query().Get("business_date"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "business_date must be YYYY-MM-DD")
+		WriteError(w, r, CodeValidation, "business_date must be YYYY-MM-DD")
 		return
 	}
 	movements, err := h.EOD.ListCashMovements(r.Context(), claims.TenantID, businessDate)
 	if err != nil {
 		if errors.Is(err, eod.ErrNotFound) {
-			WriteError(w, reqID, CodeNotFound, "no EOD session for this business date")
+			WriteError(w, r, CodeNotFound, "no EOD session for this business date")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to list cash movements: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to list cash movements: "+err.Error())
 		return
 	}
 	out := make([]map[string]interface{}, 0, len(movements))
@@ -243,24 +238,23 @@ func (h *EODHandlers) ListCashMovements(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *EODHandlers) GetSession(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	businessDate, err := parseBusinessDate(r.URL.Query().Get("business_date"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "business_date must be YYYY-MM-DD")
+		WriteError(w, r, CodeValidation, "business_date must be YYYY-MM-DD")
 		return
 	}
 	session, err := h.EOD.GetSession(r.Context(), claims.TenantID, businessDate)
 	if err != nil {
 		if errors.Is(err, eod.ErrNotFound) {
-			WriteError(w, reqID, CodeNotFound, "no EOD session for this business date")
+			WriteError(w, r, CodeNotFound, "no EOD session for this business date")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to fetch EOD session: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to fetch EOD session: "+err.Error())
 		return
 	}
 	resp := map[string]interface{}{

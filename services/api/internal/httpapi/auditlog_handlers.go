@@ -21,10 +21,9 @@ type AuditLogHandlers struct {
 // (`entity_id`), paginated via `limit`/`offset`. Read-only: there is no
 // write endpoint for this resource anywhere in the API, by design.
 func (h *AuditLogHandlers) List(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	query := r.URL.Query().Get("q")
@@ -32,7 +31,7 @@ func (h *AuditLogHandlers) List(w http.ResponseWriter, r *http.Request) {
 	if v := r.URL.Query().Get("entity_id"); v != "" {
 		id, err := uuid.Parse(v)
 		if err != nil {
-			WriteError(w, reqID, CodeValidation, "entity_id must be a valid UUID")
+			WriteError(w, r, CodeValidation, "entity_id must be a valid UUID")
 			return
 		}
 		entityID = &id
@@ -52,7 +51,7 @@ func (h *AuditLogHandlers) List(w http.ResponseWriter, r *http.Request) {
 
 	page, err := h.AuditLog.List(r.Context(), claims.TenantID, query, entityID, limit, offset)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to list audit log: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to list audit log: "+err.Error())
 		return
 	}
 	out := make([]map[string]interface{}, 0, len(page.Entries))

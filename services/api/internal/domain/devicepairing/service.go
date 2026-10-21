@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/andipatti/feedmate/services/api/internal/dbctx"
+	"github.com/andipatti/feedmate/services/api/internal/reqctx"
 )
 
 var (
@@ -77,10 +78,11 @@ func (s *Service) GeneratePairingCode(ctx context.Context, tenantID, userID uuid
 		if err != nil {
 			return fmt.Errorf("insert pairing code: %w", err)
 		}
+		reqID, ip, ua := reqctx.AuditFields(ctx)
 		_, err = tx.Exec(ctx, `
-			INSERT INTO audit_logs (tenant_id, actor_user_id, action_code, entity_type, after_json)
-			VALUES ($1, $2, 'DEVICE_PAIRING_CODE_GENERATED', 'device_pairing_code', $3)
-		`, tenantID, userID, map[string]interface{}{"expires_at": expiresAt})
+			INSERT INTO audit_logs (tenant_id, actor_user_id, action_code, entity_type, after_json, request_id, ip_address, user_agent)
+			VALUES ($1, $2, 'DEVICE_PAIRING_CODE_GENERATED', 'device_pairing_code', $3, $4, $5, $6)
+		`, tenantID, userID, map[string]interface{}{"expires_at": expiresAt}, reqID, ip, ua)
 		return err
 	})
 	if err != nil {
@@ -127,10 +129,11 @@ func (s *Service) RegisterDevice(ctx context.Context, code string, deviceUUID uu
 		if err := MarkCodeUsed(ctx, tx, pc.ID, deviceID); err != nil {
 			return fmt.Errorf("mark pairing code used: %w", err)
 		}
+		reqID, ip, ua := reqctx.AuditFields(ctx)
 		_, err = tx.Exec(ctx, `
-			INSERT INTO audit_logs (tenant_id, action_code, entity_type, entity_id, after_json)
-			VALUES ($1, 'DEVICE_REGISTERED', 'device', $2, $3)
-		`, tenantID, deviceID, map[string]interface{}{"device_uuid": deviceUUID, "display_name": displayName})
+			INSERT INTO audit_logs (tenant_id, action_code, entity_type, entity_id, after_json, request_id, ip_address, user_agent)
+			VALUES ($1, 'DEVICE_REGISTERED', 'device', $2, $3, $4, $5, $6)
+		`, tenantID, deviceID, map[string]interface{}{"device_uuid": deviceUUID, "display_name": displayName}, reqID, ip, ua)
 		return err
 	})
 	if err != nil {
@@ -185,10 +188,11 @@ func (s *Service) RevokeDevice(ctx context.Context, tenantID, deviceID, actorUse
 		if reason != "" {
 			auditPayload["reason"] = reason
 		}
+		reqID, ip, ua := reqctx.AuditFields(ctx)
 		_, err = tx.Exec(ctx, `
-			INSERT INTO audit_logs (tenant_id, actor_user_id, action_code, entity_type, entity_id, reason, after_json)
-			VALUES ($1,$2,'DEVICE_REVOKED','device',$3,$4,$5)
-		`, tenantID, actorUserID, deviceID, reason, auditPayload)
+			INSERT INTO audit_logs (tenant_id, actor_user_id, action_code, entity_type, entity_id, reason, after_json, request_id, ip_address, user_agent)
+			VALUES ($1,$2,'DEVICE_REVOKED','device',$3,$4,$5,$6,$7,$8)
+		`, tenantID, actorUserID, deviceID, reason, auditPayload, reqID, ip, ua)
 		return err
 	})
 }

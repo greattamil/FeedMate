@@ -57,15 +57,14 @@ func customerToJSON(c *customer.Customer) map[string]interface{} {
 }
 
 func (h *CustomerHandlers) Create(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	var req createCustomerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 
@@ -77,7 +76,7 @@ func (h *CustomerHandlers) Create(w http.ResponseWriter, r *http.Request) {
 	if req.CreditLimit != "" {
 		limit, err := decimal.NewFromString(req.CreditLimit)
 		if err != nil {
-			WriteError(w, reqID, CodeValidation, "credit_limit must be a valid decimal")
+			WriteError(w, r, CodeValidation, "credit_limit must be a valid decimal")
 			return
 		}
 		in.CreditLimit = &limit
@@ -86,10 +85,10 @@ func (h *CustomerHandlers) Create(w http.ResponseWriter, r *http.Request) {
 	created, err := h.Customer.Create(r.Context(), claims.TenantID, in)
 	if err != nil {
 		if errors.Is(err, customer.ErrValidation) {
-			WriteError(w, reqID, CodeValidation, err.Error())
+			WriteError(w, r, CodeValidation, err.Error())
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to create customer: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to create customer: "+err.Error())
 		return
 	}
 	WriteJSON(w, http.StatusCreated, customerToJSON(created))
@@ -108,20 +107,19 @@ type updateCustomerRequest struct {
 // Update revises a customer's editable fields. customer_code is immutable
 // and not accepted here — see customer.Update's doc comment.
 func (h *CustomerHandlers) Update(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid customer id")
+		WriteError(w, r, CodeValidation, "invalid customer id")
 		return
 	}
 	var req updateCustomerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 
@@ -131,14 +129,14 @@ func (h *CustomerHandlers) Update(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		if errors.Is(err, customer.ErrValidation) {
-			WriteError(w, reqID, CodeValidation, err.Error())
+			WriteError(w, r, CodeValidation, err.Error())
 			return
 		}
 		if errors.Is(err, customer.ErrNotFound) {
-			WriteError(w, reqID, CodeNotFound, "customer not found")
+			WriteError(w, r, CodeNotFound, "customer not found")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to update customer: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to update customer: "+err.Error())
 		return
 	}
 	WriteJSON(w, http.StatusOK, customerToJSON(updated))
@@ -152,45 +150,43 @@ type setCustomerStatusRequest struct {
 // historical invoice/ledger rows reference it (mirrors
 // SupplierHandlers.SetStatus).
 func (h *CustomerHandlers) SetStatus(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid customer id")
+		WriteError(w, r, CodeValidation, "invalid customer id")
 		return
 	}
 	var req setCustomerStatusRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	updated, err := h.Customer.SetActive(r.Context(), claims.TenantID, id, req.Active)
 	if err != nil {
 		if errors.Is(err, customer.ErrNotFound) {
-			WriteError(w, reqID, CodeNotFound, "customer not found")
+			WriteError(w, r, CodeNotFound, "customer not found")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to update customer status: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to update customer status: "+err.Error())
 		return
 	}
 	WriteJSON(w, http.StatusOK, customerToJSON(updated))
 }
 
 func (h *CustomerHandlers) List(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	query := r.URL.Query().Get("q")
 	customers, err := h.Customer.List(r.Context(), claims.TenantID, query, 50)
 	if err != nil {
-		WriteError(w, reqID, CodeInternal, "failed to list customers: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to list customers: "+err.Error())
 		return
 	}
 	out := make([]map[string]interface{}, 0, len(customers))
@@ -203,24 +199,23 @@ func (h *CustomerHandlers) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *CustomerHandlers) Get(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid customer id")
+		WriteError(w, r, CodeValidation, "invalid customer id")
 		return
 	}
 	c, profile, balance, err := h.Customer.GetByID(r.Context(), claims.TenantID, id)
 	if err != nil {
 		if errors.Is(err, customer.ErrNotFound) {
-			WriteError(w, reqID, CodeNotFound, "customer not found")
+			WriteError(w, r, CodeNotFound, "customer not found")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to fetch customer: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to fetch customer: "+err.Error())
 		return
 	}
 	resp := customerToJSON(c)
@@ -232,15 +227,14 @@ func (h *CustomerHandlers) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *CustomerHandlers) Ledger(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid customer id")
+		WriteError(w, r, CodeValidation, "invalid customer id")
 		return
 	}
 	limit := 100
@@ -252,10 +246,10 @@ func (h *CustomerHandlers) Ledger(w http.ResponseWriter, r *http.Request) {
 	entries, err := h.Customer.ListLedger(r.Context(), claims.TenantID, id, limit)
 	if err != nil {
 		if errors.Is(err, customer.ErrNotFound) {
-			WriteError(w, reqID, CodeNotFound, "customer not found")
+			WriteError(w, r, CodeNotFound, "customer not found")
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to fetch ledger: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to fetch ledger: "+err.Error())
 		return
 	}
 	out := make([]map[string]interface{}, 0, len(entries))
@@ -281,36 +275,35 @@ type setCreditLimitRequest struct {
 }
 
 func (h *CustomerHandlers) SetCreditLimit(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid customer id")
+		WriteError(w, r, CodeValidation, "invalid customer id")
 		return
 	}
 	var req setCreditLimitRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	limit, err := decimal.NewFromString(req.CreditLimit)
 	if err != nil {
-		WriteError(w, reqID, CodeValidation, "credit_limit must be a valid decimal")
+		WriteError(w, r, CodeValidation, "credit_limit must be a valid decimal")
 		return
 	}
 
 	if err := h.Customer.SetCreditLimit(r.Context(), claims.TenantID, id, claims.UserID, limit); err != nil {
 		switch {
 		case errors.Is(err, customer.ErrValidation):
-			WriteError(w, reqID, CodeValidation, err.Error())
+			WriteError(w, r, CodeValidation, err.Error())
 		case errors.Is(err, customer.ErrNotFound):
-			WriteError(w, reqID, CodeNotFound, "customer not found")
+			WriteError(w, r, CodeNotFound, "customer not found")
 		default:
-			WriteError(w, reqID, CodeInternal, "failed to update credit limit: "+err.Error())
+			WriteError(w, r, CodeInternal, "failed to update credit limit: "+err.Error())
 		}
 		return
 	}

@@ -21,20 +21,19 @@ type quoteRequest struct {
 // calculation client-side and without allocating stock or writing anything —
 // see pos.Service.Quote / pos/quote.go for why this exists.
 func (h *POSHandlers) Quote(w http.ResponseWriter, r *http.Request) {
-	reqID := reqctx.RequestID(r.Context())
 	claims, ok := reqctx.Claims(r.Context())
 	if !ok {
-		WriteError(w, reqID, CodeUnauthorized, "authentication required")
+		WriteError(w, r, CodeUnauthorized, "authentication required")
 		return
 	}
 
 	var req quoteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		WriteError(w, reqID, CodeValidation, "invalid request body")
+		WriteError(w, r, CodeValidation, "invalid request body")
 		return
 	}
 	if len(req.Lines) == 0 {
-		WriteError(w, reqID, CodeValidation, "at least one line is required")
+		WriteError(w, r, CodeValidation, "at least one line is required")
 		return
 	}
 
@@ -42,19 +41,19 @@ func (h *POSHandlers) Quote(w http.ResponseWriter, r *http.Request) {
 	for _, l := range req.Lines {
 		productID, err := uuid.Parse(l.ProductID)
 		if err != nil {
-			WriteError(w, reqID, CodeValidation, "line product_id must be a valid UUID")
+			WriteError(w, r, CodeValidation, "line product_id must be a valid UUID")
 			return
 		}
 		qty, err := decimal.NewFromString(l.Quantity)
 		if err != nil {
-			WriteError(w, reqID, CodeValidation, "line quantity must be a valid decimal")
+			WriteError(w, r, CodeValidation, "line quantity must be a valid decimal")
 			return
 		}
 		discount := decimal.Zero
 		if l.DiscountAmount != "" {
 			discount, err = decimal.NewFromString(l.DiscountAmount)
 			if err != nil {
-				WriteError(w, reqID, CodeValidation, "discount_amount must be a valid decimal")
+				WriteError(w, r, CodeValidation, "discount_amount must be a valid decimal")
 				return
 			}
 		}
@@ -62,7 +61,7 @@ func (h *POSHandlers) Quote(w http.ResponseWriter, r *http.Request) {
 		if l.UnitPriceOverride != nil {
 			price, err := decimal.NewFromString(*l.UnitPriceOverride)
 			if err != nil {
-				WriteError(w, reqID, CodeValidation, "unit_price_override must be a valid decimal")
+				WriteError(w, r, CodeValidation, "unit_price_override must be a valid decimal")
 				return
 			}
 			line.UnitPriceOverride = &price
@@ -73,10 +72,10 @@ func (h *POSHandlers) Quote(w http.ResponseWriter, r *http.Request) {
 	result, err := h.POS.Quote(r.Context(), claims.TenantID, lines)
 	if err != nil {
 		if errors.Is(err, pos.ErrValidation) || errors.Is(err, pos.ErrNoTaxProfile) {
-			WriteError(w, reqID, CodeValidation, err.Error())
+			WriteError(w, r, CodeValidation, err.Error())
 			return
 		}
-		WriteError(w, reqID, CodeInternal, "failed to compute quote: "+err.Error())
+		WriteError(w, r, CodeInternal, "failed to compute quote: "+err.Error())
 		return
 	}
 

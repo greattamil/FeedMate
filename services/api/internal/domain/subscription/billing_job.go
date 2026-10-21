@@ -52,7 +52,7 @@ func RunBillingCycleOnce(ctx context.Context, tx pgx.Tx, now time.Time) (Billing
 			FROM subscription_plans sp
 			WHERE ts.plan_id = sp.id
 			  AND ts.status = 'PAST_DUE'
-			  AND ts.past_due_since < $1 - (COALESCE(ts.grace_period_days, sp.grace_period_days) || ' days')::interval
+			  AND ts.past_due_since < $1::timestamptz - (COALESCE(ts.grace_period_days, sp.grace_period_days) || ' days')::interval
 			RETURNING ts.tenant_id
 		)
 		UPDATE tenants SET status = 'SUSPENDED', updated_at = $1

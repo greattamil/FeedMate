@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ui' show PlatformDispatcher;
 
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -78,6 +79,14 @@ void main() async {
     _showGlobalError(error.toString());
     return true;
   };
+
+  // Push notifications (internal/domain/pushnotify) are Android-only for
+  // now — google-services.json only configures that platform, and
+  // Firebase.initializeApp() with no explicit FirebaseOptions would throw
+  // on web/Windows, which have no Firebase project configured at all.
+  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+    await Firebase.initializeApp();
+  }
 
   final storage = SecureStorage();
   final localDb = _supportsEncryptedLocalDb ? await openEncryptedLocalDatabase(storage) : InMemoryLocalDatabase();

@@ -137,7 +137,7 @@ func TestEOD_CashSaleReconcilesExactly(t *testing.T) {
 	db := connectTest(t)
 	defer db.Close()
 	f := seedFixture(t, db)
-	posSvc := pos.NewService(db)
+	posSvc := pos.NewService(db, nil)
 	eodSvc := eod.NewService(db)
 
 	sessionID, err := eodSvc.OpenSession(context.Background(), f.tenantID, f.deviceID, f.userID, f.businessDate, decimal.RequireFromString("1000.00"))
@@ -175,7 +175,7 @@ func TestEOD_CashMovementsAffectExpectedCash(t *testing.T) {
 	db := connectTest(t)
 	defer db.Close()
 	f := seedFixture(t, db)
-	posSvc := pos.NewService(db)
+	posSvc := pos.NewService(db, nil)
 	eodSvc := eod.NewService(db)
 
 	if _, err := eodSvc.OpenSession(context.Background(), f.tenantID, f.deviceID, f.userID, f.businessDate, decimal.RequireFromString("1000.00")); err != nil {
@@ -253,7 +253,7 @@ func TestEOD_MismatchRequiresReasonThenSucceeds(t *testing.T) {
 	db := connectTest(t)
 	defer db.Close()
 	f := seedFixture(t, db)
-	posSvc := pos.NewService(db)
+	posSvc := pos.NewService(db, nil)
 	eodSvc := eod.NewService(db)
 
 	if _, err := eodSvc.OpenSession(context.Background(), f.tenantID, f.deviceID, f.userID, f.businessDate, decimal.RequireFromString("500.00")); err != nil {
@@ -290,7 +290,7 @@ func TestEOD_CashRefundReducesExpectedCash(t *testing.T) {
 	db := connectTest(t)
 	defer db.Close()
 	f := seedFixture(t, db)
-	posSvc := pos.NewService(db)
+	posSvc := pos.NewService(db, nil)
 	returnsSvc := returns.NewService(db)
 	eodSvc := eod.NewService(db)
 

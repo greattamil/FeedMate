@@ -1,11 +1,20 @@
-# Production deployment for feedmate.ramadas.me — fully isolated from any
-# other application on the host. No ports are published to the host at
-# all: Postgres and the API are reachable only from other containers on
-# the `feedmate_internal` network, and the API is additionally attached
-# to the pre-existing `feedmate_public` external network so the host's
-# shared Caddy reverse proxy (which belongs to a different, unrelated
-# project) can reach it by container name — Caddy's own config and the
-# other applications it serves are never touched by this file.
+# Self-hosted / VPS deployment alternative — NOT the currently active
+# production deployment (that's Cloud Run + Cloudflare; see
+# ../ENVIRONMENT.md). This compose file is kept as the supported fallback
+# for anyone who'd rather self-host the whole stack (including its own
+# Postgres, not Aiven) on a plain VPS. It's fully generic Docker Compose
+# with no cloud-provider lock-in — the same services/api/Dockerfile image
+# used by Cloud Run runs here unmodified.
+#
+# Fully isolated from any other application on the host: no ports are
+# published to the host at all. Postgres and the API are reachable only
+# from other containers on the `feedmate_internal` network, and the API is
+# additionally attached to a pre-existing `feedmate_public` external
+# network so a host-level reverse proxy (e.g. Caddy, serving other
+# unrelated projects too) can reach it by container name — that reverse
+# proxy's own config is never touched by this file. You'd point whatever
+# domain you're using at this reverse proxy, which then routes to
+# `feedmate-api`/`feedmate-web` by their container_name.
 #
 # Deploy with:
 #   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build

@@ -11,11 +11,13 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/andipatti/feedmate/services/api/internal/domain/devicepairing"
+	"github.com/andipatti/feedmate/services/api/internal/domain/pushnotify"
 	"github.com/andipatti/feedmate/services/api/internal/reqctx"
 )
 
 type DeviceHandlers struct {
 	DevicePairing *devicepairing.Service
+	PushNotify    *pushnotify.Service
 }
 
 // List returns registered devices newest-first, optionally filtered by a
@@ -170,4 +172,31 @@ func (h *DeviceHandlers) RegisterDevice(w http.ResponseWriter, r *http.Request) 
 		"tenant_id": result.TenantID.String(),
 		"status":    "ACTIVE",
 	})
+}
+
+type setFCMTokenRequest struct {
+	Token string `json:"token"`
+}
+
+// SetFCMToken lets a logged-in device register (or clear, with an empty
+// token on logout) its current Firebase Cloud Messaging registration
+// token. Behind RequireAuth only — any authenticated device may set its
+// own token, scoped to claims.DeviceID so it can never set another
+// device's token.
+func (h *DeviceHandlers) SetFCMToken(w http.ResponseWriter, r *http.Request) {
+	claims, ok := reqctx.Claims(r.Context())
+	if !ok {
+		WriteError(w, r, CodeUnauthorized, "authentication required")
+		return
+	}
+	var req setFCMTokenRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, r, CodeValidation, "invalid request body")
+		return
+	}
+	if err := h.PushNotify.SetDeviceToken(r.Context(), claims.TenantID, claims.DeviceID, req.Token); err != nil {
+		WriteError(w, r, CodeInternal, "failed to set fcm token: "+err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

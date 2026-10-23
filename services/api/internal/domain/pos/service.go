@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -15,6 +17,7 @@ import (
 	"github.com/andipatti/feedmate/services/api/internal/domain/customer"
 	"github.com/andipatti/feedmate/services/api/internal/domain/inventory"
 	"github.com/andipatti/feedmate/services/api/internal/domain/product"
+	"github.com/andipatti/feedmate/services/api/internal/domain/pushnotify"
 	"github.com/andipatti/feedmate/services/api/internal/domain/settings"
 	"github.com/andipatti/feedmate/services/api/internal/reqctx"
 )
@@ -26,11 +29,20 @@ var (
 )
 
 type Service struct {
-	db *dbctx.DB
+	db         *dbctx.DB
+	pushNotify *pushnotify.Service
 }
 
-func NewService(db *dbctx.DB) *Service {
-	return &Service{db: db}
+// creditLimitBreachInfo is captured inside FinalizeInvoice's transaction
+// (where profile/projected are in scope) and read after it commits, to
+// drive a best-effort push notification — see FinalizeInvoice's tail.
+type creditLimitBreachInfo struct {
+	Projected decimal.Decimal
+	Limit     decimal.Decimal
+}
+
+func NewService(db *dbctx.DB, pushNotify *pushnotify.Service) *Service {
+	return &Service{db: db, pushNotify: pushNotify}
 }
 
 // InvoiceForReturn is everything a cashier needs to pick which lines of a
@@ -191,6 +203,7 @@ func (s *Service) FinalizeInvoice(ctx context.Context, tenantID, deviceID, userI
 	}
 
 	var result FinalizeResult
+	var creditLimitBreach *creditLimitBreachInfo
 	err := s.db.WithTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
 		// --- Idempotency: a retried finalize from the same device with the
 		// same client_transaction_id returns the original result untouched. ---
@@ -353,6 +366,7 @@ func (s *Service) FinalizeInvoice(ctx context.Context, tenantID, deviceID, userI
 					return fmt.Errorf("%w: a reason is required to override the credit limit", ErrValidation)
 				}
 				creditOverrideApplied = true
+				creditLimitBreach = &creditLimitBreachInfo{Projected: projected, Limit: profile.CreditLimit}
 			}
 		}
 
@@ -529,6 +543,25 @@ func (s *Service) FinalizeInvoice(ctx context.Context, tenantID, deviceID, userI
 	if err != nil {
 		return nil, err
 	}
+
+	// Fire-and-forget: a push notification failing or being slow must
+	// never affect the sale that already committed successfully. Uses
+	// its own short-lived context, not ctx, which ends the moment this
+	// HTTP response is written — matching the convention established by
+	// subscription/cloudusage's background jobs (one failure logged and
+	// skipped, never propagated to the caller).
+	if s.pushNotify != nil && creditLimitBreach != nil {
+		go func() {
+			pushCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			over := creditLimitBreach.Projected.Sub(creditLimitBreach.Limit)
+			body := fmt.Sprintf("A credit sale pushed a customer ₹%s over their credit limit of ₹%s", over, creditLimitBreach.Limit)
+			if _, err := s.pushNotify.SendToTenant(pushCtx, tenantID, "Credit limit exceeded", body); err != nil {
+				slog.Warn("pos: credit-limit-breach push failed", "error", err)
+			}
+		}()
+	}
+
 	return &result, nil
 }
 

@@ -127,7 +127,7 @@ func TestSalesSummary_MatchesActualInvoices(t *testing.T) {
 	db := connectTest(t)
 	defer db.Close()
 	f := seedFixture(t, db)
-	posSvc := pos.NewService(db)
+	posSvc := pos.NewService(db, nil)
 	reportsSvc := reports.NewService(db)
 
 	// Invoice 1: 2 bags cash = 2400 + 5% = 2520.
@@ -183,7 +183,7 @@ func TestStockOnHand_MatchesBatchAvailableQty(t *testing.T) {
 	db := connectTest(t)
 	defer db.Close()
 	f := seedFixture(t, db)
-	posSvc := pos.NewService(db)
+	posSvc := pos.NewService(db, nil)
 	reportsSvc := reports.NewService(db)
 
 	// Sell 5 of the 50 available bags.
@@ -222,7 +222,7 @@ func TestStockSummary_ReflectsOnHandAndReorderStatus(t *testing.T) {
 	db := connectTest(t)
 	defer db.Close()
 	f := seedFixture(t, db)
-	posSvc := pos.NewService(db)
+	posSvc := pos.NewService(db, nil)
 	reportsSvc := reports.NewService(db)
 
 	// Give the fixture product (50 available) a reorder level of 10, then
@@ -355,7 +355,7 @@ func TestCustomerBalances_ZeroBalanceExcluded(t *testing.T) {
 	db := connectTest(t)
 	defer db.Close()
 	f := seedFixture(t, db)
-	posSvc := pos.NewService(db)
+	posSvc := pos.NewService(db, nil)
 	reportsSvc := reports.NewService(db)
 
 	// No transactions yet: customer must not appear (zero balance).
@@ -435,7 +435,7 @@ func TestDashboardOverview_ReflectsRealActivityAcrossEverySection(t *testing.T) 
 	db := connectTest(t)
 	defer db.Close()
 	f := seedFixture(t, db)
-	posSvc := pos.NewService(db)
+	posSvc := pos.NewService(db, nil)
 	reportsSvc := reports.NewService(db)
 
 	// A credit sale today: 3 bags at 1200 = 3600 + 5% GST = 3780, all on

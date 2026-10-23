@@ -202,6 +202,7 @@ class _DocSeriesScreenState extends State<DocSeriesScreen> {
         title: const Text('Financial Years & Document Series', style: AppTypography.headline),
       ),
       floatingActionButton: FloatingActionButton.extended(
+        heroTag: null,
         key: const Key('new_financial_year_fab'),
         onPressed: _createFinancialYear,
         icon: const Icon(Icons.calendar_month_rounded),
@@ -215,98 +216,264 @@ class _DocSeriesScreenState extends State<DocSeriesScreen> {
               : ListView(
                   padding: const EdgeInsets.all(16),
                   children: [
-                    DropdownButtonFormField<String>(
-                      key: const Key('financial_year_dropdown'),
-                      initialValue: _selectedYearId,
-                      decoration: const InputDecoration(labelText: 'Financial Year'),
-                      items: _years
-                          .map((y) => DropdownMenuItem(
-                                value: y.id,
-                                child: Text('${y.label} (${y.status})'),
-                              ))
-                          .toList(),
-                      onChanged: (v) {
-                        if (v == null) return;
-                        setState(() => _selectedYearId = v);
-                        _loadSeries(v);
-                      },
-                    ),
-                    if (selectedYear != null) ...[
-                      const SizedBox(height: 12),
-                      Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: AppDecorations.card(color: AppColors.surface),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              '${_dateFormat.format(selectedYear.startDate)} – ${_dateFormat.format(selectedYear.endDate)}',
-                              style: const TextStyle(fontSize: 13, color: AppColors.textSecondary),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'Status: ${selectedYear.status}',
-                              key: const Key('financial_year_status_text'),
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: selectedYear.status == 'OPEN' ? AppColors.success : AppColors.danger,
-                              ),
-                            ),
-                            if (selectedYear.status == 'OPEN') ...[
-                              const SizedBox(height: 10),
-                              OutlinedButton(
-                                key: const Key('close_financial_year_button'),
-                                onPressed: _closeFinancialYear,
-                                child: const Text('Close This Year'),
-                              ),
-                            ],
-                          ],
-                        ),
+                    // Modern Hero Banner
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 16),
+                      padding: const EdgeInsets.all(18),
+                      decoration: BoxDecoration(
+                        gradient: AppColors.gradientPurple,
+                        borderRadius: AppDecorations.borderRadiusLg,
+                        boxShadow: AppDecorations.elevatedCardShadow,
                       ),
-                      const SizedBox(height: 16),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.2),
+                              borderRadius: AppDecorations.borderRadiusMd,
+                            ),
+                            child: const Icon(Icons.account_balance_wallet_rounded, color: Colors.white, size: 28),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Fiscal Year & Document Series',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 18,
+                                    letterSpacing: 0.2,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Configure financial cycles, numbering schemes & auto-prefixes',
+                                  style: TextStyle(
+                                    color: Colors.white.withValues(alpha: 0.9),
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    // Financial Year Selection Card
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: AppDecorations.card(color: AppColors.surface),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          DropdownButtonFormField<String>(
+                            key: const Key('financial_year_dropdown'),
+                            initialValue: _selectedYearId,
+                            decoration: InputDecoration(
+                              labelText: 'Financial Year',
+                              prefixIcon: const Icon(Icons.calendar_today_rounded, size: 20, color: AppColors.primary),
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                            ),
+                            items: _years
+                                .map((y) => DropdownMenuItem(
+                                      value: y.id,
+                                      child: Text('${y.label} (${y.status})'),
+                                    ))
+                                .toList(),
+                            onChanged: (v) {
+                              if (v == null) return;
+                              setState(() => _selectedYearId = v);
+                              _loadSeries(v);
+                            },
+                          ),
+                          if (selectedYear != null) ...[
+                            const SizedBox(height: 14),
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: AppColors.surfaceSecondary,
+                                borderRadius: AppDecorations.borderRadiusSm,
+                                border: Border.all(color: AppColors.border.withValues(alpha: 0.5)),
+                              ),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            const Icon(Icons.date_range_rounded, size: 14, color: AppColors.textSecondary),
+                                            const SizedBox(width: 4),
+                                            Text(
+                                              '${_dateFormat.format(selectedYear.startDate)} – ${_dateFormat.format(selectedYear.endDate)}',
+                                              style: const TextStyle(fontSize: 13, color: AppColors.textSecondary, fontWeight: FontWeight.w500),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 6),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                          decoration: BoxDecoration(
+                                            color: selectedYear.status == 'OPEN' ? AppColors.success.withValues(alpha: 0.12) : AppColors.danger.withValues(alpha: 0.12),
+                                            borderRadius: BorderRadius.circular(6),
+                                          ),
+                                          child: Text(
+                                            'Status: ${selectedYear.status}',
+                                            key: const Key('financial_year_status_text'),
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 12,
+                                              color: selectedYear.status == 'OPEN' ? AppColors.success : AppColors.danger,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  if (selectedYear.status == 'OPEN')
+                                    OutlinedButton.icon(
+                                      key: const Key('close_financial_year_button'),
+                                      style: OutlinedButton.styleFrom(
+                                        foregroundColor: AppColors.danger,
+                                        side: const BorderSide(color: AppColors.danger),
+                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                      ),
+                                      onPressed: _closeFinancialYear,
+                                      icon: const Icon(Icons.lock_clock_rounded, size: 16),
+                                      label: const Text('Close This Year'),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+
+                    if (selectedYear != null) ...[
+                      const SizedBox(height: 20),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const Text('Document Series', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                           Row(
                             children: [
-                              TextButton.icon(
+                              const Text('Document Series', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: AppColors.primary.withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  '${_series.length}',
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppColors.primary),
+                                ),
+                              ),
+                            ],
+                          ),
+                          Row(
+                            children: [
+                              FilledButton.tonalIcon(
                                 key: const Key('seed_default_series_button'),
+                                style: FilledButton.styleFrom(
+                                  visualDensity: VisualDensity.compact,
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                ),
                                 onPressed: _seedDefaults,
                                 icon: const Icon(Icons.auto_fix_high_rounded, size: 16),
-                                label: const Text('Seed Defaults'),
+                                label: const Text('Seed Defaults', style: TextStyle(fontSize: 12)),
                               ),
+                              const SizedBox(width: 6),
                               IconButton(
                                 key: const Key('add_series_button'),
                                 onPressed: _addSeries,
-                                icon: const Icon(Icons.add_circle_outline, color: AppColors.primary),
+                                tooltip: 'Add custom series',
+                                icon: const Icon(Icons.add_circle_rounded, color: AppColors.primary, size: 24),
                               ),
                             ],
                           ),
                         ],
                       ),
+                      const SizedBox(height: 8),
                       if (_loadingSeries)
-                        const Padding(padding: EdgeInsets.all(16), child: Center(child: CircularProgressIndicator()))
+                        const Padding(padding: EdgeInsets.all(24), child: Center(child: CircularProgressIndicator()))
                       else if (_series.isEmpty)
-                        const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 24),
-                          child: Center(child: Text('No document series configured for this year', style: AppTypography.bodySecondary)),
+                        Container(
+                          padding: const EdgeInsets.all(28),
+                          decoration: AppDecorations.card(color: AppColors.surface),
+                          child: Center(
+                            child: Column(
+                              children: [
+                                Icon(Icons.format_list_numbered_rounded, size: 40, color: AppColors.textSecondary.withValues(alpha: 0.4)),
+                                const SizedBox(height: 8),
+                                const Text('No document series configured for this year', style: AppTypography.bodySecondary),
+                              ],
+                            ),
+                          ),
                         )
                       else
                         ..._series.map((s) => Container(
                               key: Key('series_item_${s.id}'),
-                              margin: const EdgeInsets.only(bottom: 8),
-                              decoration: BoxDecoration(
-                                color: AppColors.surface,
-                                borderRadius: AppDecorations.borderRadiusMd,
-                                border: Border.all(color: AppColors.border),
-                              ),
+                              margin: const EdgeInsets.only(bottom: 10),
+                              decoration: AppDecorations.card(color: AppColors.surface),
                               child: ListTile(
-                                title: Text('${s.documentType} · ${s.prefix}'),
-                                subtitle: Text('Next: ${s.nextNumber.toString().padLeft(s.padding, '0')} · Padding ${s.padding}'),
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+                                leading: Container(
+                                  padding: const EdgeInsets.all(10),
+                                  decoration: BoxDecoration(
+                                    color: s.active ? AppColors.primary.withValues(alpha: 0.1) : AppColors.surfaceSecondary,
+                                    borderRadius: AppDecorations.borderRadiusSm,
+                                  ),
+                                  child: Icon(
+                                    Icons.receipt_long_rounded,
+                                    color: s.active ? AppColors.primary : AppColors.textSecondary,
+                                    size: 20,
+                                  ),
+                                ),
+                                title: Row(
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: AppColors.surfaceSecondary,
+                                        borderRadius: BorderRadius.circular(4),
+                                        border: Border.all(color: AppColors.border),
+                                      ),
+                                      child: Text(
+                                        s.documentType,
+                                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, letterSpacing: 0.5),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        '${s.documentType} · ${s.prefix}',
+                                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                subtitle: Padding(
+                                  padding: const EdgeInsets.only(top: 4),
+                                  child: Text(
+                                    'Next: ${s.nextNumber.toString().padLeft(s.padding, '0')} · Padding ${s.padding}',
+                                    style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                                  ),
+                                ),
                                 trailing: Switch(
                                   key: Key('series_active_switch_${s.id}'),
                                   value: s.active,
+                                  activeColor: AppColors.primary,
                                   onChanged: (_) => _toggleSeriesActive(s),
                                 ),
                               ),

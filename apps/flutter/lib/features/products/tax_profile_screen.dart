@@ -97,85 +97,138 @@ class _TaxProfileScreenState extends State<TaxProfileScreen> {
   }
 
   @override
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(title: const Text('Tax Profiles (GST)', style: AppTypography.headline)),
       floatingActionButton: FloatingActionButton(
+        heroTag: null,
         key: const Key('tax_profile_add_fab'),
         backgroundColor: AppColors.primary,
         onPressed: () => _openForm(),
-        child: const Icon(Icons.add),
+        child: const Icon(Icons.add_rounded),
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _error != null
-              ? Center(child: Padding(padding: const EdgeInsets.all(16), child: Text(_error!, style: const TextStyle(color: Colors.red))))
-              : _profiles.isEmpty
-                  ? Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(24),
-                        child: Text(
-                          'No tax profiles yet.\nCreate one for each GST rate your products need — mark it '
-                          '"Price Includes GST" if the selling price already has tax baked in.',
-                          textAlign: TextAlign.center,
-                          style: AppTypography.bodySecondary,
-                        ),
+      body: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: const BoxDecoration(
+              gradient: AppColors.gradientAmber,
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withAlpha(40),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.percent_rounded, color: Colors.white, size: 22),
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'GST Tax Configuration',
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
                       ),
-                    )
-                  : ListView.builder(
-                      padding: const EdgeInsets.all(12),
-                      itemCount: _profiles.length,
-                      itemBuilder: (context, index) {
-                        final p = _profiles[index];
-                        return Opacity(
-                          opacity: p.active ? 1 : 0.55,
-                          child: Container(
-                            key: Key('tax_profile_item_${p.id}'),
-                            margin: const EdgeInsets.only(bottom: 8),
-                            decoration: BoxDecoration(
-                              color: AppColors.surface,
-                              borderRadius: AppDecorations.borderRadiusMd,
-                              border: Border.all(color: AppColors.border),
-                            ),
-                            child: ListTile(
-                              onTap: () => _openForm(existing: p),
-                              title: Row(
-                                children: [
-                                  Expanded(
-                                    child: Text('${p.code} — ${p.description}', style: const TextStyle(fontWeight: FontWeight.w600)),
-                                  ),
-                                  if (p.priceInclusive)
-                                    Container(
-                                      key: Key('tax_profile_inclusive_badge_${p.id}'),
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                      decoration: BoxDecoration(color: AppColors.infoContainer, borderRadius: BorderRadius.circular(20)),
-                                      child: const Text('Price incl. GST', style: TextStyle(fontSize: 11, color: AppColors.onInfoContainer, fontWeight: FontWeight.w600)),
-                                    )
-                                  else
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                      decoration: BoxDecoration(color: AppColors.surfaceTertiary, borderRadius: BorderRadius.circular(20)),
-                                      child: const Text('Price excl. GST', style: TextStyle(fontSize: 11, color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
-                                    ),
-                                ],
-                              ),
-                              subtitle: Text(
-                                '${_supplyTypeLabel(p.supplyType)} · Total ${p.totalRate.toStringAsFixed(2)}% '
-                                '(CGST ${p.cgstRate.toStringAsFixed(2)} / SGST ${p.sgstRate.toStringAsFixed(2)} / IGST ${p.igstRate.toStringAsFixed(2)} / CESS ${p.cessRate.toStringAsFixed(2)})'
-                                '${p.active ? '' : ' · Inactive'}',
-                                style: const TextStyle(fontSize: 12),
-                              ),
-                              trailing: Switch(
-                                key: Key('tax_profile_active_switch_${p.id}'),
-                                value: p.active,
-                                onChanged: (_) => _toggleActive(p),
-                              ),
-                            ),
+                      Text(
+                        'HSN slabs, inclusive/exclusive pricing & rate definitions',
+                        style: TextStyle(color: Colors.white70, fontSize: 11),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+                : _error != null
+                    ? Center(
+                        child: Container(
+                          margin: const EdgeInsets.all(16),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: AppColors.dangerContainer,
+                            borderRadius: BorderRadius.circular(12),
                           ),
-                        );
-                      },
-                    ),
+                          child: Text(_error!, style: const TextStyle(color: AppColors.onDangerContainer)),
+                        ),
+                      )
+                    : _profiles.isEmpty
+                        ? Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(24),
+                              child: Text(
+                                'No tax profiles yet.\nCreate one for each GST rate your products need — mark it '
+                                '"Price Includes GST" if the selling price already has tax baked in.',
+                                textAlign: TextAlign.center,
+                                style: AppTypography.bodySecondary,
+                              ),
+                            ),
+                          )
+                        : ListView.builder(
+                            padding: const EdgeInsets.all(12),
+                            itemCount: _profiles.length,
+                            itemBuilder: (context, index) {
+                              final p = _profiles[index];
+                              return Opacity(
+                                opacity: p.active ? 1 : 0.55,
+                                child: Container(
+                                  key: Key('tax_profile_item_${p.id}'),
+                                  margin: const EdgeInsets.only(bottom: 8),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.surface,
+                                    borderRadius: AppDecorations.borderRadiusMd,
+                                    border: Border.all(color: AppColors.border),
+                                    boxShadow: AppDecorations.cardShadow,
+                                  ),
+                                  child: ListTile(
+                                    onTap: () => _openForm(existing: p),
+                                    title: Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text('${p.code} — ${p.description}', style: const TextStyle(fontWeight: FontWeight.w600)),
+                                        ),
+                                        if (p.priceInclusive)
+                                          Container(
+                                            key: Key('tax_profile_inclusive_badge_${p.id}'),
+                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                            decoration: BoxDecoration(color: AppColors.infoContainer, borderRadius: BorderRadius.circular(20)),
+                                            child: const Text('Price incl. GST', style: TextStyle(fontSize: 11, color: AppColors.onInfoContainer, fontWeight: FontWeight.w600)),
+                                          )
+                                        else
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                            decoration: BoxDecoration(color: AppColors.surfaceTertiary, borderRadius: BorderRadius.circular(20)),
+                                            child: const Text('Price excl. GST', style: TextStyle(fontSize: 11, color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
+                                          ),
+                                      ],
+                                    ),
+                                    subtitle: Text(
+                                      '${_supplyTypeLabel(p.supplyType)} · Total ${p.totalRate.toStringAsFixed(2)}% '
+                                      '(CGST ${p.cgstRate.toStringAsFixed(2)} / SGST ${p.sgstRate.toStringAsFixed(2)} / IGST ${p.igstRate.toStringAsFixed(2)} / CESS ${p.cessRate.toStringAsFixed(2)})'
+                                      '${p.active ? '' : ' · Inactive'}',
+                                      style: const TextStyle(fontSize: 12),
+                                    ),
+                                    trailing: Switch(
+                                      key: Key('tax_profile_active_switch_${p.id}'),
+                                      value: p.active,
+                                      onChanged: (_) => _toggleActive(p),
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+          ),
+        ],
+      ),
     );
   }
 }

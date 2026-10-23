@@ -3,19 +3,21 @@ import 'package:provider/provider.dart';
 
 import '../../core/api_client.dart';
 import '../../core/api_error.dart';
+import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_decorations.dart';
+import '../../core/theme/app_typography.dart';
 import '../pos/customer_api.dart';
 import '../pos/customer_picker_screen.dart';
 import '../pos/pos_api.dart';
 import '../procurement/product_picker_screen.dart';
 import 'contra_api.dart';
 import 'contra_line_form_screen.dart';
+import '../../core/number_format.dart';
 
 /// Contra / buy-back (PRD 8): the shop takes stock back from a farmer and
 /// credits it against what they owe, instead of paying cash. Pick the
 /// customer and the location the stock is returning into, add one or more
-/// product lines, and post. The server is authoritative for the receivable
-/// reduction, inventory entry, and accounting journal — this screen only
-/// collects what a human physically observed.
+/// product lines, and post.
 class ContraScreen extends StatefulWidget {
   const ContraScreen({super.key});
 
@@ -114,13 +116,28 @@ class _ContraScreenState extends State<ContraScreen> {
       await showDialog<void>(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text('Contra Posted'),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppColors.successContainer,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.check_circle_rounded, color: AppColors.success, size: 24),
+              ),
+              const SizedBox(width: 12),
+              const Text('Contra Posted'),
+            ],
+          ),
           content: Text(
-            'Contra ${result.contraNumber} was posted, crediting ₹${result.totalValue.toStringAsFixed(2)} against ${_customer!.name}\'s balance.',
+            'Contra ${result.contraNumber} was posted, crediting ${money(result.totalValue)} against ${_customer!.name}\'s balance.',
+            style: const TextStyle(height: 1.4),
           ),
           actions: [
-            TextButton(
+            FilledButton(
               key: const Key('contra_posted_ok_button'),
+              style: FilledButton.styleFrom(backgroundColor: AppColors.primary),
               onPressed: () => Navigator.of(context).pop(),
               child: const Text('OK'),
             ),
@@ -143,32 +160,72 @@ class _ContraScreenState extends State<ContraScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
+      backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: const Text('Contra / Buy-Back', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        title: const Text('Contra / Buy-Back', style: AppTypography.headline),
       ),
       body: _loadingLocations
-          ? const Center(child: CircularProgressIndicator(color: Color(0xFF0F766E)))
+          ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
+                // Purple Hero Banner
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  decoration: BoxDecoration(
+                    gradient: AppColors.gradientPurple,
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: AppDecorations.cardShadow,
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withAlpha(40),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(Icons.swap_horiz_rounded, color: Colors.white, size: 24),
+                      ),
+                      const SizedBox(width: 14),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Buy-Back & Ledger Credit',
+                              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                            ),
+                            SizedBox(height: 2),
+                            Text(
+                              'Accept returned feed/items and offset farmer receivable balances',
+                              style: TextStyle(color: Colors.white70, fontSize: 12),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
                 if (_error != null) ...[
                   Container(
                     margin: const EdgeInsets.only(bottom: 12),
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFFFE4E6),
-                      borderRadius: BorderRadius.circular(10),
+                      color: AppColors.dangerContainer,
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                    child: Text(_error!, style: const TextStyle(color: Color(0xFFE11D48), fontSize: 13)),
+                    child: Text(_error!, style: const TextStyle(color: AppColors.onDangerContainer, fontSize: 13)),
                   ),
                 ],
+                // Customer Card
                 Container(
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: AppColors.surface,
                     borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: const Color(0xFFE2E8F0)),
-                    boxShadow: const [BoxShadow(color: Color(0x060F172A), blurRadius: 10, offset: Offset(0, 2))],
+                    border: Border.all(color: AppColors.border),
+                    boxShadow: AppDecorations.cardShadow,
                   ),
                   child: ListTile(
                     key: const Key('contra_customer_tile'),
@@ -177,32 +234,34 @@ class _ContraScreenState extends State<ContraScreen> {
                       width: 40,
                       height: 40,
                       decoration: BoxDecoration(
-                        color: const Color(0xFFEDE9FE),
+                        gradient: AppColors.gradientPurple,
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: const Center(
-                        child: Icon(Icons.person_rounded, color: Color(0xFF7C3AED), size: 20),
+                        child: Icon(Icons.person_rounded, color: Colors.white, size: 20),
                       ),
                     ),
                     title: Text(
                       _customer == null ? 'Select customer' : _customer!.name,
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppColors.textPrimary),
                     ),
                     subtitle: Text(
                       _customer == null ? 'Required — whose balance is credited' : _customer!.customerCode,
-                      style: const TextStyle(color: Color(0xFF64748B), fontSize: 12),
+                      style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
                     ),
-                    trailing: const Icon(Icons.chevron_right_rounded, color: Color(0xFF64748B)),
+                    trailing: const Icon(Icons.chevron_right_rounded, color: AppColors.textSecondary),
                     onTap: _pickCustomer,
                   ),
                 ),
                 const SizedBox(height: 12),
+                // Location & Source Ref Card
                 Container(
-                  padding: const EdgeInsets.all(14),
+                  padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: AppColors.surface,
                     borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                    border: Border.all(color: AppColors.border),
+                    boxShadow: AppDecorations.cardShadow,
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -217,7 +276,7 @@ class _ContraScreenState extends State<ContraScreen> {
                         items: _locations.map((l) => DropdownMenuItem(value: l.id, child: Text(l.name))).toList(),
                         onChanged: (v) => setState(() => _selectedLocationId = v),
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 14),
                       TextField(
                         key: const Key('contra_source_reference_field'),
                         controller: _sourceReferenceController,
@@ -233,12 +292,12 @@ class _ContraScreenState extends State<ContraScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('Returned Items (${_lines.length})', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                    Text('Returned Items (${_lines.length})', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppColors.textPrimary)),
                     FilledButton.icon(
                       key: const Key('contra_add_line_button'),
                       style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFF0F766E),
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                        backgroundColor: AppColors.primary,
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       ),
                       onPressed: _addLine,
@@ -250,18 +309,18 @@ class _ContraScreenState extends State<ContraScreen> {
                 const SizedBox(height: 10),
                 if (_lines.isEmpty)
                   Container(
-                    padding: const EdgeInsets.symmetric(vertical: 32),
+                    padding: const EdgeInsets.symmetric(vertical: 36),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: AppColors.surface,
                       borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                      border: Border.all(color: AppColors.border),
                     ),
                     child: Center(
                       child: Column(
                         children: const [
-                          Icon(Icons.undo_rounded, size: 42, color: Color(0xFF94A3B8)),
+                          Icon(Icons.undo_rounded, size: 40, color: AppColors.textSecondary),
                           SizedBox(height: 8),
-                          Text('No lines added yet.', style: TextStyle(color: Color(0xFF64748B), fontSize: 13)),
+                          Text('No lines added yet.', style: TextStyle(color: AppColors.textSecondary, fontSize: 13, fontWeight: FontWeight.w500)),
                         ],
                       ),
                     ),
@@ -272,30 +331,30 @@ class _ContraScreenState extends State<ContraScreen> {
                     key: Key('contra_line_card_$index'),
                     margin: const EdgeInsets.only(bottom: 8),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: AppColors.surface,
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: const Color(0xFFE2E8F0)),
-                      boxShadow: const [BoxShadow(color: Color(0x060F172A), blurRadius: 6, offset: Offset(0, 1))],
+                      border: Border.all(color: AppColors.border),
+                      boxShadow: AppDecorations.cardShadow,
                     ),
                     child: ListTile(
                       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
                       leading: Container(
                         padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFEDE9FE),
+                          color: AppColors.surfaceSecondary,
                           borderRadius: BorderRadius.circular(8),
                         ),
-                        child: const Icon(Icons.undo_rounded, color: Color(0xFF7C3AED), size: 20),
+                        child: const Icon(Icons.inventory_2_rounded, color: AppColors.primary, size: 20),
                       ),
-                      title: Text(line.product.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                      title: Text(line.product.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppColors.textPrimary)),
                       subtitle: Text(
-                        'Batch ${line.batchCode} · Qty ${line.quantity.toString()} · ₹${line.valuationUnitPrice.toStringAsFixed(2)}/unit',
-                        style: const TextStyle(color: Color(0xFF64748B), fontSize: 12),
+                        'Batch ${line.batchCode} · Qty ${line.quantity.toString()} · ${money(line.valuationUnitPrice)}/unit',
+                        style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
                       ),
                       onTap: () => _editLine(index),
                       trailing: IconButton(
                         key: Key('contra_line_delete_$index'),
-                        icon: const Icon(Icons.delete_outline, size: 20, color: Color(0xFFE11D48)),
+                        icon: const Icon(Icons.delete_outline_rounded, size: 20, color: AppColors.danger),
                         onPressed: () => setState(() => _lines.removeAt(index)),
                       ),
                     ),
@@ -305,7 +364,7 @@ class _ContraScreenState extends State<ContraScreen> {
                 FilledButton(
                   key: const Key('contra_post_button'),
                   style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFF0F766E),
+                    backgroundColor: AppColors.primary,
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),

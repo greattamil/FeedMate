@@ -66,19 +66,37 @@ func RunBillingCycleOnce(ctx context.Context, tx pgx.Tx, now time.Time) (Billing
 	return result, nil
 }
 
-// StartBillingScheduler runs RunBillingCycleOnce once immediately, then
+// RunBillingCycleNow wraps RunBillingCycleOnce in an admin transaction —
+// the single reusable "do it once" entrypoint called both by
+// StartBillingScheduler's ticker (self-hosted/VPS deployments, where the
+// process runs continuously so an in-process ticker is reliable) and by
+// the /internal/cron/billing-cycle handler that Google Cloud Scheduler
+// calls on Cloud Run (where it is NOT reliable — see that handler's doc
+// comment for why).
+func (s *Service) RunBillingCycleNow(ctx context.Context) (BillingCycleResult, error) {
+	var result BillingCycleResult
+	err := s.db.WithAdminTx(ctx, func(tx pgx.Tx) error {
+		var err error
+		result, err = RunBillingCycleOnce(ctx, tx, time.Now().UTC())
+		return err
+	})
+	return result, err
+}
+
+// StartBillingScheduler runs RunBillingCycleNow once immediately, then
 // once every tickInterval (24h in production; shorter in tests) until ctx
 // is cancelled. A single run's error is logged and never stops future
 // runs — a transient DB blip (see this session's intermittent Aiven DNS
 // issue) must not permanently wedge billing.
+//
+// Only reliable on a host where the process runs continuously (self-hosted
+// / VPS via docker-compose.prod.yml). On Cloud Run's scale-to-zero, CPU is
+// frozen between requests and the container can be torn down entirely
+// while idle, so this ticker was found to only ever fire at container
+// boot — see CRON_SECRET / cron_handlers.go for the fix used there.
 func (s *Service) StartBillingScheduler(ctx context.Context, tickInterval time.Duration) {
 	run := func() {
-		var result BillingCycleResult
-		err := s.db.WithAdminTx(ctx, func(tx pgx.Tx) error {
-			var err error
-			result, err = RunBillingCycleOnce(ctx, tx, time.Now().UTC())
-			return err
-		})
+		result, err := s.RunBillingCycleNow(ctx)
 		if err != nil {
 			slog.Error("billing cycle run failed", "error", err)
 			return

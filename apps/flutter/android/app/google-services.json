@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "794548234279",
+    "project_id": "project-29fdd88b-c856-4839-907",
+    "storage_bucket": "project-29fdd88b-c856-4839-907.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:794548234279:android:c0b5ab7628fd5e3d424602",
+        "android_client_info": {
+          "package_name": "com.andipatti.feedmate_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAzZTozwPkz8wjmRwPE6XL2--ioM0fCc4g"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

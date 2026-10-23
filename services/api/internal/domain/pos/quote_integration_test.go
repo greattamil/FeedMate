@@ -17,7 +17,7 @@ func TestQuote_MatchesWhatFinalizeWouldCharge(t *testing.T) {
 	db := connectTest(t)
 	defer db.Close()
 	f := seedFixture(t, db)
-	svc := pos.NewService(db)
+	svc := pos.NewService(db, nil)
 
 	lines := []pos.SaleLine{{ProductID: f.productID, Quantity: decimal.RequireFromString("3")}}
 
@@ -72,7 +72,7 @@ func TestQuote_PriceInclusiveTaxProfileBacksTaxOutOfTheSellingPrice(t *testing.T
 	db := connectTest(t)
 	defer db.Close()
 	f := seedFixture(t, db)
-	svc := pos.NewService(db)
+	svc := pos.NewService(db, nil)
 
 	inclusiveTaxProfileID := uuid.New()
 	inclusiveProductID := uuid.New()
@@ -118,7 +118,7 @@ func TestQuote_RejectsInactiveOrMissingProduct(t *testing.T) {
 	db := connectTest(t)
 	defer db.Close()
 	f := seedFixture(t, db)
-	svc := pos.NewService(db)
+	svc := pos.NewService(db, nil)
 	_ = f
 
 	_, err := svc.Quote(context.Background(), f.tenantID, []pos.SaleLine{{ProductID: uuid.New(), Quantity: decimal.RequireFromString("1")}})

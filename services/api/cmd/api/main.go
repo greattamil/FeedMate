@@ -19,12 +19,14 @@ import (
 	"github.com/andipatti/feedmate/services/api/internal/domain/contra"
 	"github.com/andipatti/feedmate/services/api/internal/domain/customer"
 	"github.com/andipatti/feedmate/services/api/internal/domain/devicepairing"
+	"github.com/andipatti/feedmate/services/api/internal/domain/pushnotify"
 	"github.com/andipatti/feedmate/services/api/internal/domain/docseries"
 	"github.com/andipatti/feedmate/services/api/internal/domain/eod"
 	"github.com/andipatti/feedmate/services/api/internal/domain/identity"
 	"github.com/andipatti/feedmate/services/api/internal/domain/location"
 	"github.com/andipatti/feedmate/services/api/internal/domain/masterdata"
 	"github.com/andipatti/feedmate/services/api/internal/domain/payment"
+	"github.com/andipatti/feedmate/services/api/internal/domain/cloudusage"
 	"github.com/andipatti/feedmate/services/api/internal/domain/platformadmin"
 	"github.com/andipatti/feedmate/services/api/internal/domain/pos"
 	"github.com/andipatti/feedmate/services/api/internal/domain/procurement"
@@ -64,7 +66,8 @@ func main() {
 
 	identitySvc := identity.NewService(db, cfg.JWTSigningKey, cfg.AccessTokenTTL, cfg.RefreshTokenTTL, cfg.BcryptCost)
 	productSvc := product.NewService(db)
-	posSvc := pos.NewService(db)
+	pushNotifySvc := pushnotify.NewService(db, cfg.FirebaseProjectID)
+	posSvc := pos.NewService(db, pushNotifySvc)
 	procurementSvc := procurement.NewService(db)
 	returnsSvc := returns.NewService(db)
 	contraSvc := contra.NewService(db)
@@ -81,6 +84,7 @@ func main() {
 	settingsSvc := settings.NewService(db)
 	platformSvc := platformadmin.NewService(db, cfg.JWTSigningKey, cfg.AccessTokenTTL, cfg.RefreshTokenTTL, cfg.BcryptCost)
 	subscriptionSvc := subscription.NewService(db)
+	cloudUsageSvc := cloudusage.NewService(db, cfg.CloudflareAPIToken, cfg.CloudflareAccountID, cfg.GCPProjectID, cfg.AivenAPIToken, cfg.AivenProject, cfg.AivenService)
 
 	var provider paymentprovider.Provider
 	switch cfg.PaymentProvider {
@@ -107,12 +111,14 @@ func main() {
 	stockCountHandlers := &httpapi.StockCountHandlers{StockCount: stockCountSvc}
 	docSeriesHandlers := &httpapi.DocSeriesHandlers{DocSeries: docSeriesSvc}
 	locationHandlers := &httpapi.LocationHandlers{Location: locationSvc}
-	deviceHandlers := &httpapi.DeviceHandlers{DevicePairing: devicePairingSvc}
+	deviceHandlers := &httpapi.DeviceHandlers{DevicePairing: devicePairingSvc, PushNotify: pushNotifySvc}
 	customerHandlers := &httpapi.CustomerHandlers{Customer: customerSvc}
 	supplierHandlers := &httpapi.SupplierHandlers{Supplier: supplierSvc}
 	masterDataHandlers := &httpapi.MasterDataHandlers{MasterData: masterDataSvc}
 	settingsHandlers := &httpapi.SettingsHandlers{Settings: settingsSvc}
 	platformHandlers := &httpapi.PlatformHandlers{Platform: platformSvc, Subscription: subscriptionSvc}
+	cloudUsageHandlers := &httpapi.CloudUsageHandlers{CloudUsage: cloudUsageSvc}
+	cronHandlers := &httpapi.CronHandlers{Subscription: subscriptionSvc, CloudUsage: cloudUsageSvc, CronSecret: cfg.CronSecret}
 
 	// Full debug-level detail for every error response — not just
 	// CodeInternal — is persisted here so the platform admin's error log
@@ -150,6 +156,7 @@ func main() {
 	})
 
 	r := chi.NewRouter()
+	r.Use(appmw.RequireEdgeSecret(cfg.EdgeSharedSecret))
 	r.Use(appmw.RequestID)
 	r.Use(appmw.CaptureRequestMeta)
 	r.Use(appmw.BufferRequestBody)
@@ -203,6 +210,10 @@ func main() {
 			r.Get("/platform/error-logs", platformHandlers.ListErrorLogs)
 			r.Get("/platform/settings", platformHandlers.GetPlatformSettings)
 			r.Put("/platform/settings", platformHandlers.UpdatePlatformSettings)
+			r.Get("/platform/cloud-usage", cloudUsageHandlers.ListUsage)
+			r.Get("/platform/cloud-usage/alerts", cloudUsageHandlers.ListAlerts)
+			r.Post("/platform/cloud-usage/refresh", cloudUsageHandlers.Refresh)
+			r.Put("/platform/cloud-usage/thresholds/{id}", cloudUsageHandlers.UpdateThreshold)
 		})
 
 		// The one place "FeedMate" / its tagline / logo / color come from —
@@ -216,6 +227,14 @@ func main() {
 		// behind RequireAuth.
 		r.Post("/devices/register", deviceHandlers.RegisterDevice)
 
+		// Google Cloud Scheduler calls these on a schedule to drive the
+		// billing cycle and cloud-usage poll on Cloud Run — see
+		// httpapi.CronHandlers's doc comment for why an in-process ticker
+		// alone isn't reliable there. Gated by CronSecret, not RequireAuth
+		// (Cloud Scheduler carries no user JWT).
+		r.Post("/internal/cron/billing-cycle", cronHandlers.RunBillingCycle)
+		r.Post("/internal/cron/cloud-usage-poll", cronHandlers.PollCloudUsage)
+
 		// Payment webhooks are called by the external provider, which cannot
 		// present one of our bearer tokens — authentication here is the
 		// provider's cryptographic signature (verified inside the handler),
@@ -224,6 +243,10 @@ func main() {
 
 		r.Group(func(r chi.Router) {
 			r.Use(appmw.RequireAuth(cfg.JWTSigningKey))
+
+			// Any authenticated device may set its own FCM push token —
+			// scoped to claims.DeviceID, no special permission needed.
+			r.Put("/devices/fcm-token", deviceHandlers.SetFCMToken)
 
 			r.Get("/products/search", productHandlers.Search)
 			r.Get("/products", productHandlers.List)
@@ -349,13 +372,19 @@ func main() {
 	})
 
 	// Advances past-due subscriptions and auto-suspends tenants whose grace
-	// period has elapsed — see subscription.Service.StartBillingScheduler's
-	// doc comment. Tied to the server's own shutdown signal so it stops
-	// cleanly alongside everything else; a single run's error never stops
-	// future runs.
-	schedulerCtx, stopScheduler := context.WithCancel(context.Background())
-	defer stopScheduler()
-	go subscriptionSvc.StartBillingScheduler(schedulerCtx, 24*time.Hour)
+	// period has elapsed, plus the cloud-usage poll — see
+	// subscription.Service.StartBillingScheduler's doc comment for why
+	// this in-process ticker is only enabled by default on deployments
+	// where the process runs continuously (self-hosted/VPS). Cloud Run
+	// (cfg.EnableInProcessScheduler=false there) drives the same work via
+	// Google Cloud Scheduler hitting /internal/cron/* instead — see
+	// httpapi.CronHandlers.
+	if cfg.EnableInProcessScheduler {
+		schedulerCtx, stopScheduler := context.WithCancel(context.Background())
+		defer stopScheduler()
+		go subscriptionSvc.StartBillingScheduler(schedulerCtx, 24*time.Hour)
+		go cloudUsageSvc.StartUsagePollScheduler(schedulerCtx, cfg.CloudUsagePollInterval)
+	}
 
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,

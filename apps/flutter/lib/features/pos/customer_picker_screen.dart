@@ -76,6 +76,40 @@ class _CustomerPickerScreenState extends State<CustomerPickerScreen> {
       body: Column(
         children: [
           Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: const BoxDecoration(
+              gradient: AppColors.gradientIndigo,
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withAlpha(40),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.people_alt_rounded, color: Colors.white, size: 22),
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Farmer / Buyer Directory',
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                      ),
+                      Text(
+                        'Search registered credit buyers by name, phone or code',
+                        style: TextStyle(color: Colors.white70, fontSize: 11),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Container(
             padding: const EdgeInsets.all(16),
             color: AppColors.surface,
             child: TextField(
@@ -83,7 +117,7 @@ class _CustomerPickerScreenState extends State<CustomerPickerScreen> {
               controller: _controller,
               autofocus: true,
               decoration: InputDecoration(
-                labelText: 'Search by farmer name, code, or mobile',
+                hintText: 'Search by farmer name, code, or mobile',
                 prefixIcon: const Icon(Icons.search_rounded, color: AppColors.primary),
                 suffixIcon: _controller.text.isNotEmpty
                     ? IconButton(

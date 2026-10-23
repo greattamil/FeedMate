@@ -1,3 +1,4 @@
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 
 import 'api_client.dart';
@@ -48,6 +49,7 @@ class AuthSession extends ChangeNotifier {
       displayName = result['display_name'] as String?;
       permissions = (result['permissions'] as List<dynamic>? ?? []).cast<String>();
       status = AuthStatus.loggedIn;
+      _registerPushToken();
     } on ApiError {
       // The stored refresh token is invalid or expired — the user must log
       // in again with their password; there is no way to silently recover.
@@ -79,6 +81,7 @@ class AuthSession extends ChangeNotifier {
       permissions = (result['permissions'] as List<dynamic>? ?? []).cast<String>();
       status = AuthStatus.loggedIn;
       notifyListeners();
+      _registerPushToken();
       return true;
     } on ApiError catch (e) {
       lastError = e.message;
@@ -88,7 +91,32 @@ class AuthSession extends ChangeNotifier {
     }
   }
 
+  /// Best-effort — a device with push notifications unavailable (web,
+  /// Windows, a permission denial, or any FCM/plugin error) must still be
+  /// able to log in and use the app normally. Fire-and-forget: this never
+  /// blocks or fails the login/restore flow that calls it, and every
+  /// failure is swallowed rather than surfaced, since push is a nice-to-have
+  /// (internal/domain/pushnotify's credit-limit alert), not core
+  /// functionality.
+  Future<void> _registerPushToken() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    try {
+      final messaging = FirebaseMessaging.instance;
+      await messaging.requestPermission();
+      final token = await messaging.getToken();
+      if (token == null) return;
+      await apiClient.putAuthed('/api/v1/devices/fcm-token', {'token': token});
+    } catch (_) {
+      // Swallowed deliberately — see doc comment above.
+    }
+  }
+
   Future<void> logout() async {
+    // Best-effort: clear this device's token server-side so it stops
+    // receiving pushes once logged out. Never blocks logout itself.
+    try {
+      await apiClient.putAuthed('/api/v1/devices/fcm-token', {'token': ''});
+    } catch (_) {}
     await storage.clearTokens();
     tenantId = null;
     displayName = null;

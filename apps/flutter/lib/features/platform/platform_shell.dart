@@ -7,6 +7,7 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_decorations.dart';
 import '../../core/theme/app_typography.dart';
 import 'platform_api_client.dart';
+import 'cloud_usage_screen.dart';
 import 'platform_audit_log_screen.dart';
 import 'platform_error_log_screen.dart';
 import 'platform_login_screen.dart';
@@ -78,6 +79,14 @@ class _PlatformShellState extends State<PlatformShell> {
       label: 'Plans',
       color: AppColors.warning,
       gradient: AppColors.gradientEmerald,
+    ),
+    _PlatformTab(
+      screen: CloudUsageScreen(),
+      icon: Icons.monitor_heart_outlined,
+      selectedIcon: Icons.monitor_heart_rounded,
+      label: 'Cloud Usage',
+      color: AppColors.secondary,
+      gradient: AppColors.gradientPurple,
     ),
     _PlatformTab(
       screen: PlatformSettingsScreen(),

@@ -5,6 +5,11 @@
          release build with no network permission whatsoever — it silently
          failed to reach the server on a real device. -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Android 13+ requires this declared permission in addition to the
+         runtime request FirebaseMessaging.instance.requestPermission()
+         makes in auth_session.dart — without it, push notifications never
+         display even if the token registers successfully. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
     <application
         android:label="FeedMate"

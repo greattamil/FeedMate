@@ -101,15 +101,47 @@ class _ProductSearchScreenState extends State<ProductSearchScreen> {
             child: Column(
               children: [
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
                   child: Row(
                     children: [
-                      const Icon(Icons.shopping_cart_rounded, color: AppColors.primary, size: 20),
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          gradient: AppColors.gradientIndigo,
+                          borderRadius: BorderRadius.circular(10),
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppColors.secondary.withValues(alpha: 0.3),
+                              blurRadius: 8,
+                              offset: const Offset(0, 3),
+                            ),
+                          ],
+                        ),
+                        child: const Icon(Icons.shopping_cart_rounded, color: Colors.white, size: 18),
+                      ),
+                      const SizedBox(width: 10),
+                      Text('Cart', style: AppTypography.title.copyWith(fontSize: 16, fontWeight: FontWeight.bold)),
                       const SizedBox(width: 8),
-                      Text('Cart (${cart.itemCount})', style: AppTypography.title.copyWith(fontSize: 16)),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: AppColors.secondaryContainer,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: AppColors.secondary.withValues(alpha: 0.2)),
+                        ),
+                        child: Text(
+                          '${cart.itemCount} item${cart.itemCount == 1 ? '' : 's'}',
+                          style: const TextStyle(
+                            color: AppColors.onSecondaryContainer,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                 ),
+                const Divider(height: 1, color: AppColors.border),
                 const Expanded(child: CartPanel(standalone: false)),
               ],
             ),

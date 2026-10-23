@@ -148,26 +148,80 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
       ),
       body: Column(
         children: [
-          Container(
-            padding: const EdgeInsets.all(16),
-            color: AppColors.surface,
-            child: TextField(
-              key: const Key('audit_log_search_field'),
-              controller: _controller,
-              decoration: InputDecoration(
-                labelText: 'Search by action or entity type',
-                prefixIcon: const Icon(Icons.search_rounded, color: AppColors.primary),
-                suffixIcon: _controller.text.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.clear_rounded, size: 18),
-                        onPressed: () {
-                          _controller.clear();
-                          _onQueryChanged('');
-                        },
-                      )
-                    : null,
+          // Hero Banner
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                gradient: AppColors.gradientDark,
+                borderRadius: AppDecorations.borderRadiusLg,
+                boxShadow: AppDecorations.elevatedCardShadow,
               ),
-              onChanged: _onQueryChanged,
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.15),
+                      borderRadius: AppDecorations.borderRadiusMd,
+                    ),
+                    child: const Icon(Icons.shield_rounded, color: Colors.white, size: 26),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Audit Trail & Security',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Immutable event record of overrides, EOD closures & approvals',
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.85),
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // Search Field Card
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            child: Container(
+              decoration: AppDecorations.card(color: AppColors.surface),
+              child: TextField(
+                key: const Key('audit_log_search_field'),
+                controller: _controller,
+                decoration: InputDecoration(
+                  labelText: 'Search by action or entity type',
+                  prefixIcon: const Icon(Icons.search_rounded, color: AppColors.primary),
+                  border: InputBorder.none,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  suffixIcon: _controller.text.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(Icons.clear_rounded, size: 18),
+                          onPressed: () {
+                            _controller.clear();
+                            _onQueryChanged('');
+                          },
+                        )
+                      : null,
+                ),
+                onChanged: _onQueryChanged,
+              ),
             ),
           ),
           if (_loading) const LinearProgressIndicator(color: AppColors.primary, minHeight: 2),
@@ -195,40 +249,48 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
                   )
                 : ListView.builder(
                     key: const Key('audit_log_results_list'),
-                    padding: const EdgeInsets.all(12),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     itemCount: _results.length,
                     itemBuilder: (context, index) {
                       final e = _results[index];
                       return Container(
-                        margin: const EdgeInsets.only(bottom: 8),
-                        decoration: BoxDecoration(
-                          color: AppColors.surface,
-                          borderRadius: AppDecorations.borderRadiusMd,
-                          border: Border.all(color: AppColors.border),
-                          boxShadow: AppDecorations.cardShadow,
-                        ),
+                        margin: const EdgeInsets.only(bottom: 10),
+                        decoration: AppDecorations.card(color: AppColors.surface),
                         child: ListTile(
                           key: Key('audit_log_item_${e.id}'),
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                           leading: Container(
-                            width: 42,
-                            height: 42,
+                            width: 44,
+                            height: 44,
                             decoration: BoxDecoration(
                               color: AppColors.surfaceSecondary,
                               borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: AppColors.border.withValues(alpha: 0.5)),
                             ),
                             child: const Center(
-                              child: Icon(Icons.fact_check_outlined, color: AppColors.primary, size: 20),
+                              child: Icon(Icons.verified_user_rounded, color: AppColors.primary, size: 22),
                             ),
                           ),
-                          title: Text(e.actionCode, style: AppTypography.title),
-                          subtitle: Text(
-                            [
-                              e.entityType,
-                              if (e.actorName != null) e.actorName!,
-                              _dateFormat.format(e.createdAt.toLocal()),
-                            ].join(' · '),
-                            style: AppTypography.caption,
+                          title: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  e.actionCode,
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                ),
+                              ),
+                            ],
+                          ),
+                          subtitle: Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Text(
+                              [
+                                e.entityType,
+                                if (e.actorName != null) e.actorName!,
+                                _dateFormat.format(e.createdAt.toLocal()),
+                              ].join(' · '),
+                              style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                            ),
                           ),
                           trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppColors.textSecondary),
                           onTap: () => _showDetail(e),

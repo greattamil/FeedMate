@@ -4,7 +4,9 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
 	"time"
@@ -38,14 +40,91 @@ type Config struct {
 	// provider must implement to be swapped in.
 	PaymentProvider       string
 	SandboxWebhookSecret  string
+
+	// CloudUsage* configure the platform-admin live usage dashboard
+	// (internal/domain/cloudusage). Each provider's credentials are
+	// optional and independent — if one is unset, that provider's
+	// metrics are simply omitted from the poll rather than erroring,
+	// since this feature must not block API startup.
+	CloudflareAPIToken  string
+	CloudflareAccountID string
+	GCPProjectID        string
+	AivenAPIToken       string
+	AivenProject        string
+	AivenService        string
+	CloudUsagePollInterval time.Duration
+
+	// FirebaseProjectID enables pushnotify (FCM push notifications) —
+	// optional, same "feature just skipped if unset" convention as the
+	// CloudUsage fields above. In practice the same value as
+	// GCPProjectID, since Firebase is added to the existing GCP project
+	// rather than a separate one.
+	FirebaseProjectID string
+
+	// EdgeSharedSecret, when set, requires every request to carry a
+	// matching X-Edge-Secret header (see middleware.RequireEdgeSecret) —
+	// blocks direct traffic to Cloud Run's public *.run.app URL that
+	// bypasses the Cloudflare Worker proxy entirely.
+	EdgeSharedSecret string
+
+	// CronSecret gates /internal/cron/* (see httpapi.CronHandlers):
+	// Google Cloud Scheduler calls these with X-Cron-Secret set to this
+	// value to trigger the billing cycle and cloud-usage poll on
+	// Cloud Run, where the in-process ticker (EnableInProcessScheduler)
+	// isn't reliable — see cron_handlers.go's doc comment for why.
+	CronSecret string
+
+	// EnableInProcessScheduler controls whether the in-process ticker
+	// goroutines (subscription.StartBillingScheduler,
+	// cloudusage.StartUsagePollScheduler) run at all. Default true — the
+	// right choice for self-hosted/VPS deployments (docker-compose.prod.yml),
+	// where the process runs continuously and the ticker is reliable.
+	// The Cloud Run deploy sets this to false (via deploy/gcp/deploy-api.sh)
+	// since there Google Cloud Scheduler drives the same work instead, and
+	// a ticker that silently never fires while idle is pointless to run.
+	EnableInProcessScheduler bool
+}
+
+// loadJSONSecretFile reads a small JSON object (e.g. {"url": "...",
+// "admin_url": "..."}) from the file at path, used by dbCredentialsFile /
+// internalSecretsFile below to let several related secrets share one
+// Secret Manager entry — see those two vars' doc comment for why. Absent
+// path or unreadable/malformed file both just return an empty map rather
+// than erroring, so local/VPS dev (which sets the individual env vars
+// directly, no file involved) is unaffected.
+func loadJSONSecretFile(path string) map[string]string {
+	out := map[string]string{}
+	if path == "" {
+		return out
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		slog.Error("config: failed to read JSON secret file", "path", path, "error", err)
+		return out
+	}
+	if err := json.Unmarshal(data, &out); err != nil {
+		slog.Error("config: failed to parse JSON secret file", "path", path, "error", err)
+	}
+	return out
 }
 
 func Load() (Config, error) {
+	// dbCredentials / internalSecrets: on Cloud Run, DB_CREDENTIALS_FILE
+	// and INTERNAL_SECRETS_FILE point at two small JSON secrets mounted
+	// as files (see deploy/gcp/deploy-api.sh) — one Secret Manager entry
+	// each instead of four, to stay within Secret Manager's free tier of
+	// 6 active secret versions/month rather than quietly going a few
+	// cents over it. Each individual env var below (DATABASE_URL, etc.)
+	// still wins if set directly, which is what local dev and the
+	// self-hosted/VPS docker-compose path do — no file involved there.
+	dbCredentials := loadJSONSecretFile(os.Getenv("DB_CREDENTIALS_FILE"))
+	internalSecrets := loadJSONSecretFile(os.Getenv("INTERNAL_SECRETS_FILE"))
+
 	cfg := Config{
 		AppEnv:               getEnv("APP_ENV", "development"),
 		HTTPAddr:             resolveHTTPAddr(),
-		DatabaseURL:          os.Getenv("DATABASE_URL"),
-		DatabaseAdminURL:     os.Getenv("DATABASE_ADMIN_URL"),
+		DatabaseURL:          firstNonEmpty(os.Getenv("DATABASE_URL"), dbCredentials["url"]),
+		DatabaseAdminURL:     firstNonEmpty(os.Getenv("DATABASE_ADMIN_URL"), dbCredentials["admin_url"]),
 		DBPoolMaxConns:       int32(getInt("DB_POOL_MAX_CONNS", 8)),
 		DBAdminPoolMaxConns:  int32(getInt("DB_ADMIN_POOL_MAX_CONNS", 3)),
 		RedisURL:             os.Getenv("REDIS_URL"),
@@ -57,6 +136,19 @@ func Load() (Config, error) {
 		IdempotencyRetention: getDuration("IDEMPOTENCY_RETENTION", 7*24*time.Hour),
 		PaymentProvider:      getEnv("PAYMENT_PROVIDER", "sandbox"),
 		SandboxWebhookSecret: os.Getenv("SANDBOX_WEBHOOK_SECRET"),
+
+		CloudflareAPIToken:     os.Getenv("CLOUDFLARE_API_TOKEN"),
+		CloudflareAccountID:    os.Getenv("CLOUDFLARE_ACCOUNT_ID"),
+		GCPProjectID:           os.Getenv("GCP_PROJECT_ID"),
+		AivenAPIToken:          os.Getenv("AIVEN_API_TOKEN"),
+		AivenProject:           os.Getenv("AIVEN_PROJECT"),
+		AivenService:           os.Getenv("AIVEN_SERVICE"),
+		CloudUsagePollInterval: getDuration("CLOUD_USAGE_POLL_INTERVAL", 1*time.Hour),
+		FirebaseProjectID:      os.Getenv("FIREBASE_PROJECT_ID"),
+		EdgeSharedSecret:       firstNonEmpty(os.Getenv("EDGE_SHARED_SECRET"), internalSecrets["edge_secret"]),
+
+		CronSecret:               firstNonEmpty(os.Getenv("CRON_SECRET"), internalSecrets["cron_secret"]),
+		EnableInProcessScheduler: getBool("ENABLE_IN_PROCESS_SCHEDULER", true),
 	}
 
 	if cfg.DatabaseURL == "" {
@@ -90,6 +182,15 @@ func resolveHTTPAddr() string {
 		return ":" + port
 	}
 	return getEnv("HTTP_ADDR", ":8080")
+}
+
+// firstNonEmpty returns primary if set, else fallback — used to let the
+// plain env var win over the JSON-secret-file value when both are present.
+func firstNonEmpty(primary, fallback string) string {
+	if primary != "" {
+		return primary
+	}
+	return fallback
 }
 
 func getEnv(key, def string) string {

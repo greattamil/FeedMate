@@ -160,7 +160,7 @@ func TestFinalizeInvoice_CashSale(t *testing.T) {
 	db := connectTest(t)
 	defer db.Close()
 	f := seedFixture(t, db)
-	svc := pos.NewService(db)
+	svc := pos.NewService(db, nil)
 
 	// 3 bags * 1200 = 3600 subtotal; 5% GST = 180; grand total 3780.
 	req := pos.FinalizeRequest{
@@ -220,7 +220,7 @@ func TestFinalizeInvoice_CashSaleToRealCustomerAppearsInTheirLedger(t *testing.T
 	db := connectTest(t)
 	defer db.Close()
 	f := seedFixture(t, db)
-	svc := pos.NewService(db)
+	svc := pos.NewService(db, nil)
 
 	req := pos.FinalizeRequest{
 		ClientTransactionID: uuid.New(),
@@ -318,7 +318,7 @@ func TestFinalizeInvoice_NoCustomerFallsBackToWalkIn(t *testing.T) {
 	db := connectTest(t)
 	defer db.Close()
 	f := seedFixture(t, db)
-	svc := pos.NewService(db)
+	svc := pos.NewService(db, nil)
 
 	t.Run("a cash sale with no customer is billed to the Walking Customer", func(t *testing.T) {
 		req := pos.FinalizeRequest{
@@ -444,7 +444,7 @@ func TestFinalizeInvoice_InsufficientStock(t *testing.T) {
 	db := connectTest(t)
 	defer db.Close()
 	f := seedFixture(t, db)
-	svc := pos.NewService(db)
+	svc := pos.NewService(db, nil)
 
 	req := pos.FinalizeRequest{
 		ClientTransactionID: uuid.New(),
@@ -468,7 +468,7 @@ func TestFinalizeInvoice_TenderMismatchRejected(t *testing.T) {
 	db := connectTest(t)
 	defer db.Close()
 	f := seedFixture(t, db)
-	svc := pos.NewService(db)
+	svc := pos.NewService(db, nil)
 
 	req := pos.FinalizeRequest{
 		ClientTransactionID: uuid.New(),
@@ -486,7 +486,7 @@ func TestFinalizeInvoice_CreditLimit(t *testing.T) {
 	db := connectTest(t)
 	defer db.Close()
 	f := seedFixture(t, db)
-	svc := pos.NewService(db)
+	svc := pos.NewService(db, nil)
 
 	// 40 bags * 1260 (incl. tax) = 50400, far beyond the 5000 credit limit.
 	overLimitReq := pos.FinalizeRequest{
@@ -580,7 +580,7 @@ func TestFinalizeInvoice_ConcurrentSalesNeverOversell(t *testing.T) {
 	db := connectTest(t)
 	defer db.Close()
 	f := seedFixture(t, db)
-	svc := pos.NewService(db)
+	svc := pos.NewService(db, nil)
 
 	// Only 100 available; two concurrent requests each try to buy 60 (120 total).
 	// Exactly one should succeed in full, or they should split, but the sum
@@ -630,7 +630,7 @@ func TestGetInvoiceForReturn(t *testing.T) {
 	db := connectTest(t)
 	defer db.Close()
 	f := seedFixture(t, db)
-	svc := pos.NewService(db)
+	svc := pos.NewService(db, nil)
 
 	req := pos.FinalizeRequest{
 		ClientTransactionID: uuid.New(),
@@ -672,7 +672,7 @@ func TestListInvoices_ReturnsNewestFirstAndFiltersByQuery(t *testing.T) {
 	db := connectTest(t)
 	defer db.Close()
 	f := seedFixture(t, db)
-	svc := pos.NewService(db)
+	svc := pos.NewService(db, nil)
 
 	first, err := svc.FinalizeInvoice(context.Background(), f.tenantID, f.deviceID, f.userID, pos.FinalizeRequest{
 		ClientTransactionID: uuid.New(),
@@ -717,7 +717,7 @@ func TestGetInvoiceDetail_ReturnsLinesAndTenders(t *testing.T) {
 	db := connectTest(t)
 	defer db.Close()
 	f := seedFixture(t, db)
-	svc := pos.NewService(db)
+	svc := pos.NewService(db, nil)
 
 	result, err := svc.FinalizeInvoice(context.Background(), f.tenantID, f.deviceID, f.userID, pos.FinalizeRequest{
 		ClientTransactionID: uuid.New(),

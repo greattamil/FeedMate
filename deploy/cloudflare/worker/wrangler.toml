@@ -1,0 +1,21 @@
+# Cloudflare Worker config for the api.<domain> reverse proxy.
+#
+# To migrate (new Cloud Run project/region, new custom domain, or an
+# entirely different backend host):
+#   1. Change ORIGIN_HOST below to the new origin's hostname.
+#   2. Change the route pattern below to the new custom domain.
+#   3. Run: wrangler secret put EDGE_SHARED_SECRET
+#      (must match the EDGE_SHARED_SECRET env var / secret the API itself
+#      is configured with — see ../../ENVIRONMENT.md)
+#   4. wrangler deploy (from this directory)
+
+name = "feedmate-api-proxy"
+main = "worker.js"
+compatibility_date = "2026-10-21"
+
+routes = [
+  { pattern = "api.ramadas.me", custom_domain = true }
+]
+
+[vars]
+ORIGIN_HOST = "feedmate-api-794548234279.asia-south1.run.app"

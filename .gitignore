@@ -31,3 +31,7 @@ Thumbs.db
 
 # Logs
 *.log
+backups/
+
+# wrangler's local cache/state (created by running wrangler commands)
+.wrangler/

@@ -93,17 +93,18 @@ class _OutboxScreenState extends State<OutboxScreen> {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Container(
-                        padding: const EdgeInsets.all(20),
-                        decoration: const BoxDecoration(
-                          color: AppColors.primaryContainer,
+                        padding: const EdgeInsets.all(22),
+                        decoration: BoxDecoration(
+                          gradient: AppColors.gradientTealCyan,
                           shape: BoxShape.circle,
+                          boxShadow: AppDecorations.cardShadow,
                         ),
-                        child: const Icon(Icons.cloud_done_rounded, size: 48, color: AppColors.primary),
+                        child: const Icon(Icons.cloud_done_rounded, size: 48, color: Colors.white),
                       ),
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 20),
                       const Text(
                         'No offline sales queued',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
                       ),
                       const SizedBox(height: 6),
                       const Text(
@@ -113,14 +114,68 @@ class _OutboxScreenState extends State<OutboxScreen> {
                     ],
                   ),
                 )
-              : RefreshIndicator(
-                  onRefresh: _refresh,
-                  child: ListView.builder(
-                    key: const Key('outbox_entries_list'),
-                    padding: const EdgeInsets.all(16),
-                    itemCount: _entries.length,
-                    itemBuilder: (context, index) => _buildTile(_entries[index]),
-                  ),
+              : Column(
+                  children: [
+                    // Hero Banner
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                      child: Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          gradient: AppColors.gradientTealCyan,
+                          borderRadius: AppDecorations.borderRadiusLg,
+                          boxShadow: AppDecorations.elevatedCardShadow,
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.2),
+                                borderRadius: AppDecorations.borderRadiusMd,
+                              ),
+                              child: const Icon(Icons.cloud_sync_rounded, color: Colors.white, size: 26),
+                            ),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Offline Sales Outbox',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 16,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    '${_entries.length} queued transaction(s) requiring sync or review',
+                                    style: TextStyle(
+                                      color: Colors.white.withValues(alpha: 0.9),
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: RefreshIndicator(
+                        onRefresh: _refresh,
+                        child: ListView.builder(
+                          key: const Key('outbox_entries_list'),
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          itemCount: _entries.length,
+                          itemBuilder: (context, index) => _buildTile(_entries[index]),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
     );
   }

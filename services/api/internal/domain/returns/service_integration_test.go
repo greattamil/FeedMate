@@ -171,7 +171,7 @@ func TestPostReturn_FullSellableReturnCashRefund(t *testing.T) {
 	db := connectTest(t)
 	defer db.Close()
 	f := seedFixture(t, db, "100")
-	posSvc := pos.NewService(db)
+	posSvc := pos.NewService(db, nil)
 	returnsSvc := returns.NewService(db)
 
 	// Sell 10 bags: 10*1200=12000 + 5% GST = 12600.
@@ -223,7 +223,7 @@ func TestPostReturn_CashRefundToRealCustomerAppearsInTheirLedger(t *testing.T) {
 	db := connectTest(t)
 	defer db.Close()
 	f := seedFixture(t, db, "100")
-	posSvc := pos.NewService(db)
+	posSvc := pos.NewService(db, nil)
 	returnsSvc := returns.NewService(db)
 
 	sale, err := posSvc.FinalizeInvoice(context.Background(), f.tenantID, f.deviceID, f.userID, pos.FinalizeRequest{
@@ -295,7 +295,7 @@ func TestPostReturn_PartialReturnThenExceedingRejected(t *testing.T) {
 	db := connectTest(t)
 	defer db.Close()
 	f := seedFixture(t, db, "100")
-	posSvc := pos.NewService(db)
+	posSvc := pos.NewService(db, nil)
 	returnsSvc := returns.NewService(db)
 
 	sale, err := posSvc.FinalizeInvoice(context.Background(), f.tenantID, f.deviceID, f.userID, pos.FinalizeRequest{
@@ -350,7 +350,7 @@ func TestPostReturn_DamagedConditionNeverRestocksSellable(t *testing.T) {
 	db := connectTest(t)
 	defer db.Close()
 	f := seedFixture(t, db, "100")
-	posSvc := pos.NewService(db)
+	posSvc := pos.NewService(db, nil)
 	returnsSvc := returns.NewService(db)
 
 	sale, err := posSvc.FinalizeInvoice(context.Background(), f.tenantID, f.deviceID, f.userID, pos.FinalizeRequest{
@@ -398,7 +398,7 @@ func TestPostReturn_CreditNoteReducesCustomerReceivable(t *testing.T) {
 	db := connectTest(t)
 	defer db.Close()
 	f := seedFixture(t, db, "100")
-	posSvc := pos.NewService(db)
+	posSvc := pos.NewService(db, nil)
 	returnsSvc := returns.NewService(db)
 
 	sale, err := posSvc.FinalizeInvoice(context.Background(), f.tenantID, f.deviceID, f.userID, pos.FinalizeRequest{
@@ -445,7 +445,7 @@ func TestPostReturn_DepletedBatchReactivatesOnRestock(t *testing.T) {
 	db := connectTest(t)
 	defer db.Close()
 	f := seedFixture(t, db, "5") // small batch, easy to fully deplete
-	posSvc := pos.NewService(db)
+	posSvc := pos.NewService(db, nil)
 	returnsSvc := returns.NewService(db)
 
 	sale, err := posSvc.FinalizeInvoice(context.Background(), f.tenantID, f.deviceID, f.userID, pos.FinalizeRequest{

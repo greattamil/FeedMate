@@ -98,65 +98,133 @@ class _StockCountHistoryScreenState extends State<StockCountHistoryScreen> {
         title: const Text('Stock Counts', style: AppTypography.headline),
       ),
       floatingActionButton: FloatingActionButton.extended(
+        heroTag: null,
         key: const Key('start_stock_count_fab'),
         onPressed: _startCount,
         icon: const Icon(Icons.playlist_add_check_rounded),
-        label: const Text('Start Count'),
+        label: const Text('Start Count', style: TextStyle(fontWeight: FontWeight.bold)),
         backgroundColor: AppColors.primary,
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _error != null
-              ? Center(child: Padding(padding: const EdgeInsets.all(16), child: Text(_error!, style: const TextStyle(color: Colors.red))))
-              : _results.isEmpty
-                  ? Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: const [
-                          Icon(Icons.fact_check_outlined, size: 56, color: Color(0xFF94A3B8)),
-                          SizedBox(height: 12),
-                          Text('No stock counts yet', style: AppTypography.bodySecondary),
-                        ],
+      body: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: const BoxDecoration(
+              gradient: AppColors.gradientCyan,
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withAlpha(40),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.fact_check_rounded, color: Colors.white, size: 22),
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Physical Stock Register',
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
                       ),
-                    )
-                  : RefreshIndicator(
-                      onRefresh: _load,
-                      child: ListView.builder(
-                        key: const Key('stock_count_history_list'),
-                        padding: const EdgeInsets.all(12),
-                        itemCount: _results.length,
-                        itemBuilder: (context, index) {
-                          final c = _results[index];
-                          return Container(
-                            margin: const EdgeInsets.only(bottom: 8),
-                            decoration: BoxDecoration(
-                              color: AppColors.surface,
-                              borderRadius: AppDecorations.borderRadiusMd,
-                              border: Border.all(color: AppColors.border),
-                              boxShadow: AppDecorations.cardShadow,
+                      Text(
+                        'Audit on-shelf inventories & post variance adjustments',
+                        style: TextStyle(color: Colors.white70, fontSize: 11),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+                : _error != null
+                    ? Center(
+                        child: Container(
+                          margin: const EdgeInsets.all(16),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: AppColors.dangerContainer,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(_error!, style: const TextStyle(color: AppColors.onDangerContainer)),
+                        ),
+                      )
+                    : _results.isEmpty
+                        ? Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: const [
+                                Icon(Icons.fact_check_outlined, size: 56, color: Color(0xFF94A3B8)),
+                                SizedBox(height: 12),
+                                Text('No stock counts yet', style: AppTypography.bodySecondary),
+                              ],
                             ),
-                            child: ListTile(
-                              key: Key('stock_count_history_item_${c.id}'),
-                              title: Text(c.locationName, style: AppTypography.title),
-                              subtitle: Text(
-                                '${c.countMode} · ${_dateFormat.format(c.startedAt.toLocal())}',
-                                style: AppTypography.caption,
-                              ),
-                              trailing: Text(
-                                c.status,
-                                style: TextStyle(fontWeight: FontWeight.bold, color: _statusColor(c.status)),
-                              ),
-                              onTap: () async {
-                                await Navigator.of(context).push(
-                                  MaterialPageRoute(builder: (_) => StockCountScreen(stockCountId: c.id)),
+                          )
+                        : RefreshIndicator(
+                            onRefresh: _load,
+                            child: ListView.builder(
+                              key: const Key('stock_count_history_list'),
+                              padding: const EdgeInsets.all(12),
+                              itemCount: _results.length,
+                              itemBuilder: (context, index) {
+                                final c = _results[index];
+                                return Container(
+                                  margin: const EdgeInsets.only(bottom: 8),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.surface,
+                                    borderRadius: AppDecorations.borderRadiusMd,
+                                    border: Border.all(color: AppColors.border),
+                                    boxShadow: AppDecorations.cardShadow,
+                                  ),
+                                  child: ListTile(
+                                    key: Key('stock_count_history_item_${c.id}'),
+                                    leading: Container(
+                                      width: 40,
+                                      height: 40,
+                                      decoration: BoxDecoration(
+                                        color: AppColors.surfaceSecondary,
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      child: const Icon(Icons.inventory_2_outlined, color: AppColors.primary, size: 20),
+                                    ),
+                                    title: Text(c.locationName, style: AppTypography.title),
+                                    subtitle: Text(
+                                      '${c.countMode} · ${_dateFormat.format(c.startedAt.toLocal())}',
+                                      style: AppTypography.caption,
+                                    ),
+                                    trailing: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                      decoration: BoxDecoration(
+                                        color: _statusColor(c.status).withAlpha(25),
+                                        borderRadius: BorderRadius.circular(20),
+                                        border: Border.all(color: _statusColor(c.status).withAlpha(80)),
+                                      ),
+                                      child: Text(
+                                        c.status,
+                                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: _statusColor(c.status)),
+                                      ),
+                                    ),
+                                    onTap: () async {
+                                      await Navigator.of(context).push(
+                                        MaterialPageRoute(builder: (_) => StockCountScreen(stockCountId: c.id)),
+                                      );
+                                      await _load();
+                                    },
+                                  ),
                                 );
-                                await _load();
                               },
                             ),
-                          );
-                        },
-                      ),
-                    ),
+                          ),
+          ),
+        ],
+      ),
     );
   }
 }

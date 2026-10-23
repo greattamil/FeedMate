@@ -532,6 +532,80 @@ class RecordSubscriptionPaymentResult {
   }
 }
 
+/// One provider/metric's latest live-polled usage (internal/domain
+/// /cloudusage). [limitIsLive] is false only for Google Cloud metrics,
+/// where the ceiling itself is a published constant Google's API never
+/// returns — [usedValue] is always live for every provider.
+class CloudUsageMetric {
+  final String provider;
+  final String metricKey;
+  final String label;
+  final double usedValue;
+  final double? limitValue;
+  final bool limitIsLive;
+  final String unit;
+  final double? pctUsed;
+  final DateTime capturedAt;
+
+  CloudUsageMetric({
+    required this.provider,
+    required this.metricKey,
+    required this.label,
+    required this.usedValue,
+    this.limitValue,
+    required this.limitIsLive,
+    required this.unit,
+    this.pctUsed,
+    required this.capturedAt,
+  });
+
+  factory CloudUsageMetric.fromJson(Map<String, dynamic> json) {
+    return CloudUsageMetric(
+      provider: json['provider'] as String,
+      metricKey: json['metric_key'] as String,
+      label: json['label'] as String,
+      usedValue: (json['used_value'] as num).toDouble(),
+      limitValue: (json['limit_value'] as num?)?.toDouble(),
+      limitIsLive: json['limit_is_live'] as bool,
+      unit: json['unit'] as String,
+      pctUsed: (json['pct_used'] as num?)?.toDouble(),
+      capturedAt: DateTime.parse(json['captured_at'] as String),
+    );
+  }
+}
+
+class CloudUsageAlert {
+  final String id;
+  final String provider;
+  final String metricKey;
+  final String severity;
+  final String message;
+  final double pctUsed;
+  final DateTime createdAt;
+
+  CloudUsageAlert({
+    required this.id,
+    required this.provider,
+    required this.metricKey,
+    required this.severity,
+    required this.message,
+    required this.pctUsed,
+    required this.createdAt,
+  });
+
+  factory CloudUsageAlert.fromJson(Map<String, dynamic> json) {
+    return CloudUsageAlert(
+      id: json['id'] as String,
+      provider: json['provider'] as String,
+      metricKey: json['metric_key'] as String,
+      severity: json['severity'] as String,
+      message: json['message'] as String,
+      pctUsed: (json['pct_used'] as num).toDouble(),
+      createdAt: DateTime.parse(json['created_at'] as String),
+    );
+  }
+}
+
 /// Wraps every platform-admin endpoint (services/api/internal/httpapi
 /// /platform_handlers.go). All business logic (bootstrap sequencing,
 /// suspension enforcement) lives server-side — this only shapes requests.
@@ -650,6 +724,28 @@ class PlatformApi {
     final response = await client.getAuthed(path);
     final entries = (response['entries'] as List<dynamic>).map((e) => PlatformErrorLogEntry.fromJson(e as Map<String, dynamic>)).toList();
     return (entries: entries, total: response['total'] as int);
+  }
+
+  Future<List<CloudUsageMetric>> getCloudUsage() async {
+    final response = await client.getAuthed('/api/v1/platform/cloud-usage');
+    return (response['metrics'] as List<dynamic>).map((m) => CloudUsageMetric.fromJson(m as Map<String, dynamic>)).toList();
+  }
+
+  Future<List<CloudUsageAlert>> getCloudUsageAlerts() async {
+    final response = await client.getAuthed('/api/v1/platform/cloud-usage/alerts');
+    return (response['alerts'] as List<dynamic>).map((a) => CloudUsageAlert.fromJson(a as Map<String, dynamic>)).toList();
+  }
+
+  Future<int> refreshCloudUsage() async {
+    final response = await client.postAuthed('/api/v1/platform/cloud-usage/refresh', {});
+    return response['metrics_polled'] as int;
+  }
+
+  Future<void> updateCloudUsageThreshold(String id, {required double warningPct, required double criticalPct}) {
+    return client.putAuthed('/api/v1/platform/cloud-usage/thresholds/$id', {
+      'warning_pct': warningPct,
+      'critical_pct': criticalPct,
+    });
   }
 
   /// Builds `basePath?k=v&...` from only the non-null/non-empty params,

@@ -152,6 +152,29 @@ abstract final class AppTheme {
           borderRadius: AppDecorations.borderRadiusMd,
         ),
       ),
+
+      // Platform-Adaptive Smooth Page Transitions
+      pageTransitionsTheme: const PageTransitionsTheme(
+        builders: {
+          TargetPlatform.android: ZoomPageTransitionsBuilder(),
+          TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+          TargetPlatform.windows: FadeForwardsPageTransitionsBuilder(),
+          TargetPlatform.linux: FadeForwardsPageTransitionsBuilder(),
+          TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
+        },
+      ),
+
+      // Desktop & Web Scrollbar Theme
+      scrollbarTheme: ScrollbarThemeData(
+        thumbColor: WidgetStateProperty.all(AppColors.textSecondary.withValues(alpha: 0.2)),
+        radius: const Radius.circular(8),
+        thickness: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.hovered) || states.contains(WidgetState.dragged)) {
+            return 8.0;
+          }
+          return 5.0;
+        }),
+      ),
     );
   }
 }

@@ -2,14 +2,14 @@ import 'package:decimal/decimal.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_decorations.dart';
+import '../../core/theme/app_typography.dart';
 import '../pos/product.dart';
 import 'contra_api.dart';
 
 /// Full-screen form for one contra (buy-back) line: batch/expiry, quantity,
-/// the price the shop is crediting the customer at, and quality status
-/// (REJECTED-quality lines never enter sellable stock — enforced
-/// server-side, see contra.Service). Pops with a completed ContraLineDraft,
-/// or null if cancelled.
+/// the price the shop is crediting the customer at, and quality status.
 class ContraLineFormScreen extends StatefulWidget {
   final Product product;
   final ContraLineDraft? existing;
@@ -101,66 +101,119 @@ class _ContraLineFormScreenState extends State<ContraLineFormScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(widget.product.name)),
+      backgroundColor: AppColors.background,
+      appBar: AppBar(
+        title: Text(widget.product.name, style: AppTypography.headline),
+      ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          if (_error != null)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Text(_error!, style: const TextStyle(color: Colors.red)),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: AppColors.border),
+              boxShadow: AppDecorations.cardShadow,
             ),
-          TextField(
-            key: const Key('contra_line_batch_field'),
-            controller: _batchController,
-            decoration: InputDecoration(
-              labelText: widget.product.batchRequired ? 'Batch code (required)' : 'Batch code (optional)',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TextField(
+                  key: const Key('contra_line_batch_field'),
+                  controller: _batchController,
+                  decoration: InputDecoration(
+                    labelText: widget.product.batchRequired ? 'Batch code (required)' : 'Batch code (optional)',
+                    prefixIcon: const Icon(Icons.qr_code_2_rounded, size: 20),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                ListTile(
+                  key: const Key('contra_line_manufacture_date_tile'),
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Manufacture date (optional)', style: TextStyle(fontSize: 14)),
+                  subtitle: Text(
+                    _manufactureDate == null ? 'Not set' : _dateFormat.format(_manufactureDate!),
+                    style: TextStyle(color: _manufactureDate == null ? AppColors.textSecondary : AppColors.textPrimary),
+                  ),
+                  trailing: const Icon(Icons.calendar_today_rounded, size: 18, color: AppColors.primary),
+                  onTap: () => _pickDate(isExpiry: false),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  key: const Key('contra_line_expiry_date_tile'),
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Expiry date (optional)', style: TextStyle(fontSize: 14)),
+                  subtitle: Text(
+                    _expiryDate == null ? 'Not set' : _dateFormat.format(_expiryDate!),
+                    style: TextStyle(color: _expiryDate == null ? AppColors.textSecondary : AppColors.textPrimary),
+                  ),
+                  trailing: const Icon(Icons.calendar_today_rounded, size: 18, color: AppColors.primary),
+                  onTap: () => _pickDate(isExpiry: true),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  key: const Key('contra_line_qty_field'),
+                  controller: _qtyController,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                    labelText: 'Quantity taken back',
+                    prefixIcon: Icon(Icons.scale_rounded, size: 20),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  key: const Key('contra_line_price_field'),
+                  controller: _priceController,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                    labelText: 'Credit price per unit (₹)',
+                    prefixIcon: Icon(Icons.currency_rupee_rounded, size: 20),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                DropdownButtonFormField<String>(
+                  key: const Key('contra_line_quality_dropdown'),
+                  initialValue: _qualityStatus,
+                  decoration: const InputDecoration(
+                    labelText: 'Quality status',
+                    prefixIcon: Icon(Icons.verified_outlined, size: 20),
+                  ),
+                  items: _qualityOptions.map((q) => DropdownMenuItem(value: q, child: Text(q))).toList(),
+                  onChanged: (v) => setState(() => _qualityStatus = v ?? 'ACCEPTED'),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 12),
-          ListTile(
-            key: const Key('contra_line_manufacture_date_tile'),
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Manufacture date (optional)'),
-            subtitle: Text(_manufactureDate == null ? 'Not set' : _dateFormat.format(_manufactureDate!)),
-            trailing: const Icon(Icons.calendar_today_outlined, size: 18),
-            onTap: () => _pickDate(isExpiry: false),
-          ),
-          ListTile(
-            key: const Key('contra_line_expiry_date_tile'),
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Expiry date (optional)'),
-            subtitle: Text(_expiryDate == null ? 'Not set' : _dateFormat.format(_expiryDate!)),
-            trailing: const Icon(Icons.calendar_today_outlined, size: 18),
-            onTap: () => _pickDate(isExpiry: true),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            key: const Key('contra_line_qty_field'),
-            controller: _qtyController,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(labelText: 'Quantity taken back'),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            key: const Key('contra_line_price_field'),
-            controller: _priceController,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(labelText: 'Credit price per unit'),
-          ),
-          const SizedBox(height: 12),
-          DropdownButtonFormField<String>(
-            key: const Key('contra_line_quality_dropdown'),
-            initialValue: _qualityStatus,
-            decoration: const InputDecoration(labelText: 'Quality status'),
-            items: _qualityOptions.map((q) => DropdownMenuItem(value: q, child: Text(q))).toList(),
-            onChanged: (v) => setState(() => _qualityStatus = v ?? 'ACCEPTED'),
-          ),
-          const SizedBox(height: 24),
+          if (_error != null) ...[
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.dangerContainer,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.error_outline_rounded, color: AppColors.danger, size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(_error!, style: const TextStyle(color: AppColors.onDangerContainer, fontWeight: FontWeight.w600)),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          const SizedBox(height: 20),
           FilledButton(
             key: const Key('contra_line_save_button'),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
             onPressed: _save,
-            child: const Text('Save Line'),
+            child: const Text('Save Line', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
           ),
         ],
       ),

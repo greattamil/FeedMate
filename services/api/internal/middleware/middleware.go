@@ -6,6 +6,7 @@ package middleware
 import (
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"io"
 	"log/slog"
 	"net"
@@ -19,6 +20,33 @@ import (
 	"github.com/andipatti/feedmate/services/api/internal/httpapi"
 	"github.com/andipatti/feedmate/services/api/internal/reqctx"
 )
+
+// RequireEdgeSecret rejects every request that doesn't carry the exact
+// shared-secret header the Cloudflare Worker proxy (services/api's only
+// sanctioned entry point in production — see cmd/api/main.go's domain
+// cutover notes) attaches to every request it forwards. This exists purely
+// to stop automated internet-wide scanners from reaching the API directly
+// via Cloud Run's own public *.run.app URL, which bypasses Cloudflare
+// entirely — it is not a replacement for real authentication, which every
+// actual endpoint still enforces independently. A generic 404 (not 401/403)
+// is returned so a scanner hitting the bare URL learns nothing about what's
+// behind it. When secret is empty (not configured — e.g. local dev),
+// enforcement is skipped entirely so local/non-Worker testing keeps working.
+func RequireEdgeSecret(secret string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		if secret == "" {
+			return next
+		}
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			got := r.Header.Get("X-Edge-Secret")
+			if subtle.ConstantTimeCompare([]byte(got), []byte(secret)) != 1 {
+				http.NotFound(w, r)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
 
 func RequestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

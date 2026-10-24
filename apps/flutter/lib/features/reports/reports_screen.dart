@@ -15,26 +15,56 @@ import '../../core/number_format.dart';
 /// Reports/dashboard — a real Flutter view on top of the four reporting
 /// endpoints. All computation happens server-side; every number rendered
 /// is exactly what the server returned.
-class ReportsScreen extends StatelessWidget {
+class ReportsScreen extends StatefulWidget {
   const ReportsScreen({super.key});
 
   @override
+  State<ReportsScreen> createState() => _ReportsScreenState();
+}
+
+class _ReportsScreenState extends State<ReportsScreen> with SingleTickerProviderStateMixin {
+  late final TabController _tabController;
+  // TabBarView mounts every child in its `children` list immediately, so
+  // all 4 report tabs fired their API calls on open even though only one
+  // was visible — duplicating whatever the Home dashboard had just
+  // fetched. Only building a tab's real content once its index has been
+  // visited (and keeping it built afterwards) fixes that.
+  late final Set<int> _visitedTabs;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 4, vsync: this);
+    _visitedTabs = {_tabController.index};
+    _tabController.addListener(() {
+      if (!_visitedTabs.contains(_tabController.index)) {
+        setState(() => _visitedTabs.add(_tabController.index));
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: 4,
-      child: Scaffold(
-        backgroundColor: AppColors.background,
-        appBar: AppBar(
-          title: const Text('Reports & Analytics', style: AppTypography.headline),
-          bottom: PreferredSize(
-            preferredSize: const Size.fromHeight(48),
-            child: Container(
-              margin: const EdgeInsets.symmetric(horizontal: 16),
-              decoration: BoxDecoration(
-                color: AppColors.surfaceSecondary,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: TabBar(
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      appBar: AppBar(
+        title: const Text('Reports & Analytics', style: AppTypography.headline),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(48),
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 16),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceSecondary,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: TabBar(
+                controller: _tabController,
                 isScrollable: true,
                 tabAlignment: TabAlignment.start,
                 labelColor: Colors.white,
@@ -104,18 +134,19 @@ class ReportsScreen extends StatelessWidget {
             ),
           ),
         ),
-        body: const TabBarView(
+        body: TabBarView(
+          controller: _tabController,
           children: [
-            _SalesSummaryTab(),
-            _StockOnHandTab(),
-            _CustomerBalancesTab(),
-            _EodHistoryTab(),
+            _visitedTabs.contains(0) ? const _SalesSummaryTab() : const SizedBox.shrink(),
+            _visitedTabs.contains(1) ? const _StockOnHandTab() : const SizedBox.shrink(),
+            _visitedTabs.contains(2) ? const _CustomerBalancesTab() : const SizedBox.shrink(),
+            _visitedTabs.contains(3) ? const _EodHistoryTab() : const SizedBox.shrink(),
           ],
         ),
-      ),
-    );
+      );
   }
 }
+
 
 class _SalesSummaryTab extends StatefulWidget {
   const _SalesSummaryTab();

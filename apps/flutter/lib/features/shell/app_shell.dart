@@ -33,10 +33,21 @@ class _AppShellState extends State<AppShell> {
   late int _currentIndex;
   int _pendingSyncCount = 0;
 
+  // Every tab's screen fires its own API calls from initState (sales
+  // summary, stock, customers, etc.). IndexedStack mounts every child in
+  // its list up front, so without this, opening the app fired all tabs'
+  // network calls at once — including ones the user never looked at — and
+  // Reports in particular duplicated several calls Home had just made.
+  // Tracking which indices have actually been visited lets only-ever-seen
+  // tabs mount a real screen, while still keeping it alive (not rebuilt)
+  // once visited, via IndexedStack.
+  late final Set<int> _visitedIndices;
+
   @override
   void initState() {
     super.initState();
     _currentIndex = widget.initialIndex;
+    _visitedIndices = {_currentIndex};
     _refreshSyncCount();
   }
 
@@ -49,8 +60,21 @@ class _AppShellState extends State<AppShell> {
   }
 
   void _onTabSelected(int index) {
-    setState(() => _currentIndex = index);
+    setState(() {
+      _currentIndex = index;
+      _visitedIndices.add(index);
+    });
     _refreshSyncCount();
+  }
+
+  /// Builds the real screen only for a tab the user has actually visited;
+  /// an unvisited tab gets a cheap placeholder instead, so its initState
+  /// (and the API calls it fires) never runs until the user switches to it.
+  List<Widget> _buildStackChildren(List<_ShellTab> tabs) {
+    return [
+      for (var i = 0; i < tabs.length; i++)
+        _visitedIndices.contains(i) ? tabs[i].screen : const SizedBox.shrink(),
+    ];
   }
 
   @override
@@ -127,7 +151,7 @@ class _AppShellState extends State<AppShell> {
                 Expanded(
                   child: IndexedStack(
                     index: currentIndex,
-                    children: [for (final tab in tabs) tab.screen],
+                    children: _buildStackChildren(tabs),
                   ),
                 ),
               ],
@@ -180,7 +204,7 @@ class _AppShellState extends State<AppShell> {
                 Expanded(
                   child: IndexedStack(
                     index: currentIndex,
-                    children: [for (final tab in tabs) tab.screen],
+                    children: _buildStackChildren(tabs),
                   ),
                 ),
               ],
@@ -193,7 +217,7 @@ class _AppShellState extends State<AppShell> {
         return Scaffold(
           body: IndexedStack(
             index: currentIndex,
-            children: [for (final tab in tabs) tab.screen],
+            children: _buildStackChildren(tabs),
           ),
           bottomNavigationBar: Container(
             decoration: const BoxDecoration(

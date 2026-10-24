@@ -41,9 +41,18 @@
     // copy of THIS file) indefinitely, since a page reload alone doesn't
     // reliably escape it. Safe to run on every load: once there's nothing
     // registered/cached, both calls are instant no-ops.
+    //
+    // firebase-messaging-sw.js is excluded from this sweep — it's a
+    // genuinely-wanted service worker (push notifications, see
+    // lib/core/notification_service.dart), not leftover PWA caching, and
+    // unregistering it on every load would silently break background push
+    // delivery the moment the tab isn't focused.
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.getRegistrations().then((regs) => {
-        for (const reg of regs) reg.unregister();
+        for (const reg of regs) {
+          if (reg.active && reg.active.scriptURL.includes('firebase-messaging-sw.js')) continue;
+          reg.unregister();
+        }
       });
     }
     if (window.caches) {
@@ -52,6 +61,7 @@
       });
     }
   </script>
+
 </head>
 <body>
   <script src="flutter_bootstrap.js" async></script>

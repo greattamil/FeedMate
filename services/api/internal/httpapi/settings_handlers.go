@@ -115,3 +115,35 @@ func (h *SettingsHandlers) UpdateStoreProfile(w http.ResponseWriter, r *http.Req
 	}
 	WriteJSON(w, http.StatusOK, storeProfileToJSON(updated))
 }
+
+func (h *SettingsHandlers) GetNotificationPrefs(w http.ResponseWriter, r *http.Request) {
+	claims, ok := reqctx.Claims(r.Context())
+	if !ok {
+		WriteError(w, r, CodeUnauthorized, "authentication required")
+		return
+	}
+	p, err := h.Settings.GetNotificationPrefs(r.Context(), claims.TenantID)
+	if err != nil {
+		WriteError(w, r, CodeInternal, "failed to load notification preferences: "+err.Error())
+		return
+	}
+	WriteJSON(w, http.StatusOK, p)
+}
+
+func (h *SettingsHandlers) UpdateNotificationPrefs(w http.ResponseWriter, r *http.Request) {
+	claims, ok := reqctx.Claims(r.Context())
+	if !ok {
+		WriteError(w, r, CodeUnauthorized, "authentication required")
+		return
+	}
+	var p settings.NotificationPrefs
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		WriteError(w, r, CodeValidation, "invalid request body")
+		return
+	}
+	if err := h.Settings.UpdateNotificationPrefs(r.Context(), claims.TenantID, claims.UserID, p); err != nil {
+		WriteError(w, r, CodeInternal, "failed to update notification preferences: "+err.Error())
+		return
+	}
+	WriteJSON(w, http.StatusOK, p)
+}

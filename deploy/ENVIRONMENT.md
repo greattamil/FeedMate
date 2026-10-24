@@ -161,12 +161,15 @@ on any provider or self-hosted instance. Moving to a different DB host is a
 pure config change — run the migrations against the new host, update the
 two URLs, redeploy.
 
-## Scheduled jobs: billing cycle & cloud-usage poll
+## Scheduled jobs: billing cycle, cloud-usage poll & overdue sweep
 
-Two background jobs run periodically: the subscription billing cycle
-(marks overdue tenants `PAST_DUE`/`SUSPENDED`) and the cloud-usage poll
-(populates the platform admin's Cloud Usage dashboard). How they're driven
-differs by deployment target — `ENABLE_IN_PROCESS_SCHEDULER` picks which:
+Three background jobs run periodically: the subscription billing cycle
+(marks overdue tenants `PAST_DUE`/`SUSPENDED`), the cloud-usage poll
+(populates the platform admin's Cloud Usage dashboard), and the overdue
+sweep (pushes a `payment_overdue` notification — see
+`internal/domain/notify` — to tenants with customers who still owe and
+haven't paid in a while). How they're driven differs by deployment target
+— `ENABLE_IN_PROCESS_SCHEDULER` picks which:
 
 - **Self-hosted / VPS** (`ENABLE_IN_PROCESS_SCHEDULER=true`, the default):
   an in-process `time.Ticker` goroutine, since the process runs
@@ -177,10 +180,11 @@ differs by deployment target — `ENABLE_IN_PROCESS_SCHEDULER` picks which:
   torn down entirely while idle) and its default CPU throttling (CPU is
   frozen between requests, even on a warm instance) mean an in-process
   ticker only ever fires at container boot, never on its real schedule.
-  Instead, two Google Cloud Scheduler jobs (free tier, provisioned by the
+  Instead, three Google Cloud Scheduler jobs (free tier, provisioned by the
   same deploy script when `EDGE_SHARED_SECRET` and `CRON_SECRET` are set in
-  the shell) call `POST /api/v1/internal/cron/billing-cycle` (every 24h)
-  and `POST /api/v1/internal/cron/cloud-usage-poll` (hourly) directly,
+  the shell) call `POST /api/v1/internal/cron/billing-cycle` (every 24h),
+  `POST /api/v1/internal/cron/cloud-usage-poll` (hourly), and
+  `POST /api/v1/internal/cron/overdue-sweep` (every 24h) directly,
   each carrying both `X-Edge-Secret` and `X-Cron-Secret`. This keeps the
   same "pay only for real work" cost profile scale-to-zero already gives
   the rest of the app — each scheduled hit is just one more cheap request

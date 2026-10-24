@@ -42,6 +42,20 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- Picked only for a push that arrives while the app is backgrounded
+             or fully terminated — Android's own FCM integration auto-displays
+             those via the system tray before any Dart code runs, so there's
+             no NotificationChannels.byId()-style dynamic lookup available
+             yet. A foregrounded app instead shows its own local notification
+             through flutter_local_notifications, which does read the real
+             per-event channel (see notification_service.dart) — this default
+             is only ever a fallback for the one path Dart code can't reach. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="credit_alerts" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@mipmap/ic_launcher" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

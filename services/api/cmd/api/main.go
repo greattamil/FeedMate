@@ -19,16 +19,17 @@ import (
 	"github.com/andipatti/feedmate/services/api/internal/domain/contra"
 	"github.com/andipatti/feedmate/services/api/internal/domain/customer"
 	"github.com/andipatti/feedmate/services/api/internal/domain/devicepairing"
-	"github.com/andipatti/feedmate/services/api/internal/domain/pushnotify"
 	"github.com/andipatti/feedmate/services/api/internal/domain/docseries"
 	"github.com/andipatti/feedmate/services/api/internal/domain/eod"
 	"github.com/andipatti/feedmate/services/api/internal/domain/identity"
 	"github.com/andipatti/feedmate/services/api/internal/domain/location"
 	"github.com/andipatti/feedmate/services/api/internal/domain/masterdata"
+	"github.com/andipatti/feedmate/services/api/internal/domain/notify"
 	"github.com/andipatti/feedmate/services/api/internal/domain/payment"
 	"github.com/andipatti/feedmate/services/api/internal/domain/cloudusage"
 	"github.com/andipatti/feedmate/services/api/internal/domain/platformadmin"
 	"github.com/andipatti/feedmate/services/api/internal/domain/pos"
+	"github.com/andipatti/feedmate/services/api/internal/domain/pushnotify"
 	"github.com/andipatti/feedmate/services/api/internal/domain/procurement"
 	"github.com/andipatti/feedmate/services/api/internal/domain/product"
 	"github.com/andipatti/feedmate/services/api/internal/domain/reports"
@@ -67,7 +68,8 @@ func main() {
 	identitySvc := identity.NewService(db, cfg.JWTSigningKey, cfg.AccessTokenTTL, cfg.RefreshTokenTTL, cfg.BcryptCost)
 	productSvc := product.NewService(db)
 	pushNotifySvc := pushnotify.NewService(db, cfg.FirebaseProjectID)
-	posSvc := pos.NewService(db, pushNotifySvc)
+	notifySvc := notify.NewService(db, pushNotifySvc)
+	posSvc := pos.NewService(db, notifySvc)
 	procurementSvc := procurement.NewService(db)
 	returnsSvc := returns.NewService(db)
 	contraSvc := contra.NewService(db)
@@ -118,7 +120,7 @@ func main() {
 	settingsHandlers := &httpapi.SettingsHandlers{Settings: settingsSvc}
 	platformHandlers := &httpapi.PlatformHandlers{Platform: platformSvc, Subscription: subscriptionSvc}
 	cloudUsageHandlers := &httpapi.CloudUsageHandlers{CloudUsage: cloudUsageSvc}
-	cronHandlers := &httpapi.CronHandlers{Subscription: subscriptionSvc, CloudUsage: cloudUsageSvc, CronSecret: cfg.CronSecret}
+	cronHandlers := &httpapi.CronHandlers{Subscription: subscriptionSvc, CloudUsage: cloudUsageSvc, Customer: customerSvc, Notify: notifySvc, CronSecret: cfg.CronSecret}
 
 	// Full debug-level detail for every error response — not just
 	// CodeInternal — is persisted here so the platform admin's error log
@@ -234,6 +236,7 @@ func main() {
 		// (Cloud Scheduler carries no user JWT).
 		r.Post("/internal/cron/billing-cycle", cronHandlers.RunBillingCycle)
 		r.Post("/internal/cron/cloud-usage-poll", cronHandlers.PollCloudUsage)
+		r.Post("/internal/cron/overdue-sweep", cronHandlers.RunOverdueSweep)
 
 		// Payment webhooks are called by the external provider, which cannot
 		// present one of our bearer tokens — authentication here is the
@@ -350,6 +353,8 @@ func main() {
 
 			r.With(appmw.RequirePermission("tenant.admin")).Get("/settings/store-profile", settingsHandlers.GetStoreProfile)
 			r.With(appmw.RequirePermission("tenant.admin")).Put("/settings/store-profile", settingsHandlers.UpdateStoreProfile)
+			r.With(appmw.RequirePermission("tenant.admin")).Get("/settings/notification-prefs", settingsHandlers.GetNotificationPrefs)
+			r.With(appmw.RequirePermission("tenant.admin")).Put("/settings/notification-prefs", settingsHandlers.UpdateNotificationPrefs)
 
 			r.Get("/customers", customerHandlers.List)
 			r.Get("/customers/{id}", customerHandlers.Get)

@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 
 import 'api_client.dart';
 import 'api_error.dart';
+import 'firebase_options_web.dart';
+import 'push_diagnostics.dart';
 import 'secure_storage.dart';
 
 enum AuthStatus { unknown, loggedOut, loggedIn }
@@ -91,23 +95,55 @@ class AuthSession extends ChangeNotifier {
     }
   }
 
-  /// Best-effort — a device with push notifications unavailable (web,
-  /// Windows, a permission denial, or any FCM/plugin error) must still be
-  /// able to log in and use the app normally. Fire-and-forget: this never
-  /// blocks or fails the login/restore flow that calls it, and every
-  /// failure is swallowed rather than surfaced, since push is a nice-to-have
-  /// (internal/domain/pushnotify's credit-limit alert), not core
-  /// functionality.
+  /// Best-effort — a device with push notifications unavailable (Windows, a
+  /// permission denial, or any FCM/plugin error) must still be able to log
+  /// in and use the app normally. Fire-and-forget: this never blocks or
+  /// fails the login/restore flow that calls it, and every failure is
+  /// swallowed rather than surfaced, since push is a nice-to-have
+  /// (internal/domain/notify's event pushes), not core functionality.
+  /// Runs on Android and web — the two platforms with a registered
+  /// Firebase app (see core/firebase_options_web.dart) — and skips
+  /// Windows, which has none.
+  StreamSubscription<String>? _tokenRefreshSubscription;
+
   Future<void> _registerPushToken() async {
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    if (!kIsWeb && defaultTargetPlatform != TargetPlatform.android) return;
     try {
       final messaging = FirebaseMessaging.instance;
-      await messaging.requestPermission();
-      final token = await messaging.getToken();
-      if (token == null) return;
-      await apiClient.putAuthed('/api/v1/devices/fcm-token', {'token': token});
-    } catch (_) {
-      // Swallowed deliberately — see doc comment above.
+      final settings = await messaging.requestPermission();
+      // Denied/not-determined must not fall through to getToken(): on web
+      // specifically, calling it without permission has been observed to
+      // resolve with an empty string rather than null or a thrown error —
+      // silently "succeeding" with a token that isn't actually usable, and
+      // overwriting any previously-good token server-side with garbage.
+      if (settings.authorizationStatus != AuthorizationStatus.authorized &&
+          settings.authorizationStatus != AuthorizationStatus.provisional) {
+        PushDiagnostics.report(
+          'Notification permission not granted',
+          'browser/OS reported "${settings.authorizationStatus}" — notifications will not work until this is allowed for this site',
+        );
+        return;
+      }
+      final token = await messaging.getToken(vapidKey: kIsWeb ? webVapidKey : null);
+      if (token != null && token.isNotEmpty) {
+        await apiClient.putAuthed('/api/v1/devices/fcm-token', {'token': token});
+      } else {
+        PushDiagnostics.report('Push token registration', 'getToken() returned no usable token (null or empty)');
+      }
+      // FCM can rotate a device's token at any time (app reinstall, data
+      // clear, internal token-rotation policy) — without this, a device
+      // that rotates mid-session would silently stop receiving pushes
+      // until its next login/restoreSession. Subscribed at most once per
+      // process: login() and restoreSession() can both call
+      // _registerPushToken() in the same run, and a second listen on the
+      // same broadcast-less stream would otherwise stack subscriptions.
+      _tokenRefreshSubscription ??= messaging.onTokenRefresh.listen((newToken) {
+        apiClient.putAuthed('/api/v1/devices/fcm-token', {'token': newToken}).catchError((_) => <String, dynamic>{});
+      });
+    } catch (e) {
+      // Never rethrown/blocks login — see doc comment above — but reported
+      // so it's at least visible on-screen instead of silently invisible.
+      PushDiagnostics.report('Push registration failed', e);
     }
   }
 

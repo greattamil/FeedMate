@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Deploys the Go API (services/api) to Cloud Run, grants the two IAM
 # roles the cloud-usage poller (internal/domain/cloudusage) needs to read
-# live GCP Monitoring/Service-Usage data, and provisions the two Cloud
-# Scheduler jobs that drive the billing cycle and cloud-usage poll — see
+# live GCP Monitoring/Service-Usage data, and provisions the three Cloud
+# Scheduler jobs that drive the billing cycle, cloud-usage poll, and
+# overdue-payment sweep — see
 # services/api/internal/httpapi/cron_handlers.go's doc comment for why
 # Cloud Scheduler is used instead of relying solely on the in-process
 # ticker (it silently never fires on Cloud Run's scale-to-zero while idle).
@@ -80,14 +81,19 @@ if [ -n "${EDGE_SHARED_SECRET:-}" ] && [ -n "${CRON_SECRET:-}" ]; then
 
   for JOB in \
     "feedmate-billing-cycle|every 24 hours|$SERVICE_URL/api/v1/internal/cron/billing-cycle" \
-    "feedmate-cloud-usage-poll|every 1 hours|$SERVICE_URL/api/v1/internal/cron/cloud-usage-poll"
+    "feedmate-cloud-usage-poll|every 1 hours|$SERVICE_URL/api/v1/internal/cron/cloud-usage-poll" \
+    "feedmate-overdue-sweep|every 24 hours|$SERVICE_URL/api/v1/internal/cron/overdue-sweep"
   do
     IFS='|' read -r NAME SCHEDULE URL <<< "$JOB"
     echo "Provisioning Cloud Scheduler job $NAME ..."
     if gcloud scheduler jobs describe "$NAME" --project="$GCP_PROJECT_ID" --location="$GCP_REGION" >/dev/null 2>&1; then
+      # `update http` takes --update-headers (not --headers, which only
+      # `create http` accepts) — found the hard way: the first run of this
+      # script against an already-provisioned job failed with "unrecognized
+      # arguments: --headers=...".
       gcloud scheduler jobs update http "$NAME" \
         --project="$GCP_PROJECT_ID" --location="$GCP_REGION" \
-        --schedule="$SCHEDULE" --uri="$URL" --http-method=POST --headers="$HEADERS" --quiet
+        --schedule="$SCHEDULE" --uri="$URL" --http-method=POST --update-headers="$HEADERS" --quiet
     else
       gcloud scheduler jobs create http "$NAME" \
         --project="$GCP_PROJECT_ID" --location="$GCP_REGION" \

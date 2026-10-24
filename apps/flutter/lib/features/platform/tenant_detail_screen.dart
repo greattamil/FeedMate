@@ -33,6 +33,15 @@ class TenantDetailScreen extends StatefulWidget {
 // list is just a convenience — SetTenantFeature accepts any code.
 const _knownFeatureCodes = ['advanced_reports', 'multi_location', 'sms_reminders', 'whatsapp_invoices'];
 
+// Kept out of _knownFeatureCodes above (and given its own dedicated card,
+// not folded into the generic list) since this is the full-control master
+// switch the platform admin asked for, not just another optional module —
+// see internal/domain/notify.Service's featureCode doc comment server-side.
+// A missing tenant_features row means enabled (true), matching that
+// package's "no row = not disabled" default exactly — every tenant that
+// has never been touched by a platform admin keeps receiving pushes.
+const _pushNotificationsFeatureCode = 'push_notifications';
+
 class _TenantDetailScreenState extends State<TenantDetailScreen> with SingleTickerProviderStateMixin {
   TenantDetail? _detail;
   bool _loading = true;
@@ -306,6 +315,29 @@ class _TenantDetailScreenState extends State<TenantDetailScreen> with SingleTick
               _kv('App name', detail.appDisplayName ?? '(using platform default)'),
               _kv('Logo URL', detail.logoUrl ?? '(none)'),
               _kv('Primary color', detail.primaryColor ?? '(using platform default)'),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        _card(
+          title: 'Push Notifications',
+          icon: Icons.notifications_active_outlined,
+          iconColor: AppColors.primary,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Master switch for this tenant. Turning this off blocks every push — sale, credit, stock, and overdue alerts — regardless of what the shop has chosen in its own Settings screen.',
+                style: AppTypography.caption.copyWith(color: AppColors.textSecondary),
+              ),
+              SwitchListTile(
+                key: const Key('tenant_feature_switch_push_notifications'),
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Push notifications enabled', style: AppTypography.body),
+                value: detail.features[_pushNotificationsFeatureCode] ?? true,
+                activeThumbColor: AppColors.primary,
+                onChanged: (v) => _toggleFeature(_pushNotificationsFeatureCode, v),
+              ),
             ],
           ),
         ),

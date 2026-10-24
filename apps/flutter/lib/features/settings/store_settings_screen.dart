@@ -66,13 +66,63 @@ class _StoreSettingsScreenState extends State<StoreSettingsScreen> {
   String? _appVersionLabel;
   bool _checkingForUpdate = false;
 
+  NotificationPrefs? _notificationPrefs;
+  bool _notificationPrefsLoading = true;
+  bool _notificationPrefsSaving = false;
+
   @override
   void initState() {
     super.initState();
     _load();
+    _loadNotificationPrefs();
     PackageInfo.fromPlatform().then((info) {
       if (mounted) setState(() => _appVersionLabel = 'v${info.version} (${info.buildNumber})');
     });
+  }
+
+  Future<void> _loadNotificationPrefs() async {
+    try {
+      final api = StoreSettingsApi(context.read<ApiClient>());
+      final prefs = await api.getNotificationPrefs();
+      if (!mounted) return;
+      setState(() {
+        _notificationPrefs = prefs;
+        _notificationPrefsLoading = false;
+      });
+    } catch (e, st) {
+      // A failed load here must never block the rest of the settings
+      // screen — notification preferences are an independent resource
+      // from the store profile above, so this card just stays hidden
+      // rather than erroring the whole screen.
+      debugPrint('StoreSettingsScreen._loadNotificationPrefs failed: $e\n$st');
+      if (!mounted) return;
+      setState(() => _notificationPrefsLoading = false);
+    }
+  }
+
+  Future<void> _saveNotificationPrefs() async {
+    final prefs = _notificationPrefs;
+    if (prefs == null) return;
+    setState(() => _notificationPrefsSaving = true);
+    try {
+      final api = StoreSettingsApi(context.read<ApiClient>());
+      final saved = await api.updateNotificationPrefs(prefs);
+      if (!mounted) return;
+      setState(() {
+        _notificationPrefs = saved;
+        _notificationPrefsSaving = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Notification preferences saved')));
+    } on ApiError catch (e) {
+      if (!mounted) return;
+      setState(() => _notificationPrefsSaving = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    } catch (e, st) {
+      debugPrint('StoreSettingsScreen._saveNotificationPrefs failed: $e\n$st');
+      if (!mounted) return;
+      setState(() => _notificationPrefsSaving = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Save failed: $e')));
+    }
   }
 
   bool get _supportsInAppUpdate => !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
@@ -334,6 +384,94 @@ class _StoreSettingsScreenState extends State<StoreSettingsScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _notificationSwitch({
+    required Key key,
+    required String title,
+    required String subtitle,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+  }) {
+    return SwitchListTile(
+      key: key,
+      contentPadding: EdgeInsets.zero,
+      title: Text(title, style: AppTypography.body),
+      subtitle: Text(subtitle, style: AppTypography.caption.copyWith(color: AppColors.textSecondary)),
+      value: value,
+      onChanged: onChanged,
+    );
+  }
+
+  Widget _notificationPrefsCard() {
+    final prefs = _notificationPrefs!;
+    void update(NotificationPrefs Function(NotificationPrefs) apply) {
+      setState(() => _notificationPrefs = apply(prefs));
+    }
+
+    return _sectionCard(
+      title: 'Notification Preferences',
+      subtitle: 'Choose which events push a notification to this shop\'s devices',
+      icon: Icons.notifications_active_rounded,
+      iconColor: const Color(0xFFDB2777),
+      iconGradient: AppColors.gradientPurple,
+      children: [
+        _notificationSwitch(
+          key: const Key('notify_sale_completed_switch'),
+          title: 'Sale completed',
+          subtitle: 'Every finalized sale, cash or credit',
+          value: prefs.saleCompleted,
+          onChanged: (v) => update((p) => p.copyWith(saleCompleted: v)),
+        ),
+        _notificationSwitch(
+          key: const Key('notify_credit_sale_switch'),
+          title: 'Credit sale',
+          subtitle: 'A sale billed to a customer\'s account',
+          value: prefs.creditSale,
+          onChanged: (v) => update((p) => p.copyWith(creditSale: v)),
+        ),
+        _notificationSwitch(
+          key: const Key('notify_credit_limit_breach_switch'),
+          title: 'Credit limit exceeded',
+          subtitle: 'A credit sale pushed a customer over their limit',
+          value: prefs.creditLimitBreach,
+          onChanged: (v) => update((p) => p.copyWith(creditLimitBreach: v)),
+        ),
+        _notificationSwitch(
+          key: const Key('notify_low_stock_switch'),
+          title: 'Low stock',
+          subtitle: 'A product drops to or below its reorder level',
+          value: prefs.lowStock,
+          onChanged: (v) => update((p) => p.copyWith(lowStock: v)),
+        ),
+        _notificationSwitch(
+          key: const Key('notify_out_of_stock_switch'),
+          title: 'Out of stock',
+          subtitle: 'A product runs out completely',
+          value: prefs.outOfStock,
+          onChanged: (v) => update((p) => p.copyWith(outOfStock: v)),
+        ),
+        _notificationSwitch(
+          key: const Key('notify_payment_overdue_switch'),
+          title: 'Payment overdue',
+          subtitle: 'Daily reminder of customers who still owe and haven\'t paid in a while',
+          value: prefs.paymentOverdue,
+          onChanged: (v) => update((p) => p.copyWith(paymentOverdue: v)),
+        ),
+        const SizedBox(height: 4),
+        Align(
+          alignment: Alignment.centerRight,
+          child: FilledButton(
+            key: const Key('save_notification_prefs_button'),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.primary),
+            onPressed: _notificationPrefsSaving ? null : _saveNotificationPrefs,
+            child: _notificationPrefsSaving
+                ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                : const Text('Save Notification Preferences'),
+          ),
+        ),
+      ],
     );
   }
 
@@ -616,6 +754,13 @@ class _StoreSettingsScreenState extends State<StoreSettingsScreen> {
                       ),
 
                       const SizedBox(height: 10),
+
+                      // Notification Preferences — a separate resource from
+                      // the store profile above (its own GET/PUT endpoint),
+                      // so it has its own save action rather than riding
+                      // along with "Save Store Settings".
+                      if (!_notificationPrefsLoading && _notificationPrefs != null)
+                        _notificationPrefsCard(),
 
                       // Save Action Button
                       Container(

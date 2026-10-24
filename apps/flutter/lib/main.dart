@@ -3,6 +3,7 @@ import 'dart:ui' show PlatformDispatcher;
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -11,6 +12,9 @@ import 'core/api_client.dart';
 import 'core/app_update_service.dart';
 import 'core/auth_session.dart';
 import 'core/branding_provider.dart';
+import 'core/firebase_options_web.dart';
+import 'core/notification_service.dart';
+import 'core/push_diagnostics.dart';
 import 'core/widgets/update_prompt_dialog.dart';
 import 'core/in_memory_local_db.dart';
 import 'core/local_db.dart';
@@ -60,6 +64,13 @@ String _defaultDownloadsBaseUrl() => const String.fromEnvironment('DOWNLOADS_BAS
 /// widget tree.
 final rootScaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
 
+/// Lets NotificationService push a screen from a notification tap without
+/// a screen-local BuildContext — the tap can arrive while the app is fully
+/// backgrounded or freshly cold-started, long before any screen's own
+/// context would exist. Same rationale as rootScaffoldMessengerKey above.
+final rootNavigatorKey = GlobalKey<NavigatorState>();
+
+
 /// Before this, an uncaught exception anywhere in the app (outside a
 /// screen's own try/catch) vanished into the browser/native console with
 /// zero on-screen indication — a user just saw "nothing happened" and had
@@ -90,12 +101,37 @@ void main() async {
     return true;
   };
 
-  // Push notifications (internal/domain/pushnotify) are Android-only for
-  // now — google-services.json only configures that platform, and
-  // Firebase.initializeApp() with no explicit FirebaseOptions would throw
-  // on web/Windows, which have no Firebase project configured at all.
-  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-    await Firebase.initializeApp();
+  // Push notifications (internal/domain/pushnotify) run on Android and web
+  // — the two platforms with a registered Firebase app (see
+  // core/firebase_options_web.dart's doc comment for why web needs
+  // explicit FirebaseOptions, unlike Android's auto-configured
+  // google-services.json). Windows has no Firebase project configured at
+  // all and stays excluded.
+  //
+  // Wrapped in try/catch deliberately: this runs before runApp(), so an
+  // unhandled exception here (a browser blocking third-party cookies, a
+  // transient network blip reaching Firebase, a service-worker
+  // registration failure, anything) would abort main() entirely and the
+  // user would see a blank page with no way to even log in — the exact
+  // outage this caused once already on web. Push is explicitly a
+  // nice-to-have everywhere else in this codebase (see
+  // auth_session.dart's _registerPushToken doc comment); it must never be
+  // able to take the whole app down.
+  try {
+    if (kIsWeb) {
+      await Firebase.initializeApp(options: webFirebaseOptions);
+      await NotificationService.instance.init(rootNavigatorKey);
+    } else if (defaultTargetPlatform == TargetPlatform.android) {
+      await Firebase.initializeApp();
+      FirebaseMessaging.onBackgroundMessage(firebaseBackgroundMessageHandler);
+      await NotificationService.instance.init(rootNavigatorKey);
+    }
+  } catch (e, st) {
+    debugPrint('Push notification setup failed (app continues without it): $e\n$st');
+    // No ScaffoldMessenger exists yet this early (runApp() hasn't run), so
+    // _showGlobalError can't display anything here — PushDiagnostics holds
+    // the message until _SessionGate can show it, once one does.
+    PushDiagnostics.report('Push setup failed', e);
   }
 
   final storage = SecureStorage();
@@ -160,6 +196,7 @@ class FeedMateApp extends StatelessWidget {
         ],
       ],
       child: MaterialApp(
+        navigatorKey: rootNavigatorKey,
         scaffoldMessengerKey: rootScaffoldMessengerKey,
         onGenerateTitle: (context) => context.watch<BrandingProvider>().appName,
         theme: AppTheme.lightTheme,
@@ -226,6 +263,34 @@ class _SessionGateState extends State<_SessionGate> {
     // (see PlatformApiClient's doc comment), so both are checked here and
     // whichever one has a valid persisted session wins the initial route.
     context.read<PlatformApiClient>().restoreSession();
+
+    PushDiagnostics.lastError.addListener(_showPushError);
+    // Covers a failure that already happened before this listener was
+    // attached (main()'s own Firebase.initializeApp() call, which runs
+    // before _SessionGate exists at all).
+    if (PushDiagnostics.lastError.value != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _showPushError());
+    }
+  }
+
+  void _showPushError() {
+    final message = PushDiagnostics.lastError.value;
+    if (message == null) return;
+    PushDiagnostics.lastError.value = null; // show each failure once
+    rootScaffoldMessengerKey.currentState?.showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.orange.shade800,
+        duration: const Duration(seconds: 20),
+        action: SnackBarAction(label: 'Dismiss', textColor: Colors.white, onPressed: () {}),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    PushDiagnostics.lastError.removeListener(_showPushError);
+    super.dispose();
   }
 
   /// Fires once per app launch, the first time the shop login screen is

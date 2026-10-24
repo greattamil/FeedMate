@@ -66,6 +66,18 @@ func nullIfEmpty(s string) *string {
 	return &s
 }
 
+// RichMessage is a push with deep-link data and an Android notification
+// channel, on top of the plain title/body every message has. ChannelID
+// must match a channel the Flutter client creates at startup (see
+// lib/core/notification_service.dart) — an unknown channel ID just falls
+// back to Android's default channel rather than failing the send.
+type RichMessage struct {
+	Title     string
+	Body      string
+	Data      map[string]string
+	ChannelID string
+}
+
 // SendToTenant pushes the same title/body to every ACTIVE device the
 // tenant has that's registered a token. Best-effort per device — one
 // device's failure (a stale/unregistered token, a transient FCM error) is
@@ -73,6 +85,14 @@ func nullIfEmpty(s string) *string {
 // cloudusage.PollAll's "one provider failing never blocks the rest"
 // convention. Returns how many sends succeeded.
 func (s *Service) SendToTenant(ctx context.Context, tenantID uuid.UUID, title, body string) (int, error) {
+	return s.SendToTenantRich(ctx, tenantID, RichMessage{Title: title, Body: body})
+}
+
+// SendToTenantRich is SendToTenant with a deep-link data payload and a
+// notification channel — every event in internal/domain/notify goes
+// through this; SendToTenant is now just a thin convenience wrapper for
+// plain title/body callers.
+func (s *Service) SendToTenantRich(ctx context.Context, tenantID uuid.UUID, msg RichMessage) (int, error) {
 	if s.gcpProjectID == "" {
 		return 0, nil
 	}
@@ -110,7 +130,7 @@ func (s *Service) SendToTenant(ctx context.Context, tenantID uuid.UUID, title, b
 
 	sent := 0
 	for _, token := range tokens {
-		if err := s.sendOne(ctx, accessToken, token, title, body); err != nil {
+		if err := s.sendOne(ctx, accessToken, token, msg); err != nil {
 			slog.Warn("pushnotify: send failed", "error", err)
 			continue
 		}
@@ -119,16 +139,27 @@ func (s *Service) SendToTenant(ctx context.Context, tenantID uuid.UUID, title, b
 	return sent, nil
 }
 
-func (s *Service) sendOne(ctx context.Context, accessToken, deviceToken, title, body string) error {
-	payload := map[string]interface{}{
-		"message": map[string]interface{}{
-			"token": deviceToken,
-			"notification": map[string]string{
-				"title": title,
-				"body":  body,
-			},
+func (s *Service) sendOne(ctx context.Context, accessToken, deviceToken string, msg RichMessage) error {
+	message := map[string]interface{}{
+		"token": deviceToken,
+		"notification": map[string]string{
+			"title": msg.Title,
+			"body":  msg.Body,
 		},
 	}
+	if len(msg.Data) > 0 {
+		message["data"] = msg.Data
+	}
+	if msg.ChannelID != "" {
+		message["android"] = map[string]interface{}{
+			"priority": "high",
+			"notification": map[string]string{
+				"channel_id": msg.ChannelID,
+				"sound":      "default",
+			},
+		}
+	}
+	payload := map[string]interface{}{"message": message}
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return err

@@ -16,8 +16,8 @@ import (
 	"github.com/andipatti/feedmate/services/api/internal/domain/accounting"
 	"github.com/andipatti/feedmate/services/api/internal/domain/customer"
 	"github.com/andipatti/feedmate/services/api/internal/domain/inventory"
+	"github.com/andipatti/feedmate/services/api/internal/domain/notify"
 	"github.com/andipatti/feedmate/services/api/internal/domain/product"
-	"github.com/andipatti/feedmate/services/api/internal/domain/pushnotify"
 	"github.com/andipatti/feedmate/services/api/internal/domain/settings"
 	"github.com/andipatti/feedmate/services/api/internal/reqctx"
 )
@@ -29,8 +29,8 @@ var (
 )
 
 type Service struct {
-	db         *dbctx.DB
-	pushNotify *pushnotify.Service
+	db     *dbctx.DB
+	notify *notify.Service
 }
 
 // creditLimitBreachInfo is captured inside FinalizeInvoice's transaction
@@ -41,8 +41,8 @@ type creditLimitBreachInfo struct {
 	Limit     decimal.Decimal
 }
 
-func NewService(db *dbctx.DB, pushNotify *pushnotify.Service) *Service {
-	return &Service{db: db, pushNotify: pushNotify}
+func NewService(db *dbctx.DB, notifySvc *notify.Service) *Service {
+	return &Service{db: db, notify: notifySvc}
 }
 
 // InvoiceForReturn is everything a cashier needs to pick which lines of a
@@ -204,6 +204,18 @@ func (s *Service) FinalizeInvoice(ctx context.Context, tenantID, deviceID, userI
 
 	var result FinalizeResult
 	var creditLimitBreach *creditLimitBreachInfo
+	// Captured inside the transaction (where they're already in scope) and
+	// read after it commits, to drive the fire-and-forget notify.Dispatch
+	// calls at the tail of this function — never anything these pushes
+	// could themselves affect, so reading them post-commit is safe.
+	var saleCreditAmount decimal.Decimal
+	var saleCustomerName string
+	type touchedProduct struct {
+		id   uuid.UUID
+		name string
+	}
+	var touchedProducts []touchedProduct
+	seenProducts := map[uuid.UUID]bool{}
 	err := s.db.WithTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
 		// --- Idempotency: a retried finalize from the same device with the
 		// same client_transaction_id returns the original result untouched. ---
@@ -462,6 +474,10 @@ func (s *Service) FinalizeInvoice(ctx context.Context, tenantID, deviceID, userI
 					return fmt.Errorf("post stock movement: %w", err)
 				}
 			}
+			if !seenProducts[pl.product.ID] && pl.product.StockAlertEnabled {
+				seenProducts[pl.product.ID] = true
+				touchedProducts = append(touchedProducts, touchedProduct{id: pl.product.ID, name: pl.product.Name})
+			}
 		}
 
 		for _, t := range req.Tenders {
@@ -538,6 +554,12 @@ func (s *Service) FinalizeInvoice(ctx context.Context, tenantID, deviceID, userI
 		}
 
 		result = FinalizeResult{InvoiceID: header.ID, InvoiceNumber: invoiceNumber, GrandTotal: grandTotal}
+		saleCreditAmount = creditAmount
+		if customerName != nil {
+			saleCustomerName = *customerName
+		} else {
+			saleCustomerName = "a walk-in customer"
+		}
 		return nil
 	})
 	if err != nil {
@@ -545,24 +567,87 @@ func (s *Service) FinalizeInvoice(ctx context.Context, tenantID, deviceID, userI
 	}
 
 	// Fire-and-forget: a push notification failing or being slow must
-	// never affect the sale that already committed successfully. Uses
-	// its own short-lived context, not ctx, which ends the moment this
-	// HTTP response is written — matching the convention established by
+	// never affect the sale that already committed successfully. Uses its
+	// own short-lived context, not ctx, which ends the moment this HTTP
+	// response is written — matching the convention established by
 	// subscription/cloudusage's background jobs (one failure logged and
-	// skipped, never propagated to the caller).
-	if s.pushNotify != nil && creditLimitBreach != nil {
+	// skipped, never propagated to the caller). notify.Dispatch itself
+	// checks the platform-admin master switch and the tenant's own
+	// per-event preference before sending anything.
+	if s.notify != nil && !result.Duplicate {
 		go func() {
 			pushCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
-			over := creditLimitBreach.Projected.Sub(creditLimitBreach.Limit)
-			body := fmt.Sprintf("A credit sale pushed a customer ₹%s over their credit limit of ₹%s", over, creditLimitBreach.Limit)
-			if _, err := s.pushNotify.SendToTenant(pushCtx, tenantID, "Credit limit exceeded", body); err != nil {
-				slog.Warn("pos: credit-limit-breach push failed", "error", err)
+
+			invoiceData := map[string]string{
+				"type":       "invoice",
+				"invoice_id": result.InvoiceID.String(),
+			}
+			switch {
+			case creditLimitBreach != nil:
+				over := creditLimitBreach.Projected.Sub(creditLimitBreach.Limit)
+				invoiceData["customer_name"] = saleCustomerName
+				invoiceData["projected"] = creditLimitBreach.Projected.String()
+				invoiceData["limit"] = creditLimitBreach.Limit.String()
+				invoiceData["over"] = over.String()
+				s.notify.Dispatch(pushCtx, tenantID, notify.EventCreditLimitBreach, invoiceData)
+			case saleCreditAmount.GreaterThan(decimal.Zero):
+				invoiceData["customer_name"] = saleCustomerName
+				invoiceData["invoice_number"] = result.InvoiceNumber
+				invoiceData["amount"] = saleCreditAmount.String()
+				s.notify.Dispatch(pushCtx, tenantID, notify.EventCreditSale, invoiceData)
+			default:
+				invoiceData["invoice_number"] = result.InvoiceNumber
+				invoiceData["amount"] = result.GrandTotal.String()
+				s.notify.Dispatch(pushCtx, tenantID, notify.EventSaleCompleted, invoiceData)
+			}
+
+			for _, tp := range touchedProducts {
+				onHand, reorderLevel, err := stockLevelForProduct(pushCtx, s.db, tenantID, tp.id)
+				if err != nil {
+					slog.Warn("pos: stock-level lookup for low/out-of-stock push failed", "product_id", tp.id, "error", err)
+					continue
+				}
+				productData := map[string]string{
+					"type":         "product",
+					"product_id":   tp.id.String(),
+					"product_name": tp.name,
+					"on_hand":      onHand.String(),
+				}
+				switch {
+				case onHand.LessThanOrEqual(decimal.Zero):
+					s.notify.Dispatch(pushCtx, tenantID, notify.EventOutOfStock, productData)
+				case reorderLevel != nil && onHand.LessThanOrEqual(*reorderLevel):
+					productData["reorder_level"] = reorderLevel.String()
+					s.notify.Dispatch(pushCtx, tenantID, notify.EventLowStock, productData)
+				}
 			}
 		}()
 	}
 
 	return &result, nil
+}
+
+// stockLevelForProduct aggregates a product's total on_hand across every
+// active batch, same shape as reports.GetStockHealth's own aggregate
+// query — used here, post-commit, to detect whether a just-finalized
+// sale crossed a product into low/out-of-stock. A fresh short read
+// rather than threading the in-transaction allocation totals through,
+// since a sale can allocate from multiple batches/locations and the
+// authoritative total only exists as this aggregate.
+func stockLevelForProduct(ctx context.Context, db *dbctx.DB, tenantID, productID uuid.UUID) (decimal.Decimal, *decimal.Decimal, error) {
+	var onHand decimal.Decimal
+	var reorderLevel *decimal.Decimal
+	err := db.WithTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `
+			SELECT p.reorder_level, COALESCE(SUM(b.available_qty), 0) AS on_hand
+			FROM products p
+			LEFT JOIN batches b ON b.product_id = p.id AND b.status = 'ACTIVE'
+			WHERE p.id = $1
+			GROUP BY p.id, p.reorder_level
+		`, productID).Scan(&reorderLevel, &onHand)
+	})
+	return onHand, reorderLevel, err
 }
 
 func tenderAccountCode(method string) (code, name string) {

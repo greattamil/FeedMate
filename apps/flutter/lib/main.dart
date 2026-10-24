@@ -8,8 +8,10 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'core/api_client.dart';
+import 'core/app_update_service.dart';
 import 'core/auth_session.dart';
 import 'core/branding_provider.dart';
+import 'core/widgets/update_prompt_dialog.dart';
 import 'core/in_memory_local_db.dart';
 import 'core/local_db.dart';
 import 'core/local_db_sqlcipher.dart';
@@ -18,6 +20,7 @@ import 'core/sync_service.dart';
 import 'core/theme/app_theme.dart';
 import 'features/auth/login_screen.dart';
 import 'features/platform/platform_api_client.dart';
+import 'features/platform/platform_shell.dart';
 import 'features/pos/cart_model.dart';
 import 'features/pos/product_repository.dart';
 import 'features/shell/app_shell.dart';
@@ -43,6 +46,13 @@ String _defaultApiBaseUrl() {
   if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) return 'http://10.0.2.2:8081';
   return 'http://127.0.0.1:8081';
 }
+
+/// Where AppUpdateService looks for version.json and the APK it points at
+/// (see deploy/cloudflare/upload-downloads.sh). No safe local-dev default
+/// makes sense here the way API_BASE_URL has one — an empty string just
+/// means AppUpdateService.checkForUpdate no-ops, which is correct for any
+/// build that didn't set --dart-define=DOWNLOADS_BASE_URL=...
+String _defaultDownloadsBaseUrl() => const String.fromEnvironment('DOWNLOADS_BASE_URL');
 
 /// Lets any part of the app show a SnackBar without needing a screen-local
 /// BuildContext — used by the global error handlers below, which by
@@ -90,11 +100,17 @@ void main() async {
 
   final storage = SecureStorage();
   final localDb = _supportsEncryptedLocalDb ? await openEncryptedLocalDatabase(storage) : InMemoryLocalDatabase();
-  runApp(FeedMateApp(apiBaseUrl: _defaultApiBaseUrl(), storageOverride: storage, localDbOverride: localDb));
+  runApp(FeedMateApp(
+    apiBaseUrl: _defaultApiBaseUrl(),
+    downloadsBaseUrl: _defaultDownloadsBaseUrl(),
+    storageOverride: storage,
+    localDbOverride: localDb,
+  ));
 }
 
 class FeedMateApp extends StatelessWidget {
   final String apiBaseUrl;
+  final String downloadsBaseUrl;
 
   /// Overridable for tests (e.g. integration_test needs to pre-seed a known
   /// device UUID that matches a fixture already registered in the backend,
@@ -110,7 +126,13 @@ class FeedMateApp extends StatelessWidget {
   /// screen needs it.
   final LocalDatabase? localDbOverride;
 
-  const FeedMateApp({super.key, required this.apiBaseUrl, this.storageOverride, this.localDbOverride});
+  const FeedMateApp({
+    super.key,
+    required this.apiBaseUrl,
+    this.downloadsBaseUrl = '',
+    this.storageOverride,
+    this.localDbOverride,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -130,6 +152,7 @@ class FeedMateApp extends StatelessWidget {
         ChangeNotifierProvider<BrandingProvider>(
           create: (_) => BrandingProvider(client: apiClient, storage: storage)..refresh(),
         ),
+        Provider<AppUpdateService>(create: (_) => AppUpdateService(downloadsBaseUrl: downloadsBaseUrl)),
         if (localDb != null) ...[
           Provider<LocalDatabase>.value(value: localDb),
           Provider<ProductRepository>(create: (_) => ProductRepository(client: apiClient, localDb: localDb)),
@@ -192,21 +215,61 @@ class _SessionGate extends StatefulWidget {
 }
 
 class _SessionGateState extends State<_SessionGate> {
+  bool _updateChecked = false;
+
   @override
   void initState() {
     super.initState();
     context.read<AuthSession>().restoreSession();
+    // Restored independently of the tenant session above — a platform
+    // admin and a shop's tenant login are two entirely separate sessions
+    // (see PlatformApiClient's doc comment), so both are checked here and
+    // whichever one has a valid persisted session wins the initial route.
+    context.read<PlatformApiClient>().restoreSession();
+  }
+
+  /// Fires once per app launch, the first time the shop login screen is
+  /// actually shown — a silent, best-effort check (see
+  /// AppUpdateService.checkForUpdate's doc comment on why it never surfaces
+  /// an error). Deliberately not awaited by build(): a slow or failed check
+  /// must never delay getting into the app.
+  void _maybeCheckForUpdate() {
+    if (_updateChecked) return;
+    _updateChecked = true;
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    final service = context.read<AppUpdateService>();
+    service.checkForUpdate().then((info) {
+      if (info == null || !mounted) return;
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => UpdatePromptDialog(info: info, service: service),
+      );
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final session = context.watch<AuthSession>();
+    final platform = context.watch<PlatformApiClient>();
+
+    if (session.status == AuthStatus.unknown || platform.status == PlatformAuthStatus.unknown) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    // A restored platform-admin session takes priority: if an admin was on
+    // the platform-admin area and refreshes, they land back there, not on
+    // the tenant login screen, even if a tenant session also happens to be
+    // persisted on the same browser/device.
+    if (platform.status == PlatformAuthStatus.loggedIn) {
+      return const PlatformShell();
+    }
     switch (session.status) {
       case AuthStatus.unknown:
         return const Scaffold(body: Center(child: CircularProgressIndicator()));
       case AuthStatus.loggedOut:
         return const LoginScreen();
       case AuthStatus.loggedIn:
+        WidgetsBinding.instance.addPostFrameCallback((_) => _maybeCheckForUpdate());
         return const AppShell();
     }
   }

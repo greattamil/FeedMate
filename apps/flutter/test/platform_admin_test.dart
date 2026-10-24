@@ -25,7 +25,7 @@ http.Response _jsonOk(Map<String, dynamic> body) =>
     http.Response(jsonEncode(body), 200, headers: {'content-type': 'application/json; charset=utf-8'});
 
 Widget _wrap({required http.Client httpClient, required Widget child, PlatformApiClient? client, bool loggedIn = true}) {
-  final resolvedClient = client ?? PlatformApiClient(baseUrl: 'http://test.invalid', httpClient: httpClient);
+  final resolvedClient = client ?? PlatformApiClient(baseUrl: 'http://test.invalid', httpClient: httpClient, store: InMemoryKeyValueStore());
   if (loggedIn && client == null) {
     resolvedClient.seedTokensForTesting(accessToken: 'test-access-token', refreshToken: 'test-refresh-token');
   }
@@ -408,7 +408,7 @@ void main() {
       if (request.url.path == '/api/v1/platform/auth/logout') return http.Response('', 204);
       return http.Response('not found', 404);
     });
-    final platformClient = PlatformApiClient(baseUrl: 'http://test.invalid', httpClient: client);
+    final platformClient = PlatformApiClient(baseUrl: 'http://test.invalid', httpClient: client, store: InMemoryKeyValueStore());
     await platformClient.login('superadmin', 'SuperAdmin123!');
 
     await tester.pumpWidget(_wrap(httpClient: client, client: platformClient, child: const PlatformShell()));

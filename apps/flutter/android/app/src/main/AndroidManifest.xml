@@ -10,6 +10,11 @@
          makes in auth_session.dart — without it, push notifications never
          display even if the token registers successfully. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- Lets this sideloaded app install a downloaded update APK via
+         Android's own package installer (app_update_service.dart) — Android
+         shows a one-time "allow installs from this source" system prompt
+         automatically if not already granted, no extra code needed here. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
 
     <application
         android:label="FeedMate"

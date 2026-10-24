@@ -1,0 +1,3 @@
+# Scratch file upload-downloads.sh writes version.json to before uploading
+# to R2 — never meant to be committed.
+.version.json.tmp

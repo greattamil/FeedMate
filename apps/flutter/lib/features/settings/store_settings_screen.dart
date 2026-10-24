@@ -2,14 +2,18 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/api_client.dart';
 import '../../core/api_error.dart';
+import '../../core/app_update_service.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_decorations.dart';
 import '../../core/theme/app_typography.dart';
+import '../../core/widgets/update_prompt_dialog.dart';
 import 'store_settings_api.dart';
 
 /// Server-side cap on the stored data URI length (settings.maxLogoDataURILen
@@ -59,10 +63,31 @@ class _StoreSettingsScreenState extends State<StoreSettingsScreen> {
   /// data: URI staged from a freshly picked image.
   String? _pendingLogoDataUri;
 
+  String? _appVersionLabel;
+  bool _checkingForUpdate = false;
+
   @override
   void initState() {
     super.initState();
     _load();
+    PackageInfo.fromPlatform().then((info) {
+      if (mounted) setState(() => _appVersionLabel = 'v${info.version} (${info.buildNumber})');
+    });
+  }
+
+  bool get _supportsInAppUpdate => !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+
+  Future<void> _checkForUpdateNow() async {
+    setState(() => _checkingForUpdate = true);
+    final service = context.read<AppUpdateService>();
+    final info = await service.checkForUpdate(ignoreDismissed: true);
+    if (!mounted) return;
+    setState(() => _checkingForUpdate = false);
+    if (info == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("You're on the latest version")));
+      return;
+    }
+    showDialog(context: context, barrierDismissible: false, builder: (_) => UpdatePromptDialog(info: info, service: service));
   }
 
   @override
@@ -619,6 +644,35 @@ class _StoreSettingsScreenState extends State<StoreSettingsScreen> {
                         ),
                       ),
                       const SizedBox(height: 24),
+                      if (_supportsInAppUpdate) ...[
+                        Container(
+                          padding: const EdgeInsets.all(18),
+                          decoration: AppDecorations.card(),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.system_update_rounded, color: AppColors.textSecondary, size: 22),
+                              const SizedBox(width: 14),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text('App version', style: AppTypography.bodySecondary),
+                                    Text(_appVersionLabel ?? '…', style: AppTypography.body.copyWith(fontWeight: FontWeight.w600)),
+                                  ],
+                                ),
+                              ),
+                              TextButton(
+                                key: const Key('check_for_updates_button'),
+                                onPressed: _checkingForUpdate ? null : _checkForUpdateNow,
+                                child: _checkingForUpdate
+                                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                                    : const Text('Check for Updates'),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                      ],
                     ],
                   ),
                 ),

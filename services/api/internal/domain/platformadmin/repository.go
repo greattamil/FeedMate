@@ -46,6 +46,21 @@ func CreateSession(ctx context.Context, tx pgx.Tx, platformAdminID uuid.UUID, re
 
 // ResolveSession returns the platform admin owning a still-valid (unexpired,
 // unrevoked) refresh token hash, mirroring identity.ResolveSession's shape.
+// GetPlatformAdminDisplayName is used by Service.Refresh so a refreshed
+// session's response carries the same display_name a fresh Login would —
+// ResolveSession only has the admin's ID, not their display name.
+func GetPlatformAdminDisplayName(ctx context.Context, tx pgx.Tx, id uuid.UUID) (string, error) {
+	var name string
+	row := tx.QueryRow(ctx, `SELECT display_name FROM platform_admins WHERE id = $1`, id)
+	if err := row.Scan(&name); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", ErrNotFound
+		}
+		return "", err
+	}
+	return name, nil
+}
+
 func ResolveSession(ctx context.Context, tx pgx.Tx, refreshHash string) (uuid.UUID, error) {
 	var platformAdminID uuid.UUID
 	row := tx.QueryRow(ctx, `

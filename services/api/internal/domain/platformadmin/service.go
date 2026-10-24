@@ -116,7 +116,11 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*LoginResul
 		if err != nil {
 			return err
 		}
-		result = &LoginResult{AccessToken: accessToken, RefreshToken: newRefresh, ExpiresIn: int64(s.accessTTL.Seconds())}
+		displayName, err := GetPlatformAdminDisplayName(ctx, tx, adminID)
+		if err != nil {
+			return err
+		}
+		result = &LoginResult{AccessToken: accessToken, RefreshToken: newRefresh, ExpiresIn: int64(s.accessTTL.Seconds()), DisplayName: displayName}
 		return nil
 	})
 	if err != nil {

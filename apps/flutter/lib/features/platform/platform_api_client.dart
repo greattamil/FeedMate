@@ -4,23 +4,33 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../../core/api_error.dart';
+import '../../core/secure_storage.dart';
+
+enum PlatformAuthStatus { unknown, loggedOut, loggedIn }
 
 /// A small, self-contained HTTP client for the platform-admin control plane
-/// — deliberately NOT the tenant [ApiClient]/[SecureStorage] pair, since a
-/// platform admin session has no tenant_id and no device at all (see
-/// services/api/internal/domain/platformadmin's doc comment). Tokens live
-/// only in memory: this app is used rarely, by the developer/operator, not
-/// a shop's day-to-day staff, so requiring a fresh login after the process
-/// restarts is an acceptable trade for not adding a second persisted-token
-/// scheme alongside the tenant one.
+/// — deliberately NOT the tenant [ApiClient]'s token pair, since a platform
+/// admin session has no tenant_id and no device at all (see
+/// services/api/internal/domain/platformadmin's doc comment). It does,
+/// however, persist its own refresh token via the same [KeyValueStore]
+/// abstraction the tenant side uses (under a separate key, never mixed
+/// with tenant tokens) — this app turned out to be used routinely, not
+/// rarely as first assumed, so losing the session on every browser
+/// refresh/reload was a real usability bug, not an acceptable trade.
 class PlatformApiClient extends ChangeNotifier {
   final String baseUrl;
   final http.Client _http;
+  final KeyValueStore _store;
   String? _accessToken;
   String? _refreshToken;
   String? displayName;
+  PlatformAuthStatus status = PlatformAuthStatus.unknown;
 
-  PlatformApiClient({required this.baseUrl, http.Client? httpClient}) : _http = httpClient ?? http.Client();
+  static const _keyRefreshToken = 'platform_refresh_token';
+
+  PlatformApiClient({required this.baseUrl, http.Client? httpClient, KeyValueStore? store})
+      : _http = httpClient ?? http.Client(),
+        _store = store ?? PlatformSecureKeyValueStore();
 
   bool get isLoggedIn => _accessToken != null;
 
@@ -31,10 +41,30 @@ class PlatformApiClient extends ChangeNotifier {
   void seedTokensForTesting({required String accessToken, required String refreshToken}) {
     _accessToken = accessToken;
     _refreshToken = refreshToken;
+    status = PlatformAuthStatus.loggedIn;
     notifyListeners();
   }
 
   Uri _uri(String path) => Uri.parse('$baseUrl$path');
+
+  /// Called once at app startup (see main.dart's `_SessionGate`), mirroring
+  /// the tenant `AuthSession.restoreSession()`: exchanges a persisted
+  /// refresh token for a fresh access token rather than trusting anything
+  /// stale, so `displayName` is always correct after a restore. No
+  /// persisted token, or an expired/invalid one, both just mean a normal
+  /// logged-out start — never an error shown to the admin.
+  Future<void> restoreSession() async {
+    final refreshToken = await _store.read(_keyRefreshToken);
+    if (refreshToken == null) {
+      status = PlatformAuthStatus.loggedOut;
+      notifyListeners();
+      return;
+    }
+    _refreshToken = refreshToken;
+    final refreshed = await _tryRefresh();
+    status = refreshed != null ? PlatformAuthStatus.loggedIn : PlatformAuthStatus.loggedOut;
+    notifyListeners();
+  }
 
   Future<void> login(String username, String password) async {
     final response = await _http.post(
@@ -46,6 +76,8 @@ class PlatformApiClient extends ChangeNotifier {
     _accessToken = body['access_token'] as String;
     _refreshToken = body['refresh_token'] as String;
     displayName = body['display_name'] as String?;
+    status = PlatformAuthStatus.loggedIn;
+    await _store.write(_keyRefreshToken, _refreshToken!);
     notifyListeners();
   }
 
@@ -54,6 +86,8 @@ class PlatformApiClient extends ChangeNotifier {
     _accessToken = null;
     _refreshToken = null;
     displayName = null;
+    status = PlatformAuthStatus.loggedOut;
+    await _store.delete(_keyRefreshToken);
     notifyListeners();
     if (refreshToken != null) {
       try {
@@ -113,11 +147,15 @@ class PlatformApiClient extends ChangeNotifier {
       final body = _decodeOrThrow(response);
       _accessToken = body['access_token'] as String;
       _refreshToken = body['refresh_token'] as String;
+      displayName = body['display_name'] as String? ?? displayName;
+      await _store.write(_keyRefreshToken, _refreshToken!);
       return _accessToken;
     } on ApiError {
       _accessToken = null;
       _refreshToken = null;
       displayName = null;
+      status = PlatformAuthStatus.loggedOut;
+      await _store.delete(_keyRefreshToken);
       notifyListeners();
       return null;
     }

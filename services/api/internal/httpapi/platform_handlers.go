@@ -82,7 +82,7 @@ func (h *PlatformHandlers) Refresh(w http.ResponseWriter, r *http.Request) {
 	}
 	WriteJSON(w, http.StatusOK, platformTokenResponse{
 		AccessToken: result.AccessToken, RefreshToken: result.RefreshToken,
-		ExpiresIn: result.ExpiresIn, TokenType: "Bearer",
+		ExpiresIn: result.ExpiresIn, TokenType: "Bearer", DisplayName: result.DisplayName,
 	})
 }
 

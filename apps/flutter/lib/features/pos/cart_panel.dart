@@ -50,7 +50,19 @@ import '../../core/number_format.dart';
 class CartPanel extends StatefulWidget {
   final bool standalone;
 
-  const CartPanel({super.key, this.standalone = true});
+  /// When true, checkout is broken into three full-screen stages (cart
+  /// lines -> customer -> payment) navigated with Back/Next, instead of
+  /// stacking every control into one scrolling panel. Callers set this on
+  /// narrow/phone layouts specifically — on a narrow screen this panel
+  /// previously shared vertical space with the product catalog (roughly
+  /// half the screen height each), so split-payment's extra tender rows
+  /// routinely pushed the Pay button below the visible viewport entirely.
+  /// Wide/desktop layouts give this panel the full window height already
+  /// (see ProductSearchScreen), so they keep the original single-screen
+  /// layout, which a cashier can scan faster when there's room for it.
+  final bool useGuidedSteps;
+
+  const CartPanel({super.key, this.standalone = true, this.useGuidedSteps = false});
 
   @override
   State<CartPanel> createState() => _CartPanelState();
@@ -79,6 +91,18 @@ class _CartPanelState extends State<CartPanel> {
   CustomerSummary? _selectedCustomer;
   bool _splitPayment = false;
   final List<_TenderRow> _tenderRows = [];
+
+  /// Which guided stage is showing (0=cart lines, 1=customer, 2=payment) —
+  /// only consulted when [CartPanel.useGuidedSteps] is true. The customer
+  /// stage is skipped offline (see _goToNextStage/_goToPreviousStage):
+  /// offline sales are always CASH-only and billed to the walk-in
+  /// customer, so there is nothing to pick there.
+  int _mobileStage = 0;
+
+  void _goToNextStage() => setState(() => _mobileStage = _offline ? 2 : 1);
+  void _goToCustomerNext() => setState(() => _mobileStage = 2);
+  void _goToPreviousFromPayment() => setState(() => _mobileStage = _offline ? 0 : 1);
+  void _goToPreviousFromCustomer() => setState(() => _mobileStage = 0);
 
   bool get _anyCreditTender => _splitPayment ? _tenderRows.any((r) => r.method == 'CREDIT') : _tenderMethod == 'CREDIT';
 
@@ -446,6 +470,7 @@ class _CartPanelState extends State<CartPanel> {
         _quote = null;
         _checkingOut = false;
         _selectedCustomer = null;
+        _mobileStage = 0;
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Sale complete — Invoice ${result.invoiceNumber} for ${money(result.grandTotal)}')),
@@ -505,6 +530,7 @@ class _CartPanelState extends State<CartPanel> {
     setState(() {
       _checkingOut = false;
       _quote = null;
+      _mobileStage = 0;
     });
     await showDialog<void>(
       context: context,
@@ -624,6 +650,452 @@ class _CartPanelState extends State<CartPanel> {
   @override
   Widget build(BuildContext context) {
     final cart = context.watch<CartModel>();
+
+    if (widget.useGuidedSteps && !cart.isEmpty) {
+      return _buildGuidedStages(cart);
+    }
+
+    return Column(
+      children: [
+        _buildOfflineBanner(),
+        Expanded(child: _buildLinesList(cart)),
+        if (!cart.isEmpty)
+          _buildCheckoutContainer(
+            child: SingleChildScrollView(
+              // Defensive, not just for guided/narrow layouts: even the
+              // single-screen desktop layout gets wrapped in a scroll view
+              // so an unusually short window (or a long split-payment
+              // tender list) can never hide the Pay button the way it did
+              // before — it was previously a plain fixed-height Column
+              // sitting below the cart lines with nothing to scroll if its
+              // own content outgrew the space left for it.
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _buildLocationAndTenderSection(),
+                  _buildCustomerSection(),
+                  _buildErrorAndTotalRow(cart),
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  /// Three full-screen stages (cart lines -> customer -> payment), each
+  /// getting the panel's entire height — see [CartPanel.useGuidedSteps]'s
+  /// doc comment for why. Only reached once the cart has at least one
+  /// line; an empty cart always falls through to the normal layout above,
+  /// which already shows the right empty-state message.
+  Widget _buildGuidedStages(CartModel cart) {
+    switch (_mobileStage) {
+      case 1:
+        return _GuidedStageScaffold(
+          title: 'Select Customer',
+          stepLabel: 'Step 2 of 3',
+          onBack: _goToPreviousFromCustomer,
+          body: SingleChildScrollView(child: _buildCustomerSection()),
+          primaryLabel: 'Next: Payment',
+          onPrimary: _goToCustomerNext,
+        );
+      case 2:
+        return _GuidedStageScaffold(
+          title: 'Payment',
+          stepLabel: _offline ? 'Step 2 of 2' : 'Step 3 of 3',
+          onBack: _goToPreviousFromPayment,
+          body: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _buildLocationAndTenderSection(),
+                if (_error != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(_error!, style: const TextStyle(color: Color(0xFFE11D48), fontSize: 13)),
+                  ),
+              ],
+            ),
+          ),
+          footer: _buildTotalAndPayRow(cart),
+        );
+      default:
+        return Column(
+          children: [
+            _buildOfflineBanner(),
+            Expanded(child: _buildLinesList(cart)),
+            _GuidedStageFooter(
+              stepLabel: _offline ? 'Step 1 of 2' : 'Step 1 of 3',
+              label: _offline ? 'Next: Payment' : 'Next: Customer',
+              onPressed: _goToNextStage,
+            ),
+          ],
+        );
+    }
+  }
+
+  Widget _buildOfflineBanner() {
+    if (!_offline) return const SizedBox.shrink();
+    return Container(
+      key: const Key('offline_checkout_banner'),
+      width: double.infinity,
+      color: const Color(0xFFFEF3C7),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: Row(
+        children: const [
+          Icon(Icons.wifi_off_rounded, color: Color(0xFFD97706), size: 18),
+          SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Offline — sale will be queued and priced when back online',
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF92400E)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLinesList(CartModel cart) {
+    if (cart.isEmpty) {
+      return const Center(
+        child: SingleChildScrollView(
+          // A single-screen POS can dock this panel into a fairly short
+          // strip on a narrow phone (catalog on top, cart stacked below)
+          // — this empty-state placeholder must never overflow there,
+          // even when the strip is too short to fit it without scrolling.
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.shopping_cart_outlined, size: 40, color: Color(0xFF94A3B8)),
+              SizedBox(height: 8),
+              Text('Cart is empty', style: TextStyle(color: Color(0xFF64748B), fontSize: 14, fontWeight: FontWeight.w500)),
+            ],
+          ),
+        ),
+      );
+    }
+    return ListView.builder(
+      key: const Key('cart_lines_list'),
+      padding: const EdgeInsets.all(12),
+      itemCount: cart.lines.length,
+      itemBuilder: (context, index) {
+        final line = cart.lines[index];
+        return Container(
+          margin: const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0xFFE2E8F0)),
+            boxShadow: const [
+              BoxShadow(color: Color(0x060F172A), blurRadius: 10, offset: Offset(0, 2)),
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  gradient: AppColors.gradientEmerald,
+                  borderRadius: BorderRadius.circular(10),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppColors.primary.withValues(alpha: 0.25),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: const Center(
+                  child: Icon(Icons.grain_rounded, color: Colors.white, size: 20),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(line.product.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                    const SizedBox(height: 2),
+                    Text(line.product.sku, style: const TextStyle(color: Color(0xFF64748B), fontSize: 12)),
+                    if (line.product.sellingPrice != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        '${money(line.product.sellingPrice!)} each',
+                        style: const TextStyle(color: Color(0xFF0F766E), fontWeight: FontWeight.bold, fontSize: 12),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              // Stepper Controls
+              Container(
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF1F5F9),
+                  borderRadius: BorderRadius.circular(30),
+                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.remove_circle_outline, size: 20),
+                      padding: const EdgeInsets.all(6),
+                      constraints: const BoxConstraints(),
+                      color: const Color(0xFF0F766E),
+                      onPressed: () {
+                        cart.updateQuantity(line.product.id, line.quantity - Decimal.one);
+                      },
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      child: Text(
+                        line.quantity.toString(),
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.add_circle_outline, size: 20),
+                      padding: const EdgeInsets.all(6),
+                      constraints: const BoxConstraints(),
+                      color: const Color(0xFF0F766E),
+                      onPressed: () {
+                        cart.updateQuantity(line.product.id, line.quantity + Decimal.one);
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 4),
+              IconButton(
+                icon: const Icon(Icons.delete_outline_rounded, size: 20, color: Color(0xFFE11D48)),
+                onPressed: () {
+                  cart.removeLine(line.product.id);
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildCheckoutContainer({required Widget child}) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        border: Border(top: BorderSide(color: Color(0xFFE2E8F0))),
+        boxShadow: [
+          BoxShadow(color: Color(0x0A0F172A), blurRadius: 16, offset: Offset(0, -4)),
+        ],
+      ),
+      child: child,
+    );
+  }
+
+  Widget _buildLocationAndTenderSection() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (_locations.length > 1)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: DropdownButtonFormField<String>(
+              initialValue: _selectedLocationId,
+              decoration: const InputDecoration(
+                labelText: 'Fulfillment Location',
+                prefixIcon: Icon(Icons.store_rounded, size: 18),
+                isDense: true,
+              ),
+              items: _locations
+                  .map((l) => DropdownMenuItem(value: l.id, child: Text(l.name)))
+                  .toList(),
+              onChanged: (value) => setState(() => _selectedLocationId = value),
+            ),
+          ),
+        // Tender Toggle (single-tender mode)
+        if (!_splitPayment)
+          Row(
+            children: [
+              Expanded(
+                child: SegmentedButton<String>(
+                  key: const Key('tender_method_toggle'),
+                  segments: const [
+                    ButtonSegment(
+                      value: 'CASH',
+                      icon: Icon(Icons.payments_rounded, size: 16),
+                      label: Text('Cash'),
+                    ),
+                    ButtonSegment(
+                      value: 'CREDIT',
+                      icon: Icon(Icons.account_balance_wallet_rounded, size: 16),
+                      label: Text('Credit'),
+                      enabled: true,
+                    ),
+                  ],
+                  selected: {_tenderMethod},
+                  onSelectionChanged: _offline
+                      ? null
+                      : (selection) => setState(() => _tenderMethod = selection.first),
+                ),
+              ),
+            ],
+          ),
+        if (!_offline)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Row(
+              children: [
+                const Text('Split payment', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                Switch(
+                  key: const Key('split_payment_switch'),
+                  value: _splitPayment,
+                  onChanged: _toggleSplitPayment,
+                ),
+              ],
+            ),
+          ),
+        if (_splitPayment) ...[
+          const SizedBox(height: 4),
+          ...List.generate(_tenderRows.length, (index) {
+            final row = _tenderRows[index];
+            return Padding(
+              key: Key('split_tender_row_$index'),
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    flex: 2,
+                    child: DropdownButtonFormField<String>(
+                      key: Key('split_tender_method_$index'),
+                      initialValue: row.method,
+                      isDense: true,
+                      decoration: const InputDecoration(labelText: 'Method'),
+                      items: const [
+                        DropdownMenuItem(value: 'CASH', child: Text('Cash')),
+                        DropdownMenuItem(value: 'CREDIT', child: Text('Credit')),
+                        DropdownMenuItem(value: 'UPI', child: Text('UPI')),
+                        DropdownMenuItem(value: 'BANK', child: Text('Bank')),
+                        DropdownMenuItem(value: 'OTHER', child: Text('Other')),
+                      ],
+                      onChanged: (v) => setState(() => row.method = v ?? 'CASH'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    flex: 3,
+                    child: TextField(
+                      key: Key('split_tender_amount_$index'),
+                      controller: row.amountController,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      decoration: const InputDecoration(labelText: 'Amount', isDense: true),
+                      onChanged: (_) => setState(() {}),
+                    ),
+                  ),
+                  if (_tenderRows.length > 1)
+                    IconButton(
+                      key: Key('split_tender_remove_$index'),
+                      icon: const Icon(Icons.remove_circle_outline, size: 20, color: Color(0xFFE11D48)),
+                      onPressed: () => _removeTenderRow(index),
+                    ),
+                ],
+              ),
+            );
+          }),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              key: const Key('add_tender_button'),
+              onPressed: _addTenderRow,
+              icon: const Icon(Icons.add, size: 16),
+              label: const Text('Add Tender'),
+            ),
+          ),
+          Builder(builder: (context) {
+            final remaining = _remainingSplitAmount();
+            if (remaining == null) return const SizedBox.shrink();
+            final settled = remaining == Decimal.zero;
+            return Text(
+              settled ? 'Fully allocated' : 'Remaining: ${money(remaining)}',
+              key: const Key('split_tender_remaining'),
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: settled ? const Color(0xFF059669) : const Color(0xFFE11D48),
+              ),
+            );
+          }),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildCustomerSection() {
+    if (_offline) return const SizedBox.shrink();
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: ListTile(
+        key: const Key('customer_picker_tile'),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        leading: Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            gradient: AppColors.gradientIndigo,
+            borderRadius: BorderRadius.circular(10),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.secondary.withValues(alpha: 0.3),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: const Icon(Icons.person_rounded, color: Colors.white, size: 20),
+        ),
+        title: Text(_selectedCustomer?.name ?? 'Select customer', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+        subtitle: _selectedCustomer != null
+            ? Text('${_selectedCustomer!.customerCode} · ${_selectedCustomer!.phone ?? ""}')
+            : Text(
+                _anyCreditTender
+                    ? 'Required for credit billing'
+                    : 'Optional — billed to Walking Customer if left blank',
+                style: const TextStyle(fontSize: 12),
+              ),
+        trailing: _selectedCustomer != null && !_anyCreditTender
+            ? IconButton(
+                key: const Key('customer_picker_clear'),
+                icon: const Icon(Icons.close_rounded, size: 20, color: Color(0xFF64748B)),
+                onPressed: () => setState(() => _selectedCustomer = null),
+              )
+            : const Icon(Icons.chevron_right_rounded, color: Color(0xFF64748B)),
+        onTap: _pickCustomer,
+      ),
+    );
+  }
+
+  Widget _buildErrorAndTotalRow(CartModel cart) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (_error != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(_error!, style: const TextStyle(color: Color(0xFFE11D48), fontSize: 13)),
+          ),
+        const SizedBox(height: 12),
+        _buildTotalAndPayRow(cart),
+      ],
+    );
+  }
+
+  Widget _buildTotalAndPayRow(CartModel cart) {
     final estimate = _offline ? _estimatedOfflineTotal(cart) : null;
     final splitRemaining = _splitPayment ? _remainingSplitAmount() : null;
     final splitValid = !_splitPayment || (splitRemaining != null && splitRemaining == Decimal.zero);
@@ -632,404 +1104,187 @@ class _CartPanelState extends State<CartPanel> {
         splitValid &&
         (_quote != null || (_offline && _selectedLocationId != null));
 
-    return Column(
+    return Row(
       children: [
-        if (_offline)
-          Container(
-            key: const Key('offline_checkout_banner'),
-            width: double.infinity,
-            color: const Color(0xFFFEF3C7),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            child: Row(
-              children: const [
-                Icon(Icons.wifi_off_rounded, color: Color(0xFFD97706), size: 18),
-                SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    'Offline — sale will be queued and priced when back online',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF92400E)),
-                  ),
-                ),
-              ],
-            ),
-          ),
         Expanded(
-          child: cart.isEmpty
-              ? const Center(
-                  child: SingleChildScrollView(
-                    // A single-screen POS can dock this panel into a
-                    // fairly short strip on a narrow phone (catalog on
-                    // top, cart stacked below) — this empty-state
-                    // placeholder must never overflow there, even when
-                    // the strip is too short to fit it without scrolling.
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.shopping_cart_outlined, size: 40, color: Color(0xFF94A3B8)),
-                        SizedBox(height: 8),
-                        Text('Cart is empty', style: TextStyle(color: Color(0xFF64748B), fontSize: 14, fontWeight: FontWeight.w500)),
-                      ],
-                    ),
-                  ),
-                )
-              : ListView.builder(
-                  key: const Key('cart_lines_list'),
-                  padding: const EdgeInsets.all(12),
-                  itemCount: cart.lines.length,
-                  itemBuilder: (context, index) {
-                    final line = cart.lines[index];
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 10),
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: const Color(0xFFE2E8F0)),
-                        boxShadow: const [
-                          BoxShadow(color: Color(0x060F172A), blurRadius: 10, offset: Offset(0, 2)),
-                        ],
-                      ),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 42,
-                            height: 42,
-                            decoration: BoxDecoration(
-                              gradient: AppColors.gradientEmerald,
-                              borderRadius: BorderRadius.circular(10),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: AppColors.primary.withValues(alpha: 0.25),
-                                  blurRadius: 8,
-                                  offset: const Offset(0, 2),
-                                ),
-                              ],
-                            ),
-                            child: const Center(
-                              child: Icon(Icons.grain_rounded, color: Colors.white, size: 20),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(line.product.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                                const SizedBox(height: 2),
-                                Text(line.product.sku, style: const TextStyle(color: Color(0xFF64748B), fontSize: 12)),
-                                if (line.product.sellingPrice != null) ...[
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    '${money(line.product.sellingPrice!)} each',
-                                    style: const TextStyle(color: Color(0xFF0F766E), fontWeight: FontWeight.bold, fontSize: 12),
-                                  ),
-                                ],
-                              ],
-                            ),
-                          ),
-                          // Stepper Controls
-                          Container(
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFF1F5F9),
-                              borderRadius: BorderRadius.circular(30),
-                              border: Border.all(color: const Color(0xFFE2E8F0)),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                IconButton(
-                                  icon: const Icon(Icons.remove_circle_outline, size: 20),
-                                  padding: const EdgeInsets.all(6),
-                                  constraints: const BoxConstraints(),
-                                  color: const Color(0xFF0F766E),
-                                  onPressed: () {
-                                    cart.updateQuantity(line.product.id, line.quantity - Decimal.one);
-                                  },
-                                ),
-                                Padding(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                                  child: Text(
-                                    line.quantity.toString(),
-                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                                  ),
-                                ),
-                                IconButton(
-                                  icon: const Icon(Icons.add_circle_outline, size: 20),
-                                  padding: const EdgeInsets.all(6),
-                                  constraints: const BoxConstraints(),
-                                  color: const Color(0xFF0F766E),
-                                  onPressed: () {
-                                    cart.updateQuantity(line.product.id, line.quantity + Decimal.one);
-                                  },
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 4),
-                          IconButton(
-                            icon: const Icon(Icons.delete_outline_rounded, size: 20, color: Color(0xFFE11D48)),
-                            onPressed: () {
-                              cart.removeLine(line.product.id);
-                            },
-                          ),
-                        ],
-                      ),
-                    );
-                  },
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                _quoting
+                    ? 'Calculating…'
+                    : _quote != null
+                        ? 'Total: ${money(_quote!.grandTotal)}'
+                        : (estimate != null
+                            ? 'Estimated: ${money(estimate)}'
+                            : 'Total: —'),
+                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: Color(0xFF0F766E)),
+                key: const Key('cart_total'),
+              ),
+              if (_quote != null && _quote!.taxTotal > Decimal.zero)
+                Text(
+                  'Includes ${money(_quote!.taxTotal)} GST tax',
+                  style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
                 ),
-        ),
-        // Location & Tender Controls Container
-        if (!cart.isEmpty)
-        Container(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            border: Border(top: BorderSide(color: Color(0xFFE2E8F0))),
-            boxShadow: [
-              BoxShadow(color: Color(0x0A0F172A), blurRadius: 16, offset: Offset(0, -4)),
             ],
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
+        ),
+        FilledButton(
+          key: const Key('checkout_button'),
+          style: FilledButton.styleFrom(
+            backgroundColor: _offline
+                ? AppColors.warning
+                : (_tenderMethod == 'CREDIT' ? AppColors.secondary : AppColors.primary),
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            elevation: 4,
+            shadowColor: (_offline
+                    ? AppColors.warning
+                    : (_tenderMethod == 'CREDIT' ? AppColors.secondary : AppColors.primary))
+                .withValues(alpha: 0.5),
+          ),
+          onPressed: canCheckout ? _confirmAndCheckout : null,
+          child: _checkingOut
+              ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+              : Text(
+                  _offline
+                      ? 'Queue Sale (Offline)'
+                      : (_tenderMethod == 'CREDIT' ? 'Charge on Credit' : 'Charge Cash'),
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                ),
+        ),
+      ],
+    );
+  }
+}
+
+/// One full-screen guided-checkout stage: a small header (back arrow +
+/// title + step counter), the stage's own content, and either a fixed
+/// footer widget or a simple primary-action button pinned at the bottom.
+class _GuidedStageScaffold extends StatelessWidget {
+  final String title;
+  final String stepLabel;
+  final VoidCallback onBack;
+  final Widget body;
+  final Widget? footer;
+  final String? primaryLabel;
+  final VoidCallback? onPrimary;
+
+  const _GuidedStageScaffold({
+    required this.title,
+    required this.stepLabel,
+    required this.onBack,
+    required this.body,
+    this.footer,
+    this.primaryLabel,
+    this.onPrimary,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.fromLTRB(4, 8, 16, 8),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
+          ),
+          child: Row(
             children: [
-              if (_locations.length > 1)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: DropdownButtonFormField<String>(
-                    initialValue: _selectedLocationId,
-                    decoration: const InputDecoration(
-                      labelText: 'Fulfillment Location',
-                      prefixIcon: Icon(Icons.store_rounded, size: 18),
-                      isDense: true,
-                    ),
-                    items: _locations
-                        .map((l) => DropdownMenuItem(value: l.id, child: Text(l.name)))
-                        .toList(),
-                    onChanged: (value) => setState(() => _selectedLocationId = value),
-                  ),
-                ),
-              // Tender Toggle (single-tender mode)
-              if (!_splitPayment)
-                Row(
-                  children: [
-                    Expanded(
-                      child: SegmentedButton<String>(
-                        key: const Key('tender_method_toggle'),
-                        segments: const [
-                          ButtonSegment(
-                            value: 'CASH',
-                            icon: Icon(Icons.payments_rounded, size: 16),
-                            label: Text('Cash'),
-                          ),
-                          ButtonSegment(
-                            value: 'CREDIT',
-                            icon: Icon(Icons.account_balance_wallet_rounded, size: 16),
-                            label: Text('Credit'),
-                            enabled: true,
-                          ),
-                        ],
-                        selected: {_tenderMethod},
-                        onSelectionChanged: _offline
-                            ? null
-                            : (selection) => setState(() => _tenderMethod = selection.first),
-                      ),
-                    ),
-                  ],
-                ),
-              if (!_offline)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Row(
-                    children: [
-                      const Text('Split payment', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                      Switch(
-                        key: const Key('split_payment_switch'),
-                        value: _splitPayment,
-                        onChanged: _toggleSplitPayment,
-                      ),
-                    ],
-                  ),
-                ),
-              if (_splitPayment) ...[
-                const SizedBox(height: 4),
-                ...List.generate(_tenderRows.length, (index) {
-                  final row = _tenderRows[index];
-                  return Padding(
-                    key: Key('split_tender_row_$index'),
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          flex: 2,
-                          child: DropdownButtonFormField<String>(
-                            key: Key('split_tender_method_$index'),
-                            initialValue: row.method,
-                            isDense: true,
-                            decoration: const InputDecoration(labelText: 'Method'),
-                            items: const [
-                              DropdownMenuItem(value: 'CASH', child: Text('Cash')),
-                              DropdownMenuItem(value: 'CREDIT', child: Text('Credit')),
-                              DropdownMenuItem(value: 'UPI', child: Text('UPI')),
-                              DropdownMenuItem(value: 'BANK', child: Text('Bank')),
-                              DropdownMenuItem(value: 'OTHER', child: Text('Other')),
-                            ],
-                            onChanged: (v) => setState(() => row.method = v ?? 'CASH'),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          flex: 3,
-                          child: TextField(
-                            key: Key('split_tender_amount_$index'),
-                            controller: row.amountController,
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                            decoration: const InputDecoration(labelText: 'Amount', isDense: true),
-                            onChanged: (_) => setState(() {}),
-                          ),
-                        ),
-                        if (_tenderRows.length > 1)
-                          IconButton(
-                            key: Key('split_tender_remove_$index'),
-                            icon: const Icon(Icons.remove_circle_outline, size: 20, color: Color(0xFFE11D48)),
-                            onPressed: () => _removeTenderRow(index),
-                          ),
-                      ],
-                    ),
-                  );
-                }),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton.icon(
-                    key: const Key('add_tender_button'),
-                    onPressed: _addTenderRow,
-                    icon: const Icon(Icons.add, size: 16),
-                    label: const Text('Add Tender'),
-                  ),
-                ),
-                Builder(builder: (context) {
-                  final remaining = _remainingSplitAmount();
-                  if (remaining == null) return const SizedBox.shrink();
-                  final settled = remaining == Decimal.zero;
-                  return Text(
-                    settled ? 'Fully allocated' : 'Remaining: ${money(remaining)}',
-                    key: const Key('split_tender_remaining'),
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: settled ? const Color(0xFF059669) : const Color(0xFFE11D48),
-                    ),
-                  );
-                }),
-              ],
-              if (!_offline) ...[
-                const SizedBox(height: 10),
-                Container(
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF8FAFC),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: const Color(0xFFE2E8F0)),
-                  ),
-                  child: ListTile(
-                    key: const Key('customer_picker_tile'),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                    leading: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        gradient: AppColors.gradientIndigo,
-                        borderRadius: BorderRadius.circular(10),
-                        boxShadow: [
-                          BoxShadow(
-                            color: AppColors.secondary.withValues(alpha: 0.3),
-                            blurRadius: 8,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      child: const Icon(Icons.person_rounded, color: Colors.white, size: 20),
-                    ),
-                    title: Text(_selectedCustomer?.name ?? 'Select customer', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                    subtitle: _selectedCustomer != null
-                        ? Text('${_selectedCustomer!.customerCode} · ${_selectedCustomer!.phone ?? ""}')
-                        : Text(
-                            _anyCreditTender
-                                ? 'Required for credit billing'
-                                : 'Optional — billed to Walking Customer if left blank',
-                            style: const TextStyle(fontSize: 12),
-                          ),
-                    trailing: _selectedCustomer != null && !_anyCreditTender
-                        ? IconButton(
-                            key: const Key('customer_picker_clear'),
-                            icon: const Icon(Icons.close_rounded, size: 20, color: Color(0xFF64748B)),
-                            onPressed: () => setState(() => _selectedCustomer = null),
-                          )
-                        : const Icon(Icons.chevron_right_rounded, color: Color(0xFF64748B)),
-                    onTap: _pickCustomer,
-                  ),
-                ),
-              ],
-              if (_error != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text(_error!, style: const TextStyle(color: Color(0xFFE11D48), fontSize: 13)),
-                ),
-              const SizedBox(height: 12),
-              // Total and Checkout Action Button
-              Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          _quoting
-                              ? 'Calculating…'
-                              : _quote != null
-                                  ? 'Total: ${money(_quote!.grandTotal)}'
-                                  : (estimate != null
-                                      ? 'Estimated: ${money(estimate)}'
-                                      : 'Total: —'),
-                          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: Color(0xFF0F766E)),
-                          key: const Key('cart_total'),
-                        ),
-                        if (_quote != null && _quote!.taxTotal > Decimal.zero)
-                          Text(
-                            'Includes ${money(_quote!.taxTotal)} GST tax',
-                            style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
-                          ),
-                      ],
-                    ),
-                  ),
-                  FilledButton(
-                    key: const Key('checkout_button'),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: _offline
-                          ? AppColors.warning
-                          : (_tenderMethod == 'CREDIT' ? AppColors.secondary : AppColors.primary),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      elevation: 4,
-                      shadowColor: (_offline
-                              ? AppColors.warning
-                              : (_tenderMethod == 'CREDIT' ? AppColors.secondary : AppColors.primary))
-                          .withValues(alpha: 0.5),
-                    ),
-                    onPressed: canCheckout ? _confirmAndCheckout : null,
-                    child: _checkingOut
-                        ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                        : Text(
-                            _offline
-                                ? 'Queue Sale (Offline)'
-                                : (_tenderMethod == 'CREDIT' ? 'Charge on Credit' : 'Charge Cash'),
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                          ),
-                  ),
-                ],
+              IconButton(
+                key: const Key('guided_stage_back'),
+                icon: const Icon(Icons.arrow_back_rounded),
+                onPressed: onBack,
+              ),
+              Expanded(
+                child: Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              ),
+              Text(
+                stepLabel,
+                style: const TextStyle(color: Color(0xFF64748B), fontSize: 12, fontWeight: FontWeight.w600),
               ),
             ],
           ),
         ),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: body,
+          ),
+        ),
+        if (footer != null)
+          Container(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              border: Border(top: BorderSide(color: Color(0xFFE2E8F0))),
+              boxShadow: [
+                BoxShadow(color: Color(0x0A0F172A), blurRadius: 16, offset: Offset(0, -4)),
+              ],
+            ),
+            child: footer,
+          )
+        else if (primaryLabel != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                key: const Key('guided_stage_primary'),
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                onPressed: onPrimary,
+                child: Text(primaryLabel!, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              ),
+            ),
+          ),
       ],
+    );
+  }
+}
+
+/// The footer bar on the first guided stage (cart lines) — just a
+/// step counter and a "Next" button, since that stage's content is the
+/// cart's own full-height ListView rather than something a shared
+/// scaffold body can wrap.
+class _GuidedStageFooter extends StatelessWidget {
+  final String stepLabel;
+  final String label;
+  final VoidCallback? onPressed;
+
+  const _GuidedStageFooter({required this.stepLabel, required this.label, required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        border: Border(top: BorderSide(color: Color(0xFFE2E8F0))),
+        boxShadow: [
+          BoxShadow(color: Color(0x0A0F172A), blurRadius: 16, offset: Offset(0, -4)),
+        ],
+      ),
+      child: Row(
+        children: [
+          Text(stepLabel, style: const TextStyle(color: Color(0xFF64748B), fontSize: 12, fontWeight: FontWeight.w600)),
+          const Spacer(),
+          FilledButton.icon(
+            key: const Key('guided_stage_next'),
+            onPressed: onPressed,
+            icon: const Icon(Icons.arrow_forward_rounded, size: 18),
+            label: Text(label, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+            style: FilledButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

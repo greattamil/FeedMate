@@ -101,11 +101,15 @@ void main() {
     await tester.tap(find.byKey(const Key('login_button')));
     await tester.pumpAndSettle();
 
-    // A successful login now lands on the app shell's home dashboard (the
-    // product search / counter screen is a separate bottom-nav tab, mounted
-    // but inactive — see AppShell).
+    // A successful login lands on the app shell's home dashboard. The
+    // product search / counter screen is a separate bottom-nav tab that
+    // AppShell now mounts lazily — only once the user actually switches to
+    // it — rather than eagerly building every tab (including its own
+    // startup API calls) the moment the app opens; see AppShell's
+    // _visitedIndices doc comment. It's correctly absent here, not just
+    // offstage, until that tab is visited.
     expect(find.byType(HomeDashboardScreen), findsOneWidget);
-    expect(find.byType(ProductSearchScreen, skipOffstage: false), findsWidgets);
+    expect(find.byType(ProductSearchScreen, skipOffstage: false), findsNothing);
     expect(find.textContaining('Test Owner'), findsWidgets);
   });
 

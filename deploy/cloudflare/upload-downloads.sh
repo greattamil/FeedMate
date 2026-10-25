@@ -7,7 +7,13 @@
 # describes, same as the APK/zip themselves.
 #
 # Required env vars:
-#   R2_BUCKET    e.g. feedmate-downloads
+#   R2_BUCKET        e.g. feedmate-downloads
+#   DOWNLOADS_DOMAIN the public hostname this bucket is served under
+#                    (its R2 custom domain), e.g. downloads.bpkscattlefeeds.com
+#                    — baked into version.json's apk_url so the in-app
+#                    update checker (app_update_service.dart) points at
+#                    the right place. Must match whatever domain the
+#                    bucket is actually mapped to in Cloudflare.
 #
 # Optional env vars (version.json fields):
 #   VERSION_NAME    defaults to the version before '+' in
@@ -19,12 +25,13 @@
 #                    why this isn't enforced yet
 #
 # Usage:
-#   R2_BUCKET=feedmate-downloads ./upload-downloads.sh \
-#     path/to/app-release.apk path/to/FeedMate-Windows.zip
+#   R2_BUCKET=feedmate-downloads DOWNLOADS_DOMAIN=downloads.bpkscattlefeeds.com \
+#     ./upload-downloads.sh path/to/app-release.apk path/to/FeedMate-Windows.zip
 
 set -euo pipefail
 
 : "${R2_BUCKET:?Set R2_BUCKET}"
+: "${DOWNLOADS_DOMAIN:?Set DOWNLOADS_DOMAIN}"
 
 APK_PATH="${1:?Usage: $0 <apk-path> <windows-zip-path>}"
 ZIP_PATH="${2:?Usage: $0 <apk-path> <windows-zip-path>}"
@@ -60,8 +67,8 @@ MIN_SUPPORTED_JSON=""
 if [ -n "${MIN_SUPPORTED_VERSION_CODE:-}" ]; then
   MIN_SUPPORTED_JSON=",\"min_supported_version_code\":$MIN_SUPPORTED_VERSION_CODE"
 fi
-printf '{"latest_version_code":%s,"latest_version_name":"%s","apk_url":"https://downloads.ramadas.me/feedmate.apk","release_notes":"%s"%s}' \
-  "$VERSION_CODE" "$(json_escape "$VERSION_NAME")" "$(json_escape "$RELEASE_NOTES")" "$MIN_SUPPORTED_JSON" \
+printf '{"latest_version_code":%s,"latest_version_name":"%s","apk_url":"https://%s/feedmate.apk","release_notes":"%s"%s}' \
+  "$VERSION_CODE" "$(json_escape "$VERSION_NAME")" "$DOWNLOADS_DOMAIN" "$(json_escape "$RELEASE_NOTES")" "$MIN_SUPPORTED_JSON" \
   > "$VERSION_JSON_PATH"
 echo "Uploading version.json (v$VERSION_NAME, build $VERSION_CODE) -> $R2_BUCKET/version.json ..."
 wrangler r2 object put "$R2_BUCKET/version.json" \

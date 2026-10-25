@@ -1,0 +1,22 @@
+# Cloudflare Worker that schedules + receives the FeedMate DB backup.
+# See worker.js for what the two entry points (scheduled/fetch) do.
+#
+# Secrets (set via `wrangler secret put <NAME>` from this directory):
+#   CRON_SECRET     must match the API's own CronSecret (gates
+#                   /internal/cron/* — see deploy/ENVIRONMENT.md)
+#   UPLOAD_SECRET   a dedicated bearer token only this Worker and the
+#                   feedmate-db-backup Cloud Run Job know — NOT the same
+#                   value as CRON_SECRET, so the API's cron-secret
+#                   (which gates several sensitive endpoints) is never
+#                   exposed to the Cloud Run Job container.
+
+name = "bpks-db-backup"
+main = "worker.js"
+compatibility_date = "2026-10-21"
+
+[triggers]
+crons = ["0 2 * * *"]
+
+[[r2_buckets]]
+binding = "BACKUP_BUCKET"
+bucket_name = "bpks-db-backups"

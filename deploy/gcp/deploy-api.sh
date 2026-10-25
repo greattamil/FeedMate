@@ -76,13 +76,18 @@ SERVICE_URL="$(gcloud run services describe "$CLOUD_RUN_SERVICE" \
 # fresh project after creating EDGE_SHARED_SECRET and CRON_SECRET per
 # ../ENVIRONMENT.md; safe to re-run (uses `update`, falling back to
 # `create` the first time).
+# Only 2 jobs here, not 3 — billing-cycle and overdue-sweep are combined
+# into one /internal/cron/daily-tasks call (see CronHandlers.RunDailyTasks's
+# doc comment). A separate deploy/gcp/deploy-db-backup.sh adds a 3rd
+# Scheduler job of its own (the daily DB backup trigger); together that's
+# exactly 3, Cloud Scheduler's Always Free limit per billing account — a
+# 4th would start incurring a real (if small) per-job charge.
 if [ -n "${EDGE_SHARED_SECRET:-}" ] && [ -n "${CRON_SECRET:-}" ]; then
   HEADERS="X-Edge-Secret=$EDGE_SHARED_SECRET,X-Cron-Secret=$CRON_SECRET"
 
   for JOB in \
-    "feedmate-billing-cycle|every 24 hours|$SERVICE_URL/api/v1/internal/cron/billing-cycle" \
-    "feedmate-cloud-usage-poll|every 1 hours|$SERVICE_URL/api/v1/internal/cron/cloud-usage-poll" \
-    "feedmate-overdue-sweep|every 24 hours|$SERVICE_URL/api/v1/internal/cron/overdue-sweep"
+    "feedmate-daily-tasks|every 24 hours|$SERVICE_URL/api/v1/internal/cron/daily-tasks" \
+    "feedmate-cloud-usage-poll|every 1 hours|$SERVICE_URL/api/v1/internal/cron/cloud-usage-poll"
   do
     IFS='|' read -r NAME SCHEDULE URL <<< "$JOB"
     echo "Provisioning Cloud Scheduler job $NAME ..."

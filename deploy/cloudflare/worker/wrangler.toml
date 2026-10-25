@@ -9,12 +9,12 @@
 #      is configured with — see ../../ENVIRONMENT.md)
 #   4. wrangler deploy (from this directory)
 
-name = "feedmate-api-proxy"
+name = "bpks-api-proxy"
 main = "worker.js"
 compatibility_date = "2026-10-21"
 
 routes = [
-  { pattern = "api.ramadas.me", custom_domain = true }
+  { pattern = "api.bpkscattlefeeds.com", custom_domain = true }
 ]
 
 [vars]

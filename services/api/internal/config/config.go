@@ -38,20 +38,20 @@ type Config struct {
 	// credentials (Razorpay/Cashfree/PhonePe/etc.) are not available in this
 	// environment; see internal/paymentprovider for the interface a real
 	// provider must implement to be swapped in.
-	PaymentProvider       string
-	SandboxWebhookSecret  string
+	PaymentProvider      string
+	SandboxWebhookSecret string
 
 	// CloudUsage* configure the platform-admin live usage dashboard
 	// (internal/domain/cloudusage). Each provider's credentials are
 	// optional and independent — if one is unset, that provider's
 	// metrics are simply omitted from the poll rather than erroring,
 	// since this feature must not block API startup.
-	CloudflareAPIToken  string
-	CloudflareAccountID string
-	GCPProjectID        string
-	AivenAPIToken       string
-	AivenProject        string
-	AivenService        string
+	CloudflareAPIToken     string
+	CloudflareAccountID    string
+	GCPProjectID           string
+	AivenAPIToken          string
+	AivenProject           string
+	AivenService           string
 	CloudUsagePollInterval time.Duration
 
 	// FirebaseProjectID enables pushnotify (FCM push notifications) —
@@ -60,6 +60,13 @@ type Config struct {
 	// GCPProjectID, since Firebase is added to the existing GCP project
 	// rather than a separate one.
 	FirebaseProjectID string
+
+	// GCPRegion/DBBackupJobName locate the feedmate-db-backup Cloud Run Job
+	// that TriggerDBBackup kicks off (see internal/domain/dbbackup) —
+	// defaults match deploy/gcp/deploy-db-backup.sh's own defaults, only
+	// need overriding on a genuinely different environment.
+	GCPRegion       string
+	DBBackupJobName string
 
 	// EdgeSharedSecret, when set, requires every request to carry a
 	// matching X-Edge-Secret header (see middleware.RequireEdgeSecret) —
@@ -145,6 +152,8 @@ func Load() (Config, error) {
 		AivenService:           os.Getenv("AIVEN_SERVICE"),
 		CloudUsagePollInterval: getDuration("CLOUD_USAGE_POLL_INTERVAL", 1*time.Hour),
 		FirebaseProjectID:      os.Getenv("FIREBASE_PROJECT_ID"),
+		GCPRegion:              getEnv("GCP_REGION", "asia-south1"),
+		DBBackupJobName:        getEnv("DB_BACKUP_JOB_NAME", "feedmate-db-backup"),
 		EdgeSharedSecret:       firstNonEmpty(os.Getenv("EDGE_SHARED_SECRET"), internalSecrets["edge_secret"]),
 
 		CronSecret:               firstNonEmpty(os.Getenv("CRON_SECRET"), internalSecrets["cron_secret"]),

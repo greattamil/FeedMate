@@ -1,0 +1,26 @@
+# Cloudflare Worker config for downloads.<domain> — serves the
+# downloads-landing page plus the APK/Windows zip/version.json out of the
+# bpks-downloads R2 bucket. See worker.js for why a plain R2 custom domain
+# wasn't enough on its own.
+#
+# To migrate (new bucket name or new custom domain):
+#   1. Change bucket_name below to the new bucket.
+#   2. Change the route pattern below to the new custom domain.
+#   3. wrangler deploy (from this directory)
+#
+# Note: a hostname can't simultaneously be an R2 bucket's own custom
+# domain AND a Worker custom domain — if the R2 bucket custom domain was
+# attached first (via the dashboard), remove it there before deploying
+# this Worker to the same hostname.
+
+name = "bpks-downloads-site"
+main = "worker.js"
+compatibility_date = "2026-10-21"
+
+routes = [
+  { pattern = "downloads.bpkscattlefeeds.com", custom_domain = true }
+]
+
+[[r2_buckets]]
+binding = "DOWNLOADS_BUCKET"
+bucket_name = "bpks-downloads"

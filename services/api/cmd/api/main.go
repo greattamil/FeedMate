@@ -16,8 +16,10 @@ import (
 	"github.com/andipatti/feedmate/services/api/internal/config"
 	"github.com/andipatti/feedmate/services/api/internal/dbctx"
 	"github.com/andipatti/feedmate/services/api/internal/domain/auditlog"
+	"github.com/andipatti/feedmate/services/api/internal/domain/cloudusage"
 	"github.com/andipatti/feedmate/services/api/internal/domain/contra"
 	"github.com/andipatti/feedmate/services/api/internal/domain/customer"
+	"github.com/andipatti/feedmate/services/api/internal/domain/dbbackup"
 	"github.com/andipatti/feedmate/services/api/internal/domain/devicepairing"
 	"github.com/andipatti/feedmate/services/api/internal/domain/docseries"
 	"github.com/andipatti/feedmate/services/api/internal/domain/eod"
@@ -26,12 +28,11 @@ import (
 	"github.com/andipatti/feedmate/services/api/internal/domain/masterdata"
 	"github.com/andipatti/feedmate/services/api/internal/domain/notify"
 	"github.com/andipatti/feedmate/services/api/internal/domain/payment"
-	"github.com/andipatti/feedmate/services/api/internal/domain/cloudusage"
 	"github.com/andipatti/feedmate/services/api/internal/domain/platformadmin"
 	"github.com/andipatti/feedmate/services/api/internal/domain/pos"
-	"github.com/andipatti/feedmate/services/api/internal/domain/pushnotify"
 	"github.com/andipatti/feedmate/services/api/internal/domain/procurement"
 	"github.com/andipatti/feedmate/services/api/internal/domain/product"
+	"github.com/andipatti/feedmate/services/api/internal/domain/pushnotify"
 	"github.com/andipatti/feedmate/services/api/internal/domain/reports"
 	"github.com/andipatti/feedmate/services/api/internal/domain/returns"
 	"github.com/andipatti/feedmate/services/api/internal/domain/settings"
@@ -120,7 +121,8 @@ func main() {
 	settingsHandlers := &httpapi.SettingsHandlers{Settings: settingsSvc}
 	platformHandlers := &httpapi.PlatformHandlers{Platform: platformSvc, Subscription: subscriptionSvc}
 	cloudUsageHandlers := &httpapi.CloudUsageHandlers{CloudUsage: cloudUsageSvc}
-	cronHandlers := &httpapi.CronHandlers{Subscription: subscriptionSvc, CloudUsage: cloudUsageSvc, Customer: customerSvc, Notify: notifySvc, CronSecret: cfg.CronSecret}
+	dbBackupTrigger := &dbbackup.Trigger{HTTPClient: http.DefaultClient, ProjectID: cfg.GCPProjectID, Region: cfg.GCPRegion, JobName: cfg.DBBackupJobName}
+	cronHandlers := &httpapi.CronHandlers{Subscription: subscriptionSvc, CloudUsage: cloudUsageSvc, Customer: customerSvc, Notify: notifySvc, DBBackup: dbBackupTrigger, CronSecret: cfg.CronSecret}
 
 	// Full debug-level detail for every error response — not just
 	// CodeInternal — is persisted here so the platform admin's error log
@@ -237,6 +239,15 @@ func main() {
 		r.Post("/internal/cron/billing-cycle", cronHandlers.RunBillingCycle)
 		r.Post("/internal/cron/cloud-usage-poll", cronHandlers.PollCloudUsage)
 		r.Post("/internal/cron/overdue-sweep", cronHandlers.RunOverdueSweep)
+		// Combined billing-cycle + overdue-sweep, scheduled as a single
+		// Cloud Scheduler job instead of two — see RunDailyTasks's doc
+		// comment (Cloud Scheduler's Always Free tier is 3 jobs/account).
+		// The two individual routes above stay for manual/debug use, just
+		// aren't each given their own Scheduler job anymore.
+		r.Post("/internal/cron/daily-tasks", cronHandlers.RunDailyTasks)
+		// Triggered by a Cloudflare Worker Cron Trigger, not Google Cloud
+		// Scheduler — see internal/domain/dbbackup's doc comment.
+		r.Post("/internal/cron/trigger-db-backup", cronHandlers.TriggerDBBackup)
 
 		// Payment webhooks are called by the external provider, which cannot
 		// present one of our bearer tokens — authentication here is the

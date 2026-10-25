@@ -2,7 +2,7 @@
 # Builds the Flutter web app and deploys it to Cloudflare Pages.
 #
 # Required env vars:
-#   API_BASE_URL        e.g. https://api.ramadas.me — baked into the build
+#   API_BASE_URL        e.g. https://api.bpkscattlefeeds.com — baked into the build
 #                        at compile time via --dart-define; see
 #                        apps/flutter/lib/main.dart's _defaultApiBaseUrl().
 #   CF_PAGES_PROJECT     e.g. feedmate — the Cloudflare Pages project name

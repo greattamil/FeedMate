@@ -180,16 +180,24 @@ haven't paid in a while). How they're driven differs by deployment target
   torn down entirely while idle) and its default CPU throttling (CPU is
   frozen between requests, even on a warm instance) mean an in-process
   ticker only ever fires at container boot, never on its real schedule.
-  Instead, three Google Cloud Scheduler jobs (free tier, provisioned by the
-  same deploy script when `EDGE_SHARED_SECRET` and `CRON_SECRET` are set in
-  the shell) call `POST /api/v1/internal/cron/billing-cycle` (every 24h),
-  `POST /api/v1/internal/cron/cloud-usage-poll` (hourly), and
-  `POST /api/v1/internal/cron/overdue-sweep` (every 24h) directly,
-  each carrying both `X-Edge-Secret` and `X-Cron-Secret`. This keeps the
-  same "pay only for real work" cost profile scale-to-zero already gives
-  the rest of the app — each scheduled hit is just one more cheap request
-  — while guaranteeing the jobs actually run on schedule. See
+  Instead, two Google Cloud Scheduler jobs (provisioned by the same deploy
+  script when `EDGE_SHARED_SECRET` and `CRON_SECRET` are set in the shell)
+  call `POST /api/v1/internal/cron/daily-tasks` (every 24h — combines the
+  billing cycle and overdue sweep into one call, see
+  `CronHandlers.RunDailyTasks`'s doc comment) and
+  `POST /api/v1/internal/cron/cloud-usage-poll` (hourly), each carrying
+  both `X-Edge-Secret` and `X-Cron-Secret`. This keeps the same "pay only
+  for real work" cost profile scale-to-zero already gives the rest of the
+  app — each scheduled hit is just one more cheap request — while
+  guaranteeing the jobs actually run on schedule. See
   `services/api/internal/httpapi/cron_handlers.go`'s doc comment.
+
+  **Only 2 jobs, deliberately** — Cloud Scheduler's Always Free tier is
+  3 jobs per billing account (not per project). The DB backup trigger
+  (below) is a 3rd *logical* job but runs on a Cloudflare Cron Trigger
+  instead, specifically to leave this account at 2/3 GCP Scheduler jobs
+  with a full spare slot, not 3/3 — don't add a 4th Scheduler job here
+  without first checking whether it can go on Cloudflare's side instead.
 
 One-time setup on a fresh project (after `CRON_SECRET` exists in Secret
 Manager per the pattern above):
@@ -199,6 +207,83 @@ EDGE_SHARED_SECRET=$(gcloud secrets versions access latest --secret=edge-shared-
 CRON_SECRET=$(gcloud secrets versions access latest --secret=cron-secret --project=$GCP_PROJECT_ID) \
   deploy/gcp/deploy-api.sh
 ```
+
+## Automated database backups
+
+Split deliberately across two providers, each doing the part it's
+actually good at:
+
+```
+Cloudflare Worker Cron Trigger (deploy/cloudflare/db-backup/, daily, free)
+  --POST /internal/cron/trigger-db-backup, X-Cron-Secret-->
+Cloud Run API (internal/domain/dbbackup.Trigger, ambient credentials)
+  --Cloud Run Admin API jobs.run-->
+Cloud Run Job feedmate-db-backup (deploy/backup/ — pg_dump, free tier)
+  --PUT, Authorization: Bearer UPLOAD_SECRET-->
+Cloudflare Worker (same one, fetch() handler, R2 binding)
+  --writes-->
+R2 bucket bpks-db-backups (private, 90-day lifecycle rule, free tier)
+```
+
+**Why not GCP Cloud Scheduler for this?** Scheduler's Always Free tier is
+3 jobs/billing account; the app already needs 2 (see "Scheduled jobs"
+above). A 3rd for backups would leave zero headroom and risk tipping into
+billing on the very next thing that needs scheduling. Cloudflare Cron
+Triggers have no comparable per-account job cap, so backup scheduling
+lives there instead.
+
+**Why not a GCS bucket for storage?** No reason beyond consolidation —
+this stack's actual storage/CDN layer is already Cloudflare (Pages, R2 for
+downloads), so backups use R2 too rather than splitting storage across two
+providers for no benefit. `bpks-db-backups` is a **separate, private**
+bucket from the public downloads one — never give it a public custom
+domain or enable its r2.dev URL.
+
+**Why does `pg_dump` still run on Cloud Run at all, then?** Cloudflare
+Workers run in a V8 isolate, not a container — they cannot execute
+`pg_dump` or any other arbitrary binary. A Cloud Run Job is the smallest
+piece of real compute this stack has, and it's already confirmed to run
+entirely within Cloud Run's free tier (scale-to-zero; a sub-minute daily
+job is negligible CPU-time).
+
+Two non-obvious things this needed, both documented in
+`deploy/backup/backup.sh`'s comments:
+- **`pg_dump` requires a client version >= the server's.** The image uses
+  `postgres:18-trixie` as its base specifically so the bundled `pg_dump`
+  always matches whatever Postgres major version the server runs (e.g.
+  Aiven) — bump the tag if that version ever changes, rather than fighting
+  Debian stable's own (older) `postgresql-client` package.
+- **`app_admin` has no `BYPASSRLS`** (by design — see migration
+  `0012_rls_policies.up.sql`); it instead requires an explicit
+  `app.admin_mode=on` session flag, set via `PGOPTIONS`. `pg_dump` also
+  defaults to requesting `row_security=off` (an unfiltered dump), which
+  only a superuser/`BYPASSRLS` role may do — `--enable-row-security` makes
+  it dump through RLS normally instead, which (combined with
+  `admin_mode=on` making every table's policy permissive to `app_admin`)
+  still yields a complete, every-tenant dump.
+
+Trigger one manually (any of these three, equivalent):
+- `curl -X POST https://api.bpkscattlefeeds.com/api/v1/internal/cron/trigger-db-backup -H "X-Cron-Secret: <cron_secret>"`
+- `gcloud run jobs execute feedmate-db-backup --region=asia-south1 --project=<project>`
+- From `deploy/cloudflare/db-backup/`: `wrangler dev --test-scheduled`, then `curl -X POST "http://127.0.0.1:<port>/cdn-cgi/handler/scheduled?cron=0+2+*+*+*"`
+
+List backups: `wrangler r2 object get "bpks-db-backups/<filename>" --file=<local-path> --remote` (no bulk list command in wrangler; check the Cloudflare dashboard's R2 browser for the full list).
+Restore: `pg_restore --clean --if-exists --dbname="<admin_url>" <dump-file>`.
+
+### One-time setup on a fresh environment
+1. `deploy/gcp/deploy-db-backup.sh` (GCP side — builds the image, creates the Cloud Run Job, grants it read access to `db-credentials` and `roles/run.invoker` to both the backup-scheduler SA and the API's own runtime SA).
+2. `gcloud artifacts repositories set-cleanup-policies cloud-run-source-deploy --location=<region> --policy=deploy/gcp/artifact-cleanup-policy.json` — keeps Artifact Registry's own storage within its free tier automatically (see below).
+3. From `deploy/cloudflare/db-backup/`: `wrangler deploy`, then `wrangler secret put CRON_SECRET` (same value as the API's) and `wrangler secret put UPLOAD_SECRET` (a fresh random value — must also be set as the Cloud Run Job's `UPLOAD_SECRET` env var).
+
+### Keeping Artifact Registry itself inside the free tier
+Every `gcloud builds submit` (for both the API and the backup image) adds
+a new untagged image layer set; left unpruned these accumulate and will
+eventually exceed Artifact Registry's 0.5 GB free allowance.
+`deploy/gcp/artifact-cleanup-policy.json` (applied via
+`gcloud artifacts repositories set-cleanup-policies`, see above) handles
+this automatically and permanently: keeps the 5 most recent image
+versions regardless of tag state, and deletes any other untagged image
+older than 1 day. Set once; never needs manual pruning again.
 
 ## Alternative: self-hosted / VPS deployment
 

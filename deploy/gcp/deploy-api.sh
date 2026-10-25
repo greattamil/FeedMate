@@ -46,11 +46,23 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 API_DIR="$SCRIPT_DIR/../../services/api"
 
+# --max-instances is passed explicitly on every deploy, not left to
+# Cloud Run's default, because the service also carries a separate,
+# sticky top-level "default max instances" field (visible as
+# metadata.annotations['run.googleapis.com/maxScale'], distinct from the
+# per-revision autoscaling.knative.dev/maxScale that actually governs
+# live traffic) which `gcloud run services update --max-instances`
+# doesn't touch — found set to 3 from some earlier point in this
+# project's history, worth never silently inheriting again. One
+# instance is the deliberate choice: this is a low-traffic internal API,
+# not something that needs to burst to multiple concurrent instances,
+# and staying at 1 keeps Cloud Run cost trivially within the free tier.
 echo "Deploying $CLOUD_RUN_SERVICE to $GCP_PROJECT_ID / $GCP_REGION ..."
 gcloud run deploy "$CLOUD_RUN_SERVICE" \
   --source "$API_DIR" \
   --region="$GCP_REGION" \
   --project="$GCP_PROJECT_ID" \
+  --max-instances=1 \
   --update-env-vars="GCP_PROJECT_ID=$GCP_PROJECT_ID,ENABLE_IN_PROCESS_SCHEDULER=false,FIREBASE_PROJECT_ID=$GCP_PROJECT_ID" \
   --quiet
 

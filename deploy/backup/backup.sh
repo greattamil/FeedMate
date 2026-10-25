@@ -9,26 +9,27 @@
 # reasoning), and that's already confirmed within the Always Free tier.
 #
 # Required (set by the Job definition, not baked into the image):
-#   DB_CREDENTIALS_FILE   path to the mounted db-credentials JSON secret
-#                         (the same secret the API itself uses — see
-#                         deploy/ENVIRONMENT.md — reused here read-only so
-#                         this job needs no secret of its own)
+#   APP_SECRETS_FILE      path to the mounted app-secrets JSON secret —
+#                         the single consolidated secret the API itself
+#                         also reads (see deploy/ENVIRONMENT.md), reused
+#                         here read-only so this job needs no secret of
+#                         its own beyond the dedicated UPLOAD_SECRET below.
 #   UPLOAD_URL            e.g. https://bpks-db-backup.sritamil-feedmate.workers.dev
 #   UPLOAD_SECRET          bearer token the upload Worker requires —
 #                         must match its own UPLOAD_SECRET (wrangler secret,
 #                         deploy/cloudflare/db-backup/wrangler.toml)
 set -euo pipefail
 
-: "${DB_CREDENTIALS_FILE:?Set DB_CREDENTIALS_FILE}"
+: "${APP_SECRETS_FILE:?Set APP_SECRETS_FILE}"
 : "${UPLOAD_URL:?Set UPLOAD_URL}"
 : "${UPLOAD_SECRET:?Set UPLOAD_SECRET}"
 
 # No python3/jq in this image (postgres:18-trixie doesn't ship one, and
 # pulling in a whole interpreter for one JSON field isn't worth it) — a
 # plain grep/sed extraction is enough for this one flat string field.
-DATABASE_ADMIN_URL="$(grep -oE '"admin_url":"[^"]*"' "$DB_CREDENTIALS_FILE" | sed -E 's/"admin_url":"([^"]*)"/\1/')"
+DATABASE_ADMIN_URL="$(grep -oE '"database_admin_url":"[^"]*"' "$APP_SECRETS_FILE" | sed -E 's/"database_admin_url":"([^"]*)"/\1/')"
 if [ -z "$DATABASE_ADMIN_URL" ]; then
-  echo "Failed to extract admin_url from $DB_CREDENTIALS_FILE" >&2
+  echo "Failed to extract database_admin_url from $APP_SECRETS_FILE" >&2
   exit 1
 fi
 

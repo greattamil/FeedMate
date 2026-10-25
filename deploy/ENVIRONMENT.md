@@ -24,8 +24,8 @@ the comment at the top of `deploy/cloudflare/worker/worker.js`.
 
 | Var | Required | Notes |
 |---|---|---|
-| `DATABASE_URL` | yes (directly, or via `DB_CREDENTIALS_FILE`) | `app_user` role, RLS-scoped connections |
-| `DATABASE_ADMIN_URL` | yes (directly, or via `DB_CREDENTIALS_FILE`) | `app_admin` role, used only for cross-tenant admin ops |
+| `DATABASE_URL` | yes (directly, or via `APP_SECRETS_FILE`) | `app_user` role, RLS-scoped connections |
+| `DATABASE_ADMIN_URL` | yes (directly, or via `APP_SECRETS_FILE`) | `app_admin` role, used only for cross-tenant admin ops |
 | `JWT_SIGNING_KEY` | yes in production | |
 | `SANDBOX_WEBHOOK_SECRET` | yes in production (unless a real `PAYMENT_PROVIDER` is configured) | |
 | `APP_ENV` | no (default `development`) | set to `production` on Cloud Run |
@@ -34,8 +34,8 @@ the comment at the top of `deploy/cloudflare/worker/worker.js`.
 | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | optional | enables the Cloudflare card; token needs Account Analytics + Billing read scopes |
 | `AIVEN_API_TOKEN`, `AIVEN_PROJECT`, `AIVEN_SERVICE` | optional | enables the Aiven disk-limit reading; disk *usage* is always live via `pg_database_size()` regardless |
 | `CLOUD_USAGE_POLL_INTERVAL` | no (default `1h`) | |
-| `EDGE_SHARED_SECRET` | strongly recommended in production (directly, or via `INTERNAL_SECRETS_FILE`) | must match the Worker's copy; blocks direct traffic to the bare `*.run.app` URL — see `middleware.RequireEdgeSecret`. Leave unset only for local dev. |
-| `CRON_SECRET` | required on Cloud Run (directly, or via `INTERNAL_SECRETS_FILE`) | gates `/api/v1/internal/cron/*` (billing cycle, cloud-usage poll) — see "Scheduled jobs" below |
+| `EDGE_SHARED_SECRET` | strongly recommended in production (directly, or via `APP_SECRETS_FILE`) | must match the Worker's copy; blocks direct traffic to the bare `*.run.app` URL — see `middleware.RequireEdgeSecret`. Leave unset only for local dev. |
+| `CRON_SECRET` | required on Cloud Run (directly, or via `APP_SECRETS_FILE`) | gates `/api/v1/internal/cron/*` (billing cycle, cloud-usage poll, DB backup trigger) — see "Scheduled jobs" below |
 | `ENABLE_IN_PROCESS_SCHEDULER` | no (default `true`) | set to `false` on Cloud Run (done by `deploy-api.sh`) — see "Scheduled jobs" below |
 | `FIREBASE_PROJECT_ID` | optional | enables push notifications (`internal/domain/pushnotify`) — in practice the same value as `GCP_PROJECT_ID`, since Firebase is added to the existing GCP project (see `deploy/gcp/setup-firebase.sh`, one-time). Uses the same Cloud Run ambient identity as the GCP Cloud Usage card — no separate credential, just the `roles/firebasecloudmessaging.admin` IAM grant `deploy-api.sh` adds. |
 
@@ -43,60 +43,64 @@ Every "optional" var above degrades gracefully when unset — that provider's
 dashboard card (or, for the edge secret, the edge-secret check itself) is
 simply skipped, never a startup failure.
 
-### Why two secrets are JSON files, not four separate ones
+### One secret, not six: `app-secrets`
 
-Secret Manager's free tier is **6 active secret versions/month** (pooled
-per billing account) — beyond that, each extra version costs a small
-amount. To stay at exactly 6 rather than quietly drifting over it,
-`DATABASE_URL`+`DATABASE_ADMIN_URL` share one secret (`db-credentials`,
-a JSON object `{"url":"...","admin_url":"..."}`) and
-`EDGE_SHARED_SECRET`+`CRON_SECRET` share another (`internal-secrets`,
-`{"edge_secret":"...","cron_secret":"..."}`). Both are mounted as **files**
-(Cloud Run secret volumes, not plain env vars) at `DB_CREDENTIALS_FILE` /
-`INTERNAL_SECRETS_FILE`, which `config.Load()` parses — see
+Every production secret this service needs — `DATABASE_URL`,
+`DATABASE_ADMIN_URL`, `JWT_SIGNING_KEY`, `SANDBOX_WEBHOOK_SECRET`,
+`EDGE_SHARED_SECRET`, `CRON_SECRET`, `CLOUDFLARE_API_TOKEN`,
+`AIVEN_API_TOKEN` — lives in **one** Secret Manager secret, `app-secrets`,
+as a single JSON object:
+```json
+{"database_url":"...","database_admin_url":"...","jwt_signing_key":"...",
+ "sandbox_webhook_secret":"...","edge_secret":"...","cron_secret":"...",
+ "cloudflare_api_token":"...","aiven_api_token":"..."}
+```
+Mounted as a **file** (a Cloud Run secret volume, not a plain env var) at
+`APP_SECRETS_FILE`, which `config.Load()` parses — see
 `loadJSONSecretFile` in `config.go`. The individual env vars
 (`DATABASE_URL` etc.) still work directly and take priority when set,
 which is what local dev and the self-hosted/VPS `docker-compose.prod.yml`
-path use — no JSON file involved there. Current total: 6 secrets
-(`db-credentials`, `internal-secrets`, `jwt-signing-key`,
-`sandbox-webhook-secret`, `cloudflare-api-token`, `aiven-api-token`) — at
-the free-tier line, not over it.
+path use — no JSON file involved there.
+
+This replaced an earlier design with six separate secrets (one per
+value, two of them already consolidated pairs) after a billing audit
+found it had drifted to **10 active versions** against Secret Manager's
+free tier of 6/billing account — old versions had accumulated from
+updates that created a new version without disabling the previous one.
+One secret with one active version leaves maximum headroom under that
+limit permanently, not just "currently at the line."
 
 ### One-time secret setup (GCP Secret Manager)
 ```bash
-# plain string secrets: JWT_SIGNING_KEY, SANDBOX_WEBHOOK_SECRET,
-# CLOUDFLARE_API_TOKEN, AIVEN_API_TOKEN
-gcloud secrets create <name> --project=$GCP_PROJECT_ID --replication-policy=automatic
-printf '%s' "<value>" | gcloud secrets versions add <name> --project=$GCP_PROJECT_ID --data-file=-
-gcloud secrets add-iam-policy-binding <name> --project=$GCP_PROJECT_ID \
-  --member="serviceAccount:$(gcloud projects describe $GCP_PROJECT_ID --format='value(projectNumber)')-compute@developer.gserviceaccount.com" \
-  --role="roles/secretmanager.secretAccessor"
-
-# the two JSON secrets (db-credentials, internal-secrets): same create +
-# add-iam-policy-binding, but --data-file MUST point at a file with NO
-# byte-order mark. In PowerShell, use [System.Text.Encoding]::ASCII —
-# NEVER the plain [System.Text.Encoding]::UTF8 constant, which silently
-# prepends a BOM that Go's encoding/json rejects outright
-# ("invalid character '?' looking for beginning of value").
+gcloud secrets create app-secrets --project=$GCP_PROJECT_ID --replication-policy=automatic
+# --data-file MUST point at a file with NO byte-order mark. In
+# PowerShell, use [System.Text.Encoding]::ASCII — NEVER the plain
+# [System.Text.Encoding]::UTF8 constant, which silently prepends a BOM
+# that Go's encoding/json rejects outright ("invalid character '?'
+# looking for beginning of value").
 #
-# This caused a real production outage once: the file-mounted JSON
-# secrets had a BOM from the day they were created, but it went
-# undetected because a stale plain env var (DATABASE_URL etc., left
+# This caused a real production outage once (under the old multi-secret
+# design): a file-mounted JSON secret had a BOM from the day it was
+# created, but it went undetected because a stale plain env var (left
 # over from `--remove-env-vars` silently NOT removing a *secret-backed*
 # env var — see the gotcha below) was masking it as a fallback the whole
 # time. The moment that stale fallback was properly removed, every fresh
-# container instance failed to start. `loadJSONSecretFile` now logs a
+# container instance failed to start. `loadJSONSecretFile` logs a
 # slog.Error on any read/parse failure specifically so this class of bug
 # is never silent again — if you see "config: failed to parse JSON
 # secret file" in the logs, suspect a BOM first.
+gcloud secrets versions add app-secrets --project=$GCP_PROJECT_ID --data-file=path/to/app-secrets.json
+gcloud secrets add-iam-policy-binding app-secrets --project=$GCP_PROJECT_ID \
+  --member="serviceAccount:$(gcloud projects describe $GCP_PROJECT_ID --format='value(projectNumber)')-compute@developer.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor"
 ```
 
 **Gotcha: removing a *secret-backed* env var needs `--remove-secrets`, not
 `--remove-env-vars`.** `--remove-env-vars` only removes plain env vars —
 against a secret-backed one it is a silent no-op (no error, the entry just
 stays). Use `gcloud run services update --remove-secrets=NAME1,NAME2`
-instead. If you also need to touch the file-mounted secrets in the same
-call, re-pass `--update-secrets` with their *existing* mount paths in the
+instead. If you also need to touch the file-mounted secret in the same
+call, re-pass `--update-secrets` with its *existing* mount path in the
 very same command — repeating `--update-secrets` for an already-mounted
 path across separate commands creates a **second, differently-named
 volume** for the same mount path instead of updating the first one
@@ -106,14 +110,20 @@ same container path breaks startup. Prefer one atomic
 ones, and sanity-check with
 `gcloud run revisions describe <rev> --format=json` (look at `spec.volumes`
 for duplicates) if a deploy ever fails mysteriously after touching secrets.
-Mount a plain secret as an env var with
-`gcloud run services update <service> --update-secrets="ENV_NAME=<secret-name>:latest"`,
-or a JSON one as a file with
-`--update-secrets="/secrets/<dir>/<file>.json=<secret-name>:latest"`
-(each secret needs its **own** directory under `/secrets/` — Cloud Run
-rejects two different secrets mounted in the same directory) plus
-`--update-env-vars="DB_CREDENTIALS_FILE=/secrets/db/db-credentials.json"`
-(or `INTERNAL_SECRETS_FILE=...`) pointing at that path.
+Mount the secret as a file with
+`--update-secrets="/secrets/app/app-secrets.json=app-secrets:latest"` plus
+`--update-env-vars="APP_SECRETS_FILE=/secrets/app/app-secrets.json"`
+pointing at that same path.
+
+**When rotating any one value, you're replacing the whole JSON object** —
+fetch the current version, edit the one field that changed, and
+`gcloud secrets versions add` the full object back. Adding a new version
+this way is normal and expected (that's what keeps the secret current);
+what caused the earlier 10-version drift was never disabling/destroying
+the *previous* version after doing so. After rotating, check
+`gcloud secrets versions list app-secrets` and destroy anything older
+than the new `latest` that's no longer needed:
+`gcloud secrets versions destroy <old-version-number> --secret=app-secrets --project=$GCP_PROJECT_ID`.
 
 **Use `printf '%s'`, never `echo` or a PowerShell pipe, when writing a
 secret value** — both can silently append a trailing newline, which Go's
@@ -271,7 +281,7 @@ List backups: `wrangler r2 object get "bpks-db-backups/<filename>" --file=<local
 Restore: `pg_restore --clean --if-exists --dbname="<admin_url>" <dump-file>`.
 
 ### One-time setup on a fresh environment
-1. `deploy/gcp/deploy-db-backup.sh` (GCP side — builds the image, creates the Cloud Run Job, grants it read access to `db-credentials` and `roles/run.invoker` to both the backup-scheduler SA and the API's own runtime SA).
+1. `deploy/gcp/deploy-db-backup.sh` (GCP side — builds the image, creates the Cloud Run Job, grants it read access to `app-secrets` and `roles/run.invoker` to both the backup-scheduler SA and the API's own runtime SA).
 2. `gcloud artifacts repositories set-cleanup-policies cloud-run-source-deploy --location=<region> --policy=deploy/gcp/artifact-cleanup-policy.json` — keeps Artifact Registry's own storage within its free tier automatically (see below).
 3. From `deploy/cloudflare/db-backup/`: `wrangler deploy`, then `wrangler secret put CRON_SECRET` (same value as the API's) and `wrangler secret put UPLOAD_SECRET` (a fresh random value — must also be set as the Cloud Run Job's `UPLOAD_SECRET` env var).
 

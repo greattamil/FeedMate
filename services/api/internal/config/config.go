@@ -116,47 +116,51 @@ func loadJSONSecretFile(path string) map[string]string {
 }
 
 func Load() (Config, error) {
-	// dbCredentials / internalSecrets: on Cloud Run, DB_CREDENTIALS_FILE
-	// and INTERNAL_SECRETS_FILE point at two small JSON secrets mounted
-	// as files (see deploy/gcp/deploy-api.sh) — one Secret Manager entry
-	// each instead of four, to stay within Secret Manager's free tier of
-	// 6 active secret versions/month rather than quietly going a few
-	// cents over it. Each individual env var below (DATABASE_URL, etc.)
-	// still wins if set directly, which is what local dev and the
-	// self-hosted/VPS docker-compose path do — no file involved there.
-	dbCredentials := loadJSONSecretFile(os.Getenv("DB_CREDENTIALS_FILE"))
-	internalSecrets := loadJSONSecretFile(os.Getenv("INTERNAL_SECRETS_FILE"))
+	// appSecrets: on Cloud Run, APP_SECRETS_FILE points at a single JSON
+	// secret (Secret Manager entry "app-secrets") mounted as a file,
+	// holding every production secret this service needs as one object
+	// — database_url, database_admin_url, jwt_signing_key,
+	// sandbox_webhook_secret, edge_secret, cron_secret,
+	// cloudflare_api_token, aiven_api_token. One secret, one active
+	// version, instead of six separate Secret Manager entries (the
+	// previous design) — simpler to rotate/audit, and leaves maximum
+	// headroom under Secret Manager's free tier of 6 active versions/
+	// account rather than sitting right at the line. Each individual env
+	// var below (DATABASE_URL, etc.) still wins if set directly, which
+	// is what local dev and the self-hosted/VPS docker-compose path do —
+	// no file involved there.
+	appSecrets := loadJSONSecretFile(os.Getenv("APP_SECRETS_FILE"))
 
 	cfg := Config{
 		AppEnv:               getEnv("APP_ENV", "development"),
 		HTTPAddr:             resolveHTTPAddr(),
-		DatabaseURL:          firstNonEmpty(os.Getenv("DATABASE_URL"), dbCredentials["url"]),
-		DatabaseAdminURL:     firstNonEmpty(os.Getenv("DATABASE_ADMIN_URL"), dbCredentials["admin_url"]),
+		DatabaseURL:          firstNonEmpty(os.Getenv("DATABASE_URL"), appSecrets["database_url"]),
+		DatabaseAdminURL:     firstNonEmpty(os.Getenv("DATABASE_ADMIN_URL"), appSecrets["database_admin_url"]),
 		DBPoolMaxConns:       int32(getInt("DB_POOL_MAX_CONNS", 8)),
 		DBAdminPoolMaxConns:  int32(getInt("DB_ADMIN_POOL_MAX_CONNS", 3)),
 		RedisURL:             os.Getenv("REDIS_URL"),
-		JWTSigningKey:        os.Getenv("JWT_SIGNING_KEY"),
+		JWTSigningKey:        firstNonEmpty(os.Getenv("JWT_SIGNING_KEY"), appSecrets["jwt_signing_key"]),
 		AccessTokenTTL:       getDuration("ACCESS_TOKEN_TTL", 15*time.Minute),
 		RefreshTokenTTL:      getDuration("REFRESH_TOKEN_TTL", 30*24*time.Hour),
 		BcryptCost:           getInt("BCRYPT_COST", 12),
 		AdminAPIEnabled:      getBool("ADMIN_API_ENABLED", false),
 		IdempotencyRetention: getDuration("IDEMPOTENCY_RETENTION", 7*24*time.Hour),
 		PaymentProvider:      getEnv("PAYMENT_PROVIDER", "sandbox"),
-		SandboxWebhookSecret: os.Getenv("SANDBOX_WEBHOOK_SECRET"),
+		SandboxWebhookSecret: firstNonEmpty(os.Getenv("SANDBOX_WEBHOOK_SECRET"), appSecrets["sandbox_webhook_secret"]),
 
-		CloudflareAPIToken:     os.Getenv("CLOUDFLARE_API_TOKEN"),
+		CloudflareAPIToken:     firstNonEmpty(os.Getenv("CLOUDFLARE_API_TOKEN"), appSecrets["cloudflare_api_token"]),
 		CloudflareAccountID:    os.Getenv("CLOUDFLARE_ACCOUNT_ID"),
 		GCPProjectID:           os.Getenv("GCP_PROJECT_ID"),
-		AivenAPIToken:          os.Getenv("AIVEN_API_TOKEN"),
+		AivenAPIToken:          firstNonEmpty(os.Getenv("AIVEN_API_TOKEN"), appSecrets["aiven_api_token"]),
 		AivenProject:           os.Getenv("AIVEN_PROJECT"),
 		AivenService:           os.Getenv("AIVEN_SERVICE"),
 		CloudUsagePollInterval: getDuration("CLOUD_USAGE_POLL_INTERVAL", 1*time.Hour),
 		FirebaseProjectID:      os.Getenv("FIREBASE_PROJECT_ID"),
 		GCPRegion:              getEnv("GCP_REGION", "asia-south1"),
 		DBBackupJobName:        getEnv("DB_BACKUP_JOB_NAME", "feedmate-db-backup"),
-		EdgeSharedSecret:       firstNonEmpty(os.Getenv("EDGE_SHARED_SECRET"), internalSecrets["edge_secret"]),
+		EdgeSharedSecret:       firstNonEmpty(os.Getenv("EDGE_SHARED_SECRET"), appSecrets["edge_secret"]),
 
-		CronSecret:               firstNonEmpty(os.Getenv("CRON_SECRET"), internalSecrets["cron_secret"]),
+		CronSecret:               firstNonEmpty(os.Getenv("CRON_SECRET"), appSecrets["cron_secret"]),
 		EnableInProcessScheduler: getBool("ENABLE_IN_PROCESS_SCHEDULER", true),
 	}
 

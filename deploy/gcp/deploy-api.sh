@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 # Deploys the Go API (services/api) to Cloud Run, grants the two IAM
 # roles the cloud-usage poller (internal/domain/cloudusage) needs to read
-# live GCP Monitoring/Service-Usage data, and provisions the three Cloud
-# Scheduler jobs that drive the billing cycle, cloud-usage poll, and
-# overdue-payment sweep — see
+# live GCP Monitoring/Service-Usage data, and provisions the two Cloud
+# Scheduler jobs that drive the combined billing-cycle/overdue-sweep and
+# the cloud-usage poll — see
 # services/api/internal/httpapi/cron_handlers.go's doc comment for why
 # Cloud Scheduler is used instead of relying solely on the in-process
 # ticker (it silently never fires on Cloud Run's scale-to-zero while idle).
+# Only 2, deliberately, not 3 — see CronHandlers.RunDailyTasks's doc
+# comment: Cloud Scheduler's Always Free tier is 3 jobs/billing account,
+# and a 3rd logical job (the DB backup trigger) runs on a Cloudflare Cron
+# Trigger instead, leaving a spare slot here.
 #
 # Nothing here is hardcoded to one GCP account/project — every
 # account-specific value is an env var. To deploy to a different project,
@@ -21,16 +25,17 @@
 #                         Worker reverse proxy instead; see ../cloudflare/worker)
 #   CLOUD_RUN_SERVICE    e.g. feedmate-api
 #
-# Secrets (CLOUDFLARE_API_TOKEN, AIVEN_API_TOKEN, JWT_SIGNING_KEY,
-# SANDBOX_WEBHOOK_SECRET, plus the consolidated db-credentials and
-# internal-secrets JSON secrets carrying DATABASE_URL/DATABASE_ADMIN_URL
-# and EDGE_SHARED_SECRET/CRON_SECRET) are NOT set by this script — see
-# ../ENVIRONMENT.md for how to create/mount them via GCP Secret Manager
-# (including why two of them are JSON files, not four separate secrets:
-# staying within Secret Manager's 6-free-active-versions tier). This
-# script only updates plain (non-secret) env vars, deploys the container,
-# and provisions the Scheduler jobs; run the one-time secret-creation
-# steps in ENVIRONMENT.md first on a fresh project.
+# Secrets are NOT set by this script — see ../ENVIRONMENT.md for how to
+# create/mount them via GCP Secret Manager. Every production secret
+# (DATABASE_URL, DATABASE_ADMIN_URL, JWT_SIGNING_KEY,
+# SANDBOX_WEBHOOK_SECRET, EDGE_SHARED_SECRET, CRON_SECRET,
+# CLOUDFLARE_API_TOKEN, AIVEN_API_TOKEN) lives in ONE consolidated JSON
+# secret, "app-secrets", mounted as a file at APP_SECRETS_FILE — one
+# Secret Manager secret/active-version total instead of six, well under
+# its free tier of 6 active versions/account rather than sitting right at
+# the line. This script only updates plain (non-secret) env vars, deploys
+# the container, and provisions the Scheduler jobs; run the one-time
+# secret-creation steps in ENVIRONMENT.md first on a fresh project.
 
 set -euo pipefail
 

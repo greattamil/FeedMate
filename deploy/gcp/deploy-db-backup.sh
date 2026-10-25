@@ -25,8 +25,8 @@
 #                          (`wrangler secret put UPLOAD_SECRET` from
 #                          ../cloudflare/db-backup/)
 #
-# Assumes the db-credentials secret (JSON, "admin_url" field) already
-# exists per ../ENVIRONMENT.md.
+# Assumes the consolidated "app-secrets" secret (JSON, "database_admin_url"
+# field among others) already exists per ../ENVIRONMENT.md.
 
 set -euo pipefail
 
@@ -54,26 +54,26 @@ gcloud artifacts repositories set-cleanup-policies cloud-run-source-deploy \
 PROJECT_NUMBER="$(gcloud projects describe "$GCP_PROJECT_ID" --format='value(projectNumber)')"
 JOB_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
 
-# backup.sh mounts the db-credentials JSON secret and parses admin_url out
-# of it itself — the same secret the API already uses (see
-# ../ENVIRONMENT.md), reused here read-only. The default compute service
-# account already has secretmanager.secretAccessor on it (the API needs
-# that too), so no new secret or IAM grant is needed for this.
+# backup.sh mounts the consolidated app-secrets JSON secret and parses
+# database_admin_url out of it itself — the same secret the API already
+# uses (see ../ENVIRONMENT.md), reused here read-only. The default
+# compute service account already has secretmanager.secretAccessor on
+# it (the API needs that too), so no new IAM grant is needed for this.
 echo "Deploying Cloud Run Job $JOB_NAME ..."
 if gcloud run jobs describe "$JOB_NAME" --region="$GCP_REGION" --project="$GCP_PROJECT_ID" >/dev/null 2>&1; then
   gcloud run jobs update "$JOB_NAME" \
     --image="$IMAGE" \
     --region="$GCP_REGION" --project="$GCP_PROJECT_ID" \
-    --set-env-vars="DB_CREDENTIALS_FILE=/secrets/db/db-credentials.json,UPLOAD_URL=$UPLOAD_URL,UPLOAD_SECRET=$UPLOAD_SECRET" \
-    --set-secrets="/secrets/db/db-credentials.json=db-credentials:latest" \
+    --set-env-vars="APP_SECRETS_FILE=/secrets/app/app-secrets.json,UPLOAD_URL=$UPLOAD_URL,UPLOAD_SECRET=$UPLOAD_SECRET" \
+    --set-secrets="/secrets/app/app-secrets.json=app-secrets:latest" \
     --task-timeout=900 --max-retries=1 \
     --quiet
 else
   gcloud run jobs create "$JOB_NAME" \
     --image="$IMAGE" \
     --region="$GCP_REGION" --project="$GCP_PROJECT_ID" \
-    --set-env-vars="DB_CREDENTIALS_FILE=/secrets/db/db-credentials.json,UPLOAD_URL=$UPLOAD_URL,UPLOAD_SECRET=$UPLOAD_SECRET" \
-    --set-secrets="/secrets/db/db-credentials.json=db-credentials:latest" \
+    --set-env-vars="APP_SECRETS_FILE=/secrets/app/app-secrets.json,UPLOAD_URL=$UPLOAD_URL,UPLOAD_SECRET=$UPLOAD_SECRET" \
+    --set-secrets="/secrets/app/app-secrets.json=app-secrets:latest" \
     --task-timeout=900 --max-retries=1 \
     --quiet
 fi

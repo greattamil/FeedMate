@@ -42,7 +42,21 @@ func (h *ProcurementHandlers) ListGRNs(w http.ResponseWriter, r *http.Request) {
 			offset = n
 		}
 	}
-	page, err := h.Procurement.ListGRNs(r.Context(), claims.TenantID, query, limit, offset)
+	var dateFrom, dateTo *time.Time
+	if v := r.URL.Query().Get("date_from"); v != "" {
+		if t, err := time.Parse("2006-01-02", v); err == nil {
+			dateFrom = &t
+		}
+	}
+	if v := r.URL.Query().Get("date_to"); v != "" {
+		if t, err := time.Parse("2006-01-02", v); err == nil {
+			// Inclusive of the whole end day, same convention as the
+			// sales-summary report's date range filter.
+			endOfDay := t.Add(24*time.Hour - time.Nanosecond)
+			dateTo = &endOfDay
+		}
+	}
+	page, err := h.Procurement.ListGRNs(r.Context(), claims.TenantID, query, dateFrom, dateTo, limit, offset)
 	if err != nil {
 		WriteError(w, r, CodeInternal, "failed to list GRNs: "+err.Error())
 		return
@@ -54,6 +68,8 @@ func (h *ProcurementHandlers) ListGRNs(w http.ResponseWriter, r *http.Request) {
 			"grn_number":    g.Header.GRNNumber,
 			"supplier_name": g.SupplierName,
 			"status":        g.Header.Status,
+			"line_count":    g.LineCount,
+			"total_value":   g.TotalValue.StringFixed(2),
 		}
 		if g.Header.SupplierDocumentNo != nil {
 			row["supplier_document_no"] = *g.Header.SupplierDocumentNo
@@ -63,7 +79,14 @@ func (h *ProcurementHandlers) ListGRNs(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, row)
 	}
-	WriteJSON(w, http.StatusOK, map[string]interface{}{"grns": out, "total": page.Total})
+	WriteJSON(w, http.StatusOK, map[string]interface{}{
+		"grns":  out,
+		"total": page.Total,
+		"summary": map[string]interface{}{
+			"grn_count":   page.Total,
+			"total_value": page.TotalValue.StringFixed(2),
+		},
+	})
 }
 
 // GetGRNDetail returns the full history view of one posted GRN: header

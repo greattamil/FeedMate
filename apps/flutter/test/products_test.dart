@@ -229,6 +229,12 @@ void main() {
 
     await _revealAndEnterText(tester, const Key('product_form_selling_price_field'), '1050.00');
 
+    // Tax profile is required — a product with none can never be quoted
+    // or sold at the counter (ErrNoTaxProfile server-side).
+    await _revealAndTap(tester, const Key('product_form_tax_profile_dropdown'));
+    await tester.tap(find.text('GST5 — 5% GST').last);
+    await tester.pumpAndSettle();
+
     await _revealAndTap(tester, const Key('product_form_save_button'));
 
     expect(postedBody, isNotNull);
@@ -236,6 +242,7 @@ void main() {
     expect(postedBody!['name'], 'New Cattle Feed');
     expect(postedBody!['default_sale_uom_id'], 'uom-bag');
     expect(postedBody!['selling_price'], '1050.00');
+    expect(postedBody!['tax_profile_id'], 'tax-gst5');
 
     // The form pops(true) on success, and the list screen refreshes.
     expect(find.byType(ProductListScreen), findsOneWidget);

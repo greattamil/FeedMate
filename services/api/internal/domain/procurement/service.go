@@ -28,23 +28,28 @@ func NewService(db *dbctx.DB) *Service {
 	return &Service{db: db}
 }
 
-// GRNListPage is one page of the GRN history browse list.
+// GRNListPage is one page of the GRN history browse list, plus totals
+// (count + received value) across every GRN matching the filter, not just
+// this page — the history screen's summary banner.
 type GRNListPage struct {
-	GRNs  []GRNSummary
-	Total int
+	GRNs       []GRNSummary
+	Total      int
+	TotalValue decimal.Decimal
 }
 
 // ListGRNs returns posted GRNs newest-first — the procurement history
-// screen's browse endpoint.
-func (s *Service) ListGRNs(ctx context.Context, tenantID uuid.UUID, query string, limit, offset int) (*GRNListPage, error) {
+// screen's browse endpoint. dateFrom/dateTo (either may be nil) filter on
+// posted_at.
+func (s *Service) ListGRNs(ctx context.Context, tenantID uuid.UUID, query string, dateFrom, dateTo *time.Time, limit, offset int) (*GRNListPage, error) {
 	var page GRNListPage
 	err := s.db.WithTenantReadTx(ctx, tenantID, func(tx pgx.Tx) error {
-		grns, total, err := ListGRNs(ctx, tx, query, limit, offset)
+		grns, totals, err := ListGRNs(ctx, tx, query, dateFrom, dateTo, limit, offset)
 		if err != nil {
 			return err
 		}
 		page.GRNs = grns
-		page.Total = total
+		page.Total = totals.Count
+		page.TotalValue = totals.TotalValue
 		return nil
 	})
 	if err != nil {

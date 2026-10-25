@@ -103,6 +103,22 @@ class _CatalogPanelState extends State<CatalogPanel> {
     _debounce = Timer(const Duration(milliseconds: 300), () => _search(query));
   }
 
+  /// Forces a real-time re-fetch of the catalog, categories and stock —
+  /// not just the product list. The catalog panel only loads once, in
+  /// initState; a product added or edited in Products admin while this
+  /// screen stays mounted in the background (the Counter tab is kept
+  /// alive, not rebuilt, by AppShell's tab IndexedStack) never showed up
+  /// here until the cashier happened to type a search query, which
+  /// re-triggered _search anyway — this makes that refresh explicit and
+  /// discoverable instead of accidental.
+  Future<void> _refresh() async {
+    await Future.wait([
+      _search(_searchController.text),
+      _loadCategories(),
+      _loadStock(),
+    ]);
+  }
+
   void _onCategorySelected(String? categoryId) {
     setState(() => _selectedCategoryId = categoryId);
     _search(_searchController.text);
@@ -155,32 +171,62 @@ class _CatalogPanelState extends State<CatalogPanel> {
           color: AppColors.surface,
           child: Column(
             children: [
-              TextField(
-                key: const Key('search_field'),
-                controller: _searchController,
-                autofocus: true,
-                decoration: InputDecoration(
-                  labelText: 'Scan barcode or search (English / Tamil / SKU)',
-                  prefixIcon: const Icon(Icons.search_rounded, color: AppColors.primary),
-                  suffixIcon: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (_searchController.text.isNotEmpty)
-                        IconButton(
-                          icon: const Icon(Icons.clear_rounded, size: 18),
-                          onPressed: () {
-                            _searchController.clear();
-                            _onQueryChanged('');
-                          },
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      key: const Key('search_field'),
+                      controller: _searchController,
+                      autofocus: true,
+                      decoration: InputDecoration(
+                        labelText: 'Scan barcode or search (English / Tamil / SKU)',
+                        prefixIcon: const Icon(Icons.search_rounded, color: AppColors.primary),
+                        suffixIcon: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (_searchController.text.isNotEmpty)
+                              IconButton(
+                                icon: const Icon(Icons.clear_rounded, size: 18),
+                                onPressed: () {
+                                  _searchController.clear();
+                                  _onQueryChanged('');
+                                },
+                              ),
+                            const Padding(
+                              padding: EdgeInsets.only(right: 8),
+                              child: Icon(Icons.qr_code_scanner_rounded, color: AppColors.textSecondary),
+                            ),
+                          ],
                         ),
-                      const Padding(
-                        padding: EdgeInsets.only(right: 8),
-                        child: Icon(Icons.qr_code_scanner_rounded, color: AppColors.textSecondary),
                       ),
-                    ],
+                      onChanged: _onQueryChanged,
+                    ),
                   ),
-                ),
-                onChanged: _onQueryChanged,
+                  const SizedBox(width: 8),
+                  // Explicit, always-visible refresh — pull-to-refresh on
+                  // the list below covers touch devices, but a product
+                  // just added on a desktop/web back-office browser has no
+                  // "pull" gesture at all.
+                  Container(
+                    decoration: BoxDecoration(
+                      color: AppColors.surfaceSecondary,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: IconButton(
+                      key: const Key('catalog_refresh_button'),
+                      tooltip: 'Refresh product list',
+                      icon: _loading
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
+                            )
+                          : const Icon(Icons.refresh_rounded, color: AppColors.primary),
+                      onPressed: _loading ? null : _refresh,
+                    ),
+                  ),
+                ],
               ),
               if (!_loadingCategories && _categories.isNotEmpty) ...[
                 const SizedBox(height: 10),
@@ -265,25 +311,42 @@ class _CatalogPanelState extends State<CatalogPanel> {
           ),
         // Product Search Results List
         Expanded(
-          child: _results.isEmpty && !_loading
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.inventory_2_outlined, size: 48, color: AppColors.textTertiary),
-                      const SizedBox(height: 12),
-                      Text(
-                        _searchController.text.isEmpty && _selectedCategoryId == null
-                            ? 'No active products in the catalog yet'
-                            : 'No products matched your search',
-                        style: AppTypography.bodySecondary,
+          child: RefreshIndicator(
+            onRefresh: _refresh,
+            child: _results.isEmpty && !_loading
+              ? LayoutBuilder(
+                  builder: (context, constraints) => SingleChildScrollView(
+                    // A RefreshIndicator needs a scrollable child to detect
+                    // the pull gesture even in the empty state — otherwise
+                    // pull-to-refresh silently does nothing when the
+                    // catalog (or a filtered view of it) is empty.
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                      child: Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.inventory_2_outlined, size: 48, color: AppColors.textTertiary),
+                            const SizedBox(height: 12),
+                            Text(
+                              _searchController.text.isEmpty && _selectedCategoryId == null
+                                  ? 'No active products in the catalog yet'
+                                  : 'No products matched your search',
+                              style: AppTypography.bodySecondary,
+                            ),
+                            const SizedBox(height: 4),
+                            const Text('Pull down or tap refresh to check again', style: AppTypography.caption),
+                          ],
+                        ),
                       ),
-                    ],
+                    ),
                   ),
                 )
               : ListView.builder(
                   key: const Key('results_list'),
                   padding: const EdgeInsets.all(12),
+                  physics: const AlwaysScrollableScrollPhysics(),
                   itemCount: _results.length,
                   itemBuilder: (context, index) {
                     final p = _results[index];
@@ -537,6 +600,7 @@ class _CatalogPanelState extends State<CatalogPanel> {
                     );
                   },
                 ),
+          ),
         ),
       ],
     );

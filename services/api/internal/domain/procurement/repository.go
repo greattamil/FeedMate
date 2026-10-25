@@ -128,54 +128,87 @@ func GetGRNByID(ctx context.Context, tx pgx.Tx, id uuid.UUID) (*GRNHeader, error
 
 // GRNSummary is one row of the GRN history browse list — the header plus
 // the supplier's display name (goods_receipts itself keeps no name
-// snapshot, so this always joins the live supplier record).
+// snapshot, so this always joins the live supplier record) and an
+// aggregate of its lines (received_qty * unit_cost), so the history list
+// can show what each receipt was actually worth without a second
+// round-trip per row.
 type GRNSummary struct {
 	Header       GRNHeader
 	SupplierName string
+	LineCount    int
+	TotalValue   decimal.Decimal
+}
+
+// GRNListTotals summarizes every GRN matching the current filter (not just
+// the current page) — the history screen's summary banner.
+type GRNListTotals struct {
+	Count      int
+	TotalValue decimal.Decimal
 }
 
 // ListGRNs returns posted GRNs newest-first, optionally filtered by a
-// case-insensitive substring match on grn_number or the supplier's name.
-func ListGRNs(ctx context.Context, tx pgx.Tx, query string, limit, offset int) ([]GRNSummary, int, error) {
+// case-insensitive substring match on grn_number or the supplier's name,
+// and/or a posted_at date range (either bound may be nil).
+func ListGRNs(ctx context.Context, tx pgx.Tx, query string, dateFrom, dateTo *time.Time, limit, offset int) ([]GRNSummary, GRNListTotals, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
-	var total int
-	if err := tx.QueryRow(ctx, `
-		SELECT COUNT(*) FROM goods_receipts g JOIN suppliers s ON s.id = g.supplier_id
-		WHERE g.status = 'POSTED'
+	const filterClause = `
+		g.status = 'POSTED'
 		  AND ($1 = '' OR g.grn_number ILIKE '%' || $1 || '%' OR s.legal_name ILIKE '%' || $1 || '%')
-	`, query).Scan(&total); err != nil {
-		return nil, 0, err
+		  AND ($2::timestamptz IS NULL OR g.posted_at >= $2)
+		  AND ($3::timestamptz IS NULL OR g.posted_at <= $3)
+	`
+
+	var totals GRNListTotals
+	var totalValue *decimal.Decimal
+	if err := tx.QueryRow(ctx, `
+		SELECT COUNT(DISTINCT g.id), COALESCE(SUM(l.received_qty * l.unit_cost), 0)
+		FROM goods_receipts g
+		JOIN suppliers s ON s.id = g.supplier_id
+		LEFT JOIN goods_receipt_lines l ON l.goods_receipt_id = g.id
+		WHERE `+filterClause+`
+	`, query, dateFrom, dateTo).Scan(&totals.Count, &totalValue); err != nil {
+		return nil, totals, err
+	}
+	if totalValue != nil {
+		totals.TotalValue = *totalValue
 	}
 
 	rows, err := tx.Query(ctx, `
 		SELECT g.id, g.grn_number, g.supplier_id, g.purchase_order_id, g.supplier_document_no, g.vehicle_no,
 		       g.receiver_user_id, g.status, g.gross_weight_kg, g.tare_weight_kg, g.net_weight_kg, g.tare_method,
-		       g.tare_threshold_pct, g.tare_override, g.tare_override_reason, g.posted_at, s.legal_name
-		FROM goods_receipts g JOIN suppliers s ON s.id = g.supplier_id
-		WHERE g.status = 'POSTED'
-		  AND ($1 = '' OR g.grn_number ILIKE '%' || $1 || '%' OR s.legal_name ILIKE '%' || $1 || '%')
+		       g.tare_threshold_pct, g.tare_override, g.tare_override_reason, g.posted_at, s.legal_name,
+		       COALESCE(agg.line_count, 0), COALESCE(agg.total_value, 0)
+		FROM goods_receipts g
+		JOIN suppliers s ON s.id = g.supplier_id
+		LEFT JOIN LATERAL (
+			SELECT COUNT(*) AS line_count, SUM(l.received_qty * l.unit_cost) AS total_value
+			FROM goods_receipt_lines l WHERE l.goods_receipt_id = g.id
+		) agg ON true
+		WHERE `+filterClause+`
 		ORDER BY g.posted_at DESC
-		LIMIT $2 OFFSET $3
-	`, query, limit, offset)
+		LIMIT $4 OFFSET $5
+	`, query, dateFrom, dateTo, limit, offset)
 	if err != nil {
-		return nil, 0, err
+		return nil, totals, err
 	}
 	defer rows.Close()
 
 	var out []GRNSummary
 	for rows.Next() {
 		var h GRNHeader
-		var supplierName string
+		var summary GRNSummary
 		if err := rows.Scan(&h.ID, &h.GRNNumber, &h.SupplierID, &h.PurchaseOrderID, &h.SupplierDocumentNo, &h.VehicleNo,
 			&h.ReceiverUserID, &h.Status, &h.GrossWeightKg, &h.TareWeightKg, &h.NetWeightKg, &h.TareMethod,
-			&h.TareThresholdPct, &h.TareOverride, &h.TareOverrideReason, &h.PostedAt, &supplierName); err != nil {
-			return nil, 0, err
+			&h.TareThresholdPct, &h.TareOverride, &h.TareOverrideReason, &h.PostedAt, &summary.SupplierName,
+			&summary.LineCount, &summary.TotalValue); err != nil {
+			return nil, totals, err
 		}
-		out = append(out, GRNSummary{Header: h, SupplierName: supplierName})
+		summary.Header = h
+		out = append(out, summary)
 	}
-	return out, total, rows.Err()
+	return out, totals, rows.Err()
 }
 
 // GRNLineDetail is the read-side shape of one posted GRN line, for the

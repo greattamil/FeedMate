@@ -330,7 +330,7 @@ func TestListGRNs_ReturnsNewestFirstAndFiltersByQuery(t *testing.T) {
 		t.Fatalf("post second GRN: %v", err)
 	}
 
-	page, err := svc.ListGRNs(context.Background(), f.tenantID, "", 10, 0)
+	page, err := svc.ListGRNs(context.Background(), f.tenantID, "", nil, nil, 10, 0)
 	if err != nil {
 		t.Fatalf("list GRNs: %v", err)
 	}
@@ -344,7 +344,7 @@ func TestListGRNs_ReturnsNewestFirstAndFiltersByQuery(t *testing.T) {
 		t.Fatal("expected the supplier's display name to be joined in")
 	}
 
-	byNumber, err := svc.ListGRNs(context.Background(), f.tenantID, first.GRNNumber, 10, 0)
+	byNumber, err := svc.ListGRNs(context.Background(), f.tenantID, first.GRNNumber, nil, nil, 10, 0)
 	if err != nil {
 		t.Fatalf("list by number: %v", err)
 	}

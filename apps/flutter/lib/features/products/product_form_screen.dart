@@ -201,6 +201,13 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       });
       return;
     }
+    if (_taxProfileId == null) {
+      setState(() {
+        _error = 'Tax profile is required — a product with no tax profile cannot be quoted or sold at the counter';
+        _saving = false;
+      });
+      return;
+    }
 
     final draft = ProductDetail(
       id: widget.existing?.id ?? '',
@@ -534,7 +541,10 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                     DropdownButtonFormField<String>(
                       key: const Key('product_form_tax_profile_dropdown'),
                       initialValue: _taxProfileId,
-                      decoration: _fieldDecoration('Tax profile (optional)', prefixIcon: Icons.percent_rounded),
+                      decoration: _fieldDecoration('Tax profile *', prefixIcon: Icons.percent_rounded).copyWith(
+                        helperText: 'Required — a product can\'t be billed at the counter without one',
+                        helperMaxLines: 2,
+                      ),
                       items: _taxProfiles.map((t) => DropdownMenuItem(value: t.id, child: Text(t.label))).toList(),
                       onChanged: (v) => setState(() => _taxProfileId = v),
                     ),

@@ -8,6 +8,9 @@ class GRNSummary {
   final String supplierName;
   final String? supplierDocumentNo;
   final DateTime? postedAt;
+  final String status;
+  final int lineCount;
+  final Decimal totalValue;
 
   GRNSummary({
     required this.id,
@@ -15,6 +18,9 @@ class GRNSummary {
     required this.supplierName,
     required this.supplierDocumentNo,
     required this.postedAt,
+    required this.status,
+    required this.lineCount,
+    required this.totalValue,
   });
 
   factory GRNSummary.fromJson(Map<String, dynamic> json) {
@@ -24,8 +30,34 @@ class GRNSummary {
       supplierName: json['supplier_name'] as String,
       supplierDocumentNo: json['supplier_document_no'] as String?,
       postedAt: json['posted_at'] == null ? null : DateTime.parse(json['posted_at'] as String),
+      status: json['status'] as String? ?? 'POSTED',
+      lineCount: json['line_count'] as int? ?? 0,
+      totalValue: json['total_value'] == null ? Decimal.zero : Decimal.parse(json['total_value'] as String),
     );
   }
+}
+
+/// Totals across every GRN matching the current filter, not just the
+/// current page — drives the history screen's summary banner.
+class GRNListSummary {
+  final int grnCount;
+  final Decimal totalValue;
+
+  GRNListSummary({required this.grnCount, required this.totalValue});
+
+  factory GRNListSummary.fromJson(Map<String, dynamic> json) {
+    return GRNListSummary(
+      grnCount: json['grn_count'] as int? ?? 0,
+      totalValue: json['total_value'] == null ? Decimal.zero : Decimal.parse(json['total_value'] as String),
+    );
+  }
+}
+
+class GRNListPage {
+  final List<GRNSummary> grns;
+  final GRNListSummary summary;
+
+  GRNListPage({required this.grns, required this.summary});
 }
 
 class GRNLineDetail {
@@ -104,15 +136,29 @@ class GRNHistoryApi {
 
   GRNHistoryApi(this.client);
 
-  Future<List<GRNSummary>> list({String query = '', int limit = 50, int offset = 0}) async {
+  Future<GRNListPage> list({
+    String query = '',
+    DateTime? dateFrom,
+    DateTime? dateTo,
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    String isoDate(DateTime d) =>
+        '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
     final params = {
       if (query.isNotEmpty) 'q': query,
+      if (dateFrom != null) 'date_from': isoDate(dateFrom),
+      if (dateTo != null) 'date_to': isoDate(dateTo),
       'limit': limit.toString(),
       'offset': offset.toString(),
     };
     final qs = params.entries.map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}').join('&');
     final response = await client.getAuthed('/api/v1/procurement/grns?$qs');
-    return (response['grns'] as List<dynamic>).map((g) => GRNSummary.fromJson(g as Map<String, dynamic>)).toList();
+    final grns = (response['grns'] as List<dynamic>).map((g) => GRNSummary.fromJson(g as Map<String, dynamic>)).toList();
+    final summary = response['summary'] != null
+        ? GRNListSummary.fromJson(response['summary'] as Map<String, dynamic>)
+        : GRNListSummary(grnCount: grns.length, totalValue: Decimal.zero);
+    return GRNListPage(grns: grns, summary: summary);
   }
 
   Future<GRNDetail> getDetail(String grnId) async {

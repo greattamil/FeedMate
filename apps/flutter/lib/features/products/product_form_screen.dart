@@ -1,4 +1,7 @@
+import 'dart:typed_data';
+
 import 'package:decimal/decimal.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -52,6 +55,10 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   bool _scaleRequired = false;
   bool _stockAlertEnabled = true;
   bool _showOnWebsite = false;
+  String? _savedImageUrl;
+  Uint8List? _pendingImageBytes;
+  String? _pendingImageMimeType;
+  static const _maxImageBytes = 524288; // 512 KB
   final List<String> _barcodes = [];
   final List<String> _aliases = [];
 
@@ -95,6 +102,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       _scaleRequired = e.scaleRequired;
       _stockAlertEnabled = e.stockAlertEnabled;
       _showOnWebsite = e.showOnWebsite;
+      _savedImageUrl = e.imageUrl;
       _barcodes.addAll(e.barcodes);
       _aliases.addAll(e.aliases);
     }
@@ -173,6 +181,63 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     });
   }
 
+  Future<void> _pickImage() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.image,
+        withData: true,
+      );
+      final files = result?.files;
+      if (files == null || files.isEmpty) return;
+      final picked = files.first;
+      if (picked.bytes == null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not read image file — please try another')),
+        );
+        return;
+      }
+      if (picked.bytes!.length > _maxImageBytes) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Image is too large — please use an image under 500KB')),
+        );
+        return;
+      }
+      final ext = (picked.extension ?? '').toLowerCase();
+      final mimeType = switch (ext) {
+        'png' => 'image/png',
+        'jpg' || 'jpeg' => 'image/jpeg',
+        'webp' => 'image/webp',
+        _ => null,
+      };
+      if (mimeType == null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please choose a JPEG, PNG, or WEBP image')),
+        );
+        return;
+      }
+      setState(() {
+        _pendingImageBytes = picked.bytes;
+        _pendingImageMimeType = mimeType;
+      });
+    } catch (e, st) {
+      debugPrint('ProductFormScreen._pickImage failed: $e\n$st');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not open file picker: $e')),
+      );
+    }
+  }
+
+  void _removePendingImage() {
+    setState(() {
+      _pendingImageBytes = null;
+      _pendingImageMimeType = null;
+    });
+  }
+
   Future<void> _save() async {
     setState(() {
       _error = null;
@@ -238,16 +303,23 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       active: widget.existing?.active ?? true,
       stockAlertEnabled: _stockAlertEnabled,
       showOnWebsite: _showOnWebsite,
+      imageUrl: _savedImageUrl,
       barcodes: _barcodes,
       aliases: _aliases,
     );
 
     try {
       final api = ProductAdminApi(context.read<ApiClient>());
+      String productId;
       if (_isEdit) {
-        await api.update(widget.existing!.id, draft);
+        productId = widget.existing!.id;
+        await api.update(productId, draft);
       } else {
-        await api.create(draft);
+        final created = await api.create(draft);
+        productId = created.id;
+      }
+      if (_pendingImageBytes != null && _pendingImageMimeType != null) {
+        await api.uploadImage(productId, _pendingImageBytes!, _pendingImageMimeType!);
       }
       if (!mounted) return;
       Navigator.of(context).pop(true);
@@ -489,6 +561,87 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                       decoration: _fieldDecoration('Product type', prefixIcon: Icons.layers_rounded),
                       items: _productTypes.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
                       onChanged: (v) => setState(() => _productType = v ?? 'FEED'),
+                    ),
+                  ],
+                ),
+
+                // Product Photo Section
+                _sectionCard(
+                  title: 'Product Photo',
+                  subtitle: 'Real product photo for marketing website catalog & POS display',
+                  icon: Icons.photo_camera_rounded,
+                  iconColor: AppColors.primary,
+                  iconGradient: AppColors.gradientEmerald,
+                  children: [
+                    Center(
+                      child: Column(
+                        children: [
+                          Container(
+                            width: 140,
+                            height: 140,
+                            decoration: BoxDecoration(
+                              color: AppColors.surfaceSecondary,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: AppColors.border),
+                            ),
+                            clipBehavior: Clip.antiAlias,
+                            child: _pendingImageBytes != null
+                                ? Image.memory(
+                                    _pendingImageBytes!,
+                                    fit: BoxFit.cover,
+                                    width: 140,
+                                    height: 140,
+                                  )
+                                : (_savedImageUrl != null && _savedImageUrl!.isNotEmpty)
+                                    ? Image.network(
+                                        _savedImageUrl!,
+                                        fit: BoxFit.cover,
+                                        width: 140,
+                                        height: 140,
+                                        errorBuilder: (_, __, ___) => const Center(
+                                          child: Icon(Icons.broken_image_rounded, size: 48, color: AppColors.textSecondary),
+                                        ),
+                                      )
+                                    : const Center(
+                                        child: Icon(Icons.add_a_photo_outlined, size: 48, color: AppColors.textSecondary),
+                                      ),
+                          ),
+                          const SizedBox(height: 14),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              OutlinedButton.icon(
+                                key: const Key('product_form_pick_image_button'),
+                                onPressed: _pickImage,
+                                icon: const Icon(Icons.upload_rounded, size: 18),
+                                label: Text(_pendingImageBytes != null || (_savedImageUrl != null && _savedImageUrl!.isNotEmpty)
+                                    ? 'Change Photo'
+                                    : 'Upload Photo'),
+                                style: OutlinedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                                  side: const BorderSide(color: AppColors.primary),
+                                  foregroundColor: AppColors.primary,
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                ),
+                              ),
+                              if (_pendingImageBytes != null) ...[
+                                const SizedBox(width: 8),
+                                TextButton(
+                                  onPressed: _removePendingImage,
+                                  style: TextButton.styleFrom(foregroundColor: AppColors.danger),
+                                  child: const Text('Cancel New'),
+                                ),
+                              ],
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'JPEG, PNG, or WEBP up to 500KB. Automatically uploaded to Cloudflare CDN.',
+                            style: AppTypography.caption.copyWith(color: AppColors.textSecondary, fontSize: 11),
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),

@@ -57,6 +57,12 @@ type Product struct {
 	// may hold items a shop never wants listed publicly, so nothing is
 	// exposed until explicitly marked.
 	ShowOnWebsite bool
+	// ImageURL points at the product photo uploaded from the FeedMate app
+	// (see httpapi.PublicHandlers and deploy/cloudflare/product-images/) —
+	// nil means no photo has been uploaded yet. Set only via SetImageURL,
+	// never through Create/Update, since it's populated from the separate
+	// upload endpoint after the product itself already exists.
+	ImageURL *string
 }
 
 type Barcode struct {
@@ -103,7 +109,7 @@ func GetByID(ctx context.Context, tx pgx.Tx, id uuid.UUID) (*Product, error) {
 		       hsn_code, tax_profile_id, pack_size, standard_weight_kg, mrp, selling_price,
 		       reorder_level, reorder_target, min_price_floor,
 		       batch_required, expiry_required, loose_sale_allowed, scale_required, product_type, active,
-		       stock_alert_enabled, show_on_website
+		       stock_alert_enabled, show_on_website, image_url
 		FROM products WHERE id = $1
 	`, id)
 	return scanProduct(row)
@@ -148,6 +154,23 @@ func Update(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, p *Product) erro
 func SetActive(ctx context.Context, tx pgx.Tx, tenantID, productID uuid.UUID, active bool) error {
 	cmd, err := tx.Exec(ctx, `UPDATE products SET active = $3, updated_at = now() WHERE tenant_id = $1 AND id = $2`,
 		tenantID, productID, active)
+	if err != nil {
+		return err
+	}
+	if cmd.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetImageURL persists the product photo URL after a successful upload to
+// the product-images Worker/R2 bucket (see httpapi.UploadProductImage) —
+// same shape as SetActive, a single-column update separate from the main
+// Create/Update form submission since the photo is uploaded only after the
+// product itself already has an ID.
+func SetImageURL(ctx context.Context, tx pgx.Tx, tenantID, productID uuid.UUID, imageURL string) error {
+	cmd, err := tx.Exec(ctx, `UPDATE products SET image_url = $3, updated_at = now() WHERE tenant_id = $1 AND id = $2`,
+		tenantID, productID, imageURL)
 	if err != nil {
 		return err
 	}
@@ -203,7 +226,7 @@ func List(ctx context.Context, tx pgx.Tx, opts ListOptions) ([]Product, int, err
 		       hsn_code, tax_profile_id, pack_size, standard_weight_kg, mrp, selling_price,
 		       reorder_level, reorder_target, min_price_floor,
 		       batch_required, expiry_required, loose_sale_allowed, scale_required, product_type, active,
-		       stock_alert_enabled, show_on_website
+		       stock_alert_enabled, show_on_website, image_url
 		FROM products WHERE %s ORDER BY name ASC LIMIT $%d OFFSET $%d
 	`, where, argN, argN+1)
 	rows, err := tx.Query(ctx, listSQL, listArgs...)
@@ -230,7 +253,7 @@ func scanProductRow(rows pgx.Rows) (*Product, error) {
 		&p.HSNCode, &p.TaxProfileID, &p.PackSize, &p.StandardWeightKg, &p.MRP, &p.SellingPrice,
 		&p.ReorderLevel, &p.ReorderTarget, &p.MinPriceFloor,
 		&p.BatchRequired, &p.ExpiryRequired, &p.LooseSaleAllowed, &p.ScaleRequired, &p.ProductType, &p.Active,
-		&p.StockAlertEnabled, &p.ShowOnWebsite)
+		&p.StockAlertEnabled, &p.ShowOnWebsite, &p.ImageURL)
 	return &p, err
 }
 
@@ -241,7 +264,7 @@ func GetByBarcode(ctx context.Context, tx pgx.Tx, barcode string) (*Product, err
 		       p.hsn_code, p.tax_profile_id, p.pack_size, p.standard_weight_kg, p.mrp, p.selling_price,
 		       p.reorder_level, p.reorder_target, p.min_price_floor,
 		       p.batch_required, p.expiry_required, p.loose_sale_allowed, p.scale_required, p.product_type, p.active,
-		       p.stock_alert_enabled, p.show_on_website
+		       p.stock_alert_enabled, p.show_on_website, p.image_url
 		FROM products p
 		JOIN product_barcodes b ON b.product_id = p.id
 		WHERE b.barcode = $1 AND b.active AND p.active
@@ -258,7 +281,7 @@ func scanProduct(row pgx.Row) (*Product, error) {
 		&p.HSNCode, &p.TaxProfileID, &p.PackSize, &p.StandardWeightKg, &p.MRP, &p.SellingPrice,
 		&p.ReorderLevel, &p.ReorderTarget, &p.MinPriceFloor,
 		&p.BatchRequired, &p.ExpiryRequired, &p.LooseSaleAllowed, &p.ScaleRequired, &p.ProductType, &p.Active,
-		&p.StockAlertEnabled, &p.ShowOnWebsite)
+		&p.StockAlertEnabled, &p.ShowOnWebsite, &p.ImageURL)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -452,6 +475,7 @@ type PublicCatalogItem struct {
 	MRP          *decimal.Decimal
 	SellingPrice *decimal.Decimal
 	InStock      bool
+	ImageURL     *string
 }
 
 // ListPublicCatalog returns every active product a shop has explicitly
@@ -465,12 +489,12 @@ type PublicCatalogItem struct {
 func ListPublicCatalog(ctx context.Context, tx pgx.Tx) ([]PublicCatalogItem, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT p.name, p.local_name_ta, c.name, p.pack_size, p.mrp, p.selling_price,
-		       COALESCE(SUM(b.available_qty), 0) > 0 AS in_stock
+		       COALESCE(SUM(b.available_qty), 0) > 0 AS in_stock, p.image_url
 		FROM products p
 		LEFT JOIN categories c ON c.id = p.category_id
 		LEFT JOIN batches b ON b.product_id = p.id AND b.status = 'ACTIVE'
 		WHERE p.active AND p.show_on_website
-		GROUP BY p.id, p.name, p.local_name_ta, c.name, p.pack_size, p.mrp, p.selling_price
+		GROUP BY p.id, p.name, p.local_name_ta, c.name, p.pack_size, p.mrp, p.selling_price, p.image_url
 		ORDER BY c.name, p.name
 	`)
 	if err != nil {
@@ -481,7 +505,7 @@ func ListPublicCatalog(ctx context.Context, tx pgx.Tx) ([]PublicCatalogItem, err
 	var out []PublicCatalogItem
 	for rows.Next() {
 		var item PublicCatalogItem
-		if err := rows.Scan(&item.Name, &item.LocalNameTa, &item.CategoryName, &item.PackSize, &item.MRP, &item.SellingPrice, &item.InStock); err != nil {
+		if err := rows.Scan(&item.Name, &item.LocalNameTa, &item.CategoryName, &item.PackSize, &item.MRP, &item.SellingPrice, &item.InStock, &item.ImageURL); err != nil {
 			return nil, err
 		}
 		out = append(out, item)

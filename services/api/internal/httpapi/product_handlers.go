@@ -1,10 +1,14 @@
 package httpapi
 
 import (
+	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -17,6 +21,14 @@ import (
 
 type ProductHandlers struct {
 	Product *product.Service
+	// ImagesUploadSecret authenticates UploadProductImage's PUT to the
+	// product-images Worker (deploy/cloudflare/product-images/) — see
+	// config.Config.ProductImagesUploadSecret's doc comment.
+	ImagesUploadSecret string
+	// ImagesBaseURL is the product-images Worker's public base URL
+	// (e.g. https://images.bpkscattlefeeds.com). Defaults to
+	// https://images.bpkscattlefeeds.com if left empty.
+	ImagesBaseURL string
 }
 
 // claimsFromRequest reads the trusted claims the auth middleware already
@@ -172,6 +184,7 @@ type productResponse struct {
 	Active               bool   `json:"active"`
 	StockAlertEnabled    bool   `json:"stock_alert_enabled"`
 	ShowOnWebsite        bool   `json:"show_on_website"`
+	ImageURL             string `json:"image_url,omitempty"`
 }
 
 func toProductResponse(p *product.Product) productResponse {
@@ -190,6 +203,9 @@ func toProductResponse(p *product.Product) productResponse {
 		Active:               p.Active,
 		StockAlertEnabled:    p.StockAlertEnabled,
 		ShowOnWebsite:        p.ShowOnWebsite,
+	}
+	if p.ImageURL != nil {
+		resp.ImageURL = *p.ImageURL
 	}
 	if p.LocalNameTa != nil {
 		resp.LocalNameTa = *p.LocalNameTa
@@ -485,3 +501,108 @@ func (h *ProductHandlers) Search(w http.ResponseWriter, r *http.Request) {
 	}
 	WriteJSON(w, http.StatusOK, map[string]interface{}{"results": out})
 }
+
+type uploadProductImageRequest struct {
+	ImageBase64 string `json:"image_base64"`
+	MimeType    string `json:"mime_type"`
+}
+
+// UploadProductImage validates and uploads a product photo to the Cloudflare
+// R2-backed product-images Worker, then updates the product's image_url.
+func (h *ProductHandlers) UploadProductImage(w http.ResponseWriter, r *http.Request) {
+	claims, ok := claimsFromRequest(r)
+	if !ok {
+		WriteError(w, r, CodeUnauthorized, "authentication required")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, r, CodeValidation, "invalid product id")
+		return
+	}
+
+	var req uploadProductImageRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, r, CodeValidation, "invalid request body")
+		return
+	}
+
+	if req.ImageBase64 == "" {
+		WriteError(w, r, CodeValidation, "image_base64 is required")
+		return
+	}
+	if len(req.ImageBase64) > 1_000_000 {
+		WriteError(w, r, CodeValidation, "image is too large (max 500KB)")
+		return
+	}
+
+	var ext string
+	switch req.MimeType {
+	case "image/jpeg", "image/jpg":
+		ext = "jpg"
+	case "image/png":
+		ext = "png"
+	case "image/webp":
+		ext = "webp"
+	default:
+		WriteError(w, r, CodeValidation, "unsupported mime_type: must be image/jpeg, image/png, or image/webp")
+		return
+	}
+
+	data, err := base64.StdEncoding.DecodeString(req.ImageBase64)
+	if err != nil {
+		WriteError(w, r, CodeValidation, "invalid base64 image data")
+		return
+	}
+	if len(data) > 524_288 {
+		WriteError(w, r, CodeValidation, "image exceeds 500KB limit")
+		return
+	}
+
+	if h.ImagesUploadSecret == "" {
+		WriteError(w, r, CodeInternal, "product image uploads are not configured (missing secret)")
+		return
+	}
+	baseURL := h.ImagesBaseURL
+	if baseURL == "" {
+		baseURL = "https://images.bpkscattlefeeds.com"
+	}
+
+	key := fmt.Sprintf("products/%s/%s.%s", claims.TenantID, id, ext)
+	putURL := fmt.Sprintf("%s/%s", baseURL, key)
+
+	putReq, err := http.NewRequestWithContext(r.Context(), http.MethodPut, putURL, bytes.NewReader(data))
+	if err != nil {
+		WriteError(w, r, CodeInternal, "failed to prepare storage request: "+err.Error())
+		return
+	}
+	putReq.Header.Set("Authorization", "Bearer "+h.ImagesUploadSecret)
+	putReq.Header.Set("Content-Type", req.MimeType)
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	putResp, err := client.Do(putReq)
+	if err != nil {
+		WriteError(w, r, CodeInternal, "failed to upload image to storage: "+err.Error())
+		return
+	}
+	defer putResp.Body.Close()
+
+	if putResp.StatusCode != http.StatusOK {
+		WriteError(w, r, CodeInternal, fmt.Sprintf("storage upload failed with status %d", putResp.StatusCode))
+		return
+	}
+
+	publicURL := fmt.Sprintf("%s/%s?v=%d", baseURL, key, time.Now().Unix())
+	updated, err := h.Product.SetImageURL(r.Context(), claims.TenantID, id, publicURL)
+	if err != nil {
+		if errors.Is(err, product.ErrNotFound) {
+			WriteError(w, r, CodeNotFound, "product not found")
+			return
+		}
+		WriteError(w, r, CodeInternal, "failed to update product image URL: "+err.Error())
+		return
+	}
+
+	WriteJSON(w, http.StatusOK, toProductResponse(updated))
+}
+

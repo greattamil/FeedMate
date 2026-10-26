@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:decimal/decimal.dart';
 
 import '../../core/api_client.dart';
@@ -44,6 +47,7 @@ class ProductDetail {
   // false (opt-in, not opt-out — unlike stockAlertEnabled above): nothing
   // shows publicly until a shop explicitly turns it on for that product.
   final bool showOnWebsite;
+  final String? imageUrl;
   final List<String> barcodes;
   final List<String> aliases;
 
@@ -74,6 +78,7 @@ class ProductDetail {
     required this.active,
     this.stockAlertEnabled = true,
     this.showOnWebsite = false,
+    this.imageUrl,
     this.barcodes = const [],
     this.aliases = const [],
   });
@@ -113,6 +118,7 @@ class ProductDetail {
       active: json['active'] as bool? ?? true,
       stockAlertEnabled: json['stock_alert_enabled'] as bool? ?? true,
       showOnWebsite: json['show_on_website'] as bool? ?? false,
+      imageUrl: _stringOrNull(json['image_url']),
       barcodes: (json['barcodes'] as List<dynamic>? ?? []).cast<String>(),
       aliases: (json['aliases'] as List<dynamic>? ?? []).cast<String>(),
     );
@@ -123,7 +129,7 @@ class ProductDetail {
   /// since the update endpoint replaces the whole record (see
   /// product.repository.Update's doc comment — there is no partial-patch
   /// endpoint for a single field).
-  ProductDetail copyWith({bool? stockAlertEnabled, bool? showOnWebsite}) {
+  ProductDetail copyWith({bool? stockAlertEnabled, bool? showOnWebsite, String? imageUrl}) {
     return ProductDetail(
       id: id, sku: sku, name: name, localNameTa: localNameTa, categoryId: categoryId, brandId: brandId,
       defaultSaleUomId: defaultSaleUomId, defaultPurchaseUomId: defaultPurchaseUomId, baseInventoryUomId: baseInventoryUomId,
@@ -133,6 +139,7 @@ class ProductDetail {
       productType: productType, active: active,
       stockAlertEnabled: stockAlertEnabled ?? this.stockAlertEnabled,
       showOnWebsite: showOnWebsite ?? this.showOnWebsite,
+      imageUrl: imageUrl ?? this.imageUrl,
       barcodes: barcodes, aliases: aliases,
     );
   }
@@ -172,6 +179,7 @@ class ProductDetail {
       'product_type': productType,
       'stock_alert_enabled': stockAlertEnabled,
       'show_on_website': showOnWebsite,
+      if (imageUrl != null) 'image_url': imageUrl,
       'barcodes': barcodes,
       'aliases': aliases,
     };
@@ -365,6 +373,17 @@ class ProductAdminApi {
 
   Future<void> setActive(String productId, bool active) async {
     await client.postAuthed('/api/v1/products/$productId/status', {'active': active});
+  }
+
+  /// Uploads a product photo to Cloudflare R2 via the backend's image endpoint.
+  /// Returns the stored image URL with cache-busting query parameter.
+  Future<String> uploadImage(String productId, Uint8List bytes, String mimeType) async {
+    final base64Str = base64Encode(bytes);
+    final response = await client.putAuthed('/api/v1/products/$productId/image', {
+      'image_base64': base64Str,
+      'mime_type': mimeType,
+    });
+    return response['image_url'] as String;
   }
 
   /// Quick toggle for the Stock Management screen's central alert control —

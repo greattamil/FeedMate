@@ -1,0 +1,25 @@
+# Cloudflare Worker serving FeedMate product photos at images.<domain>.
+# See worker.js for the GET (public, unauthenticated) and PUT (bearer-token
+# authenticated, called only by the Go API) paths.
+#
+# Secrets (set via `wrangler secret put <NAME>` from this directory):
+#   UPLOAD_SECRET   a dedicated bearer token only this Worker and the
+#                   services/api backend know — same value as the
+#                   consolidated app-secrets JSON's
+#                   "product_images_upload_secret" field (see
+#                   services/api/internal/config/config.go). Deliberately
+#                   its own secret, not reused from CRON_SECRET/EDGE_SHARED_SECRET
+#                   or the db-backup Worker's own UPLOAD_SECRET — narrowest
+#                   possible blast radius if any one of them ever leaks.
+
+name = "bpks-product-images"
+main = "worker.js"
+compatibility_date = "2026-10-26"
+
+routes = [
+  { pattern = "images.bpkscattlefeeds.com", custom_domain = true }
+]
+
+[[r2_buckets]]
+binding = "IMAGES_BUCKET"
+bucket_name = "bpks-product-images"

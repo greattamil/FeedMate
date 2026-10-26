@@ -189,6 +189,28 @@ func (s *Service) SetActive(ctx context.Context, tenantID, productID uuid.UUID, 
 	return updated, nil
 }
 
+// SetImageURL persists the product photo URL after httpapi.UploadProductImage
+// has already validated the upload and PUT the bytes to the product-images
+// Worker — see repository.SetImageURL's doc comment.
+func (s *Service) SetImageURL(ctx context.Context, tenantID, productID uuid.UUID, imageURL string) (*Product, error) {
+	var updated *Product
+	err := s.db.WithTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
+		if err := SetImageURL(ctx, tx, tenantID, productID, imageURL); err != nil {
+			return err
+		}
+		fresh, err := GetByID(ctx, tx, productID)
+		if err != nil {
+			return err
+		}
+		updated = fresh
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return updated, nil
+}
+
 // ListResult carries the total row count matching the filter alongside the
 // current page, so the client can render pagination controls.
 type ListResult struct {

@@ -102,7 +102,11 @@ func main() {
 	authHandlers := &httpapi.AuthHandlers{Identity: identitySvc}
 	staffHandlers := &httpapi.StaffHandlers{Identity: identitySvc}
 	healthHandlers := &httpapi.HealthHandlers{DB: db}
-	productHandlers := &httpapi.ProductHandlers{Product: productSvc}
+	productHandlers := &httpapi.ProductHandlers{
+		Product:            productSvc,
+		ImagesUploadSecret: cfg.ProductImagesUploadSecret,
+		ImagesBaseURL:      cfg.ProductImagesBaseURL,
+	}
 	posHandlers := &httpapi.POSHandlers{POS: posSvc}
 	procurementHandlers := &httpapi.ProcurementHandlers{Procurement: procurementSvc}
 	returnsHandlers := &httpapi.ReturnsHandlers{Returns: returnsSvc}
@@ -288,6 +292,7 @@ func main() {
 			r.With(appmw.RequirePermission("product.manage")).Post("/products", productHandlers.Create)
 			r.With(appmw.RequirePermission("product.manage")).Put("/products/{id}", productHandlers.Update)
 			r.With(appmw.RequirePermission("product.manage")).Post("/products/{id}/status", productHandlers.SetStatus)
+			r.With(appmw.RequirePermission("product.manage")).Put("/products/{id}/image", productHandlers.UploadProductImage)
 
 			r.Get("/categories", masterDataHandlers.ListCategories)
 			r.With(appmw.RequirePermission("product.manage")).Get("/categories/all", masterDataHandlers.ListAllCategories)

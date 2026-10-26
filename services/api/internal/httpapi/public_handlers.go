@@ -47,6 +47,7 @@ type publicCatalogItemResponse struct {
 	MRP          *string `json:"mrp,omitempty"`
 	SellingPrice *string `json:"selling_price,omitempty"`
 	InStock      bool    `json:"in_stock"`
+	ImageURL     *string `json:"image_url,omitempty"`
 }
 
 type publicCatalogResponse struct {
@@ -111,6 +112,7 @@ func (h *PublicHandlers) GetPublicCatalog(w http.ResponseWriter, r *http.Request
 				LocalNameTa: it.LocalNameTa,
 				Category:    it.CategoryName,
 				InStock:     it.InStock,
+				ImageURL:    it.ImageURL,
 			}
 			if it.PackSize != nil {
 				s := it.PackSize.String()

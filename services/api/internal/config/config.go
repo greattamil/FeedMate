@@ -90,6 +90,19 @@ type Config struct {
 	// reveals nothing sensitive on its own.
 	PublicWebsiteTenantID string
 
+	// ProductImagesUploadSecret authenticates the API's writes to the
+	// product-images Worker (deploy/cloudflare/product-images/) — see
+	// httpapi.UploadProductImage. Must match that Worker's own
+	// UPLOAD_SECRET, set via `wrangler secret put UPLOAD_SECRET` from its
+	// directory. A genuine secret (unlike PublicWebsiteTenantID above),
+	// so it follows the appSecrets fallback pattern like every other one.
+	ProductImagesUploadSecret string
+	// ProductImagesBaseURL is the product-images Worker's public base URL
+	// (e.g. https://images.bpkscattlefeeds.com) — not hardcoded, same
+	// "every account-specific value is an env var" convention as
+	// deploy/gcp/deploy-api.sh's own header comment.
+	ProductImagesBaseURL string
+
 	// EnableInProcessScheduler controls whether the in-process ticker
 	// goroutines (subscription.StartBillingScheduler,
 	// cloudusage.StartUsagePollScheduler) run at all. Default true — the
@@ -171,6 +184,8 @@ func Load() (Config, error) {
 
 		CronSecret:               firstNonEmpty(os.Getenv("CRON_SECRET"), appSecrets["cron_secret"]),
 		PublicWebsiteTenantID:    os.Getenv("PUBLIC_WEBSITE_TENANT_ID"),
+		ProductImagesUploadSecret: firstNonEmpty(os.Getenv("PRODUCT_IMAGES_UPLOAD_SECRET"), appSecrets["product_images_upload_secret"]),
+		ProductImagesBaseURL:      os.Getenv("PRODUCT_IMAGES_BASE_URL"),
 		EnableInProcessScheduler: getBool("ENABLE_IN_PROCESS_SCHEDULER", true),
 	}
 

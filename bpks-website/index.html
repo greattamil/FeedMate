@@ -106,15 +106,19 @@ html[lang="en"] .feed .en{font-family:var(--f-display);text-transform:none;lette
 :root[data-theme="dark"] .head h2{color:var(--gold-soft)}
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .head h2{color:var(--gold-soft)}}
 .head p{margin:0;color:var(--muted)}
-.feeds{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:22px}
-.feed{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:28px 24px 24px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:10px}
-.feed .ph{width:150px;height:150px;border-radius:50%;padding:5px;background:linear-gradient(140deg,var(--gold-soft),var(--gold) 55%,#8c6a22)}
+.feeds{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:22px}
+.feed{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:28px 24px 24px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:10px;transition:transform .2s ease,box-shadow .2s ease}
+.feed:hover{transform:translateY(-3px);box-shadow:0 12px 28px -10px rgba(0,0,0,0.12)}
+.feed .ph{width:150px;height:150px;border-radius:50%;padding:5px;background:linear-gradient(140deg,var(--gold-soft),var(--gold) 55%,#8c6a22);flex-shrink:0}
 .feed .ph img{width:100%;height:100%;border-radius:50%;object-fit:cover;transform:scale(1.0)}
+.feed .txt{display:flex;flex-direction:column;align-items:center;flex:1;width:100%}
 .feed h3{font-size:1.5rem;margin-top:6px}
 .feed .en{font-family:var(--f-serif);font-size:1.05rem;letter-spacing:.1em;text-transform:uppercase;color:var(--gold)}
+.feed .cat{margin:4px 0 0;color:var(--muted);font-size:.92rem}
 .feed p{margin:0;color:var(--muted);font-size:.97rem}
 .pack{margin-top:auto;padding-top:10px;font-family:var(--f-display);font-weight:700;color:var(--leaf);font-variant-numeric:tabular-nums}
-@media (max-width:820px){.feeds{grid-template-columns:minmax(0,1fr)}}
+@media (max-width:820px){.feeds{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}}
+@media (max-width:480px){.feeds{grid-template-columns:1fr}}
 
 /* benefits */
 .benefits{background:var(--card);border-block:1px solid var(--line)}
@@ -730,6 +734,7 @@ html[lang="ta"] .hours b{font-family:var(--f-display);letter-spacing:.02em;text-
     updateTotal();
     if(CONFIG.hours[lang]||CONFIG.hours.ta){$('hours').hidden=false;$('hoursText').textContent=CONFIG.hours[lang]||CONFIG.hours.ta}
     renderConfig();
+    renderDynamicProducts();
     try{localStorage.setItem('bpks-lang',lang)}catch(e){}
   }
   document.querySelectorAll('[data-lang]').forEach(function(b){b.addEventListener('click',function(){applyLang(b.dataset.lang)})});
@@ -875,13 +880,66 @@ html[lang="ta"] .hours b{font-family:var(--f-display);letter-spacing:.02em;text-
   // only has room for one price per feed type.
   function feedKey(text){
     text=text||'';
-    if(text.indexOf('மாடு')>-1||/cattle/i.test(text))return 'cow';
+    if(text.indexOf('மாடு')>-1||/cattle|cow/i.test(text))return 'cow';
     if(text.indexOf('ஆடு')>-1||/goat/i.test(text))return 'goat';
-    if(text.indexOf('கோழி')>-1||/poultry|hen/i.test(text))return 'hen';
+    if(text.indexOf('கோழி')>-1||/poultry|hen|chicken/i.test(text))return 'hen';
     return null;
   }
+
+  var catalogProducts = null;
+
+  function escapeHtml(s){
+    if(!s)return '';
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function renderDynamicProducts(){
+    if(!catalogProducts||!catalogProducts.length)return;
+    var container=document.querySelector('.feeds');
+    if(!container)return;
+    var isTa=lang==='ta';
+    var html='';
+    catalogProducts.forEach(function(p){
+      var title=isTa?(p.local_name_ta||p.name):(p.name||p.local_name_ta);
+      var sub=isTa?(p.local_name_ta?p.name:''):(p.local_name_ta||'');
+
+      var fallbackImg='img/sack.jpg';
+      var fk=feedKey(p.name)||feedKey(p.local_name_ta)||feedKey(p.category);
+      if(fk==='cow')fallbackImg='img/cow.jpg';
+      else if(fk==='goat')fallbackImg='img/goat.jpg';
+      else if(fk==='hen')fallbackImg='img/hen.jpg';
+
+      var imgSrc=p.image_url||fallbackImg;
+      var packText=p.pack_size?(p.pack_size+' kg '+(isTa?'மூட்டை':'bag')):t('pack');
+
+      var packHtml='';
+      if(p.in_stock===false){
+        packHtml='<span class="stock-out">'+t('out_of_stock')+'</span><span>'+escapeHtml(packText)+'</span>';
+      }else if(p.selling_price){
+        packHtml='<span class="price">'+rupee(p.selling_price)+' <small>'+t('per_bag')+'</small></span>';
+      }else{
+        packHtml='<span>'+escapeHtml(packText)+'</span>';
+      }
+
+      html+='<article class="feed">'+
+        '<div class="ph"><img src="'+escapeHtml(imgSrc)+'" alt="'+escapeHtml(title)+'" width="250" height="250" loading="lazy" onerror="if(this.src!==\''+fallbackImg+'\')this.src=\''+fallbackImg+'\'"></div>'+
+        '<div class="txt">'+
+          '<h3>'+escapeHtml(title)+'</h3>'+
+          (sub?'<div class="en">'+escapeHtml(sub)+'</div>':'')+
+          (p.category?'<div class="cat">'+escapeHtml(p.category)+'</div>':'')+
+          '<div class="pack">'+packHtml+'</div>'+
+        '</div>'+
+      '</article>';
+    });
+    container.innerHTML=html;
+  }
+
   function applyPublicCatalog(data){
     if(!data||!Array.isArray(data.products))return;
+    if(data.products.length>0){
+      catalogProducts=data.products;
+      renderDynamicProducts();
+    }
     var byKey={};
     data.products.forEach(function(p){
       var key=feedKey(p.name)||feedKey(p.local_name_ta)||feedKey(p.category);

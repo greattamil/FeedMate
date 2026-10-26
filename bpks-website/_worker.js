@@ -18,18 +18,24 @@ const json = (data, status = 200) =>
 const clip = (v, n) => String(v ?? "").replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, n);
 
 function buildMessage(o) {
-  const total = o.items.reduce((s, i) => s + i.bags, 0);
+  const totalBags = o.items.reduce((s, i) => s + i.bags, 0);
+  const totalKg = o.items.reduce((s, i) => s + (i.bags * (i.packSize || 50)), 0);
   const lines = [
     "🛒 BPKS புதிய ஆர்டர் (இணையதளம்)",
     "",
     `பெயர்: ${o.name}`,
     `மொபைல்: ${o.phone}`,
     "",
-    ...o.items.map((i) => `• ${i.feed} × ${i.bags} மூட்டை`),
-    `மொத்தம்: ${total} மூட்டை (${total * 50} kg)`,
-    "",
-    `முறை: ${o.mode === "delivery" ? "இலவச டோர் டெலிவரி" : "கடையில் பெறுதல்"}`,
+    ...o.items.map((i) => `• ${i.feed}${i.packSize ? ' (' + i.packSize + ' kg)' : ''} × ${i.bags} மூட்டை` + (i.subtotal ? ` = ₹${Number(i.subtotal).toLocaleString('en-IN')}` : (i.price ? ` (@ ₹${i.price})` : ""))),
+    `மொத்தம்: ${totalBags} மூட்டை (${totalKg} kg)`,
   ];
+  if (o.estimatedTotal) {
+    lines.push(`தோராய தொகை: ₹${Number(o.estimatedTotal).toLocaleString('en-IN')}`);
+  }
+  lines.push(
+    "",
+    `முறை: ${o.mode === "delivery" ? "இலவச டோர் டெலிவரி" : "கடையில் பெறுதல்"}`
+  );
   if (o.mode === "delivery") lines.push(`முகவரி: ${o.address}`);
   lines.push(`எப்போது: ${o.when}`);
   if (o.note) lines.push(`குறிப்பு: ${o.note}`);
@@ -46,10 +52,15 @@ async function handleOrder(request, env) {
   }
   if (body.website) return json({ ok: true }); // honeypot: silently drop bots
 
-  const allowedFeeds = ["மாட்டு தீவனம்", "ஆடு தீவனம்", "கோழி தீவனம்"];
   const items = (Array.isArray(body.items) ? body.items : [])
-    .map((i) => ({ feed: clip(i.feed, 30), bags: Math.min(200, Math.max(0, parseInt(i.bags, 10) || 0)) }))
-    .filter((i) => allowedFeeds.includes(i.feed) && i.bags > 0);
+    .map((i) => ({
+      feed: clip(i.feed, 80),
+      bags: Math.min(200, Math.max(0, parseInt(i.bags, 10) || 0)),
+      packSize: Math.max(1, parseInt(i.packSize, 10) || 50),
+      price: parseInt(i.price, 10) || 0,
+      subtotal: parseInt(i.subtotal, 10) || 0,
+    }))
+    .filter((i) => i.feed.length > 0 && i.bags > 0);
 
   const order = {
     name: clip(body.name, 60),
@@ -58,6 +69,7 @@ async function handleOrder(request, env) {
     address: clip(body.address, 200),
     when: clip(body.when, 20),
     note: clip(body.note, 120),
+    estimatedTotal: parseInt(body.estimatedTotal, 10) || 0,
     items,
   };
 

@@ -161,16 +161,41 @@ html[lang="en"] .feed .en{font-family:var(--f-display);text-transform:none;lette
 .form-title small{font-family:var(--f-serif);font-size:1rem;letter-spacing:.1em;text-transform:uppercase;color:var(--gold);margin-left:6px}
 fieldset{border:0;margin:0;padding:0;min-width:0}
 legend{font-weight:600;margin-bottom:10px;padding:0}
-.qty{display:grid;gap:10px;background:var(--paper);border-radius:12px;padding:14px 16px}
-.qty legend{float:left;width:100%;margin-bottom:4px}
-.q-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
-.q-row label{font-weight:500;flex:1;min-width:0;line-height:1.35}
-.stepper{flex:none}
+.qty{display:grid;gap:12px;background:var(--paper);border-radius:14px;padding:16px}
+.qty legend{float:left;width:100%;margin-bottom:6px}
+.order-items-list{display:grid;gap:10px}
+.q-card{display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px;transition:border-color .2s,box-shadow .2s,background .2s,transform .2s}
+.q-card:hover{border-color:rgba(47,138,62,.4)}
+.q-card.is-active{background:rgba(47,138,62,.04);border-color:var(--leaf);box-shadow:0 4px 14px -6px rgba(47,138,62,.25)}
+.q-card.out-of-stock{opacity:.6;background:rgba(0,0,0,.02)}
+.q-card.pulse-highlight{animation:cardPulse .7s ease-out}
+@keyframes cardPulse{0%{transform:scale(1);box-shadow:0 0 0 0 rgba(194,154,62,.7)}50%{transform:scale(1.02);box-shadow:0 0 0 8px rgba(194,154,62,0)}100%{transform:scale(1);box-shadow:none}}
+.q-thumb{width:54px;height:54px;border-radius:10px;object-fit:cover;flex-shrink:0;background:var(--paper);border:1.5px solid var(--gold-soft)}
+.q-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.q-title{font-weight:700;font-size:1.02rem;line-height:1.25;color:var(--ink);margin:0}
+.q-sub{font-size:.82rem;color:var(--muted);line-height:1.2}
+.q-meta{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;margin-top:2px}
+.q-price-tag{font-size:.92rem;font-weight:700;color:var(--leaf);font-family:var(--f-display);font-variant-numeric:tabular-nums}
+.q-mrp{font-size:.78rem;color:var(--muted);text-decoration:line-through;font-weight:normal}
+.q-badge{display:inline-block;font-size:.72rem;font-weight:600;padding:1px 6px;border-radius:999px;background:rgba(194,154,62,.15);color:var(--gold)}
+.q-oos-badge{font-size:.75rem;font-weight:700;color:#c0392b}
+.q-ctrl{display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0}
+.q-subtotal-val{font-size:.82rem;font-weight:700;color:var(--leaf);font-family:var(--f-display);font-variant-numeric:tabular-nums;min-height:1.1em}
 .stepper{display:flex;align-items:center;border:1px solid var(--line);border-radius:999px;background:var(--card);overflow:hidden}
-.stepper button{width:44px;height:44px;touch-action:manipulation;border:0;background:transparent;color:var(--leaf);font-size:1.4rem;font-weight:700;cursor:pointer}
+.stepper button{width:40px;height:40px;touch-action:manipulation;border:0;background:transparent;color:var(--leaf);font-size:1.3rem;font-weight:700;cursor:pointer}
 .stepper button:hover{background:var(--paper)}
-.stepper input{width:46px;height:44px;font-size:16px !important;border:0;text-align:center;font:600 1.05rem var(--f-body);background:transparent;color:var(--ink);font-variant-numeric:tabular-nums;-moz-appearance:textfield}
+.stepper button:disabled{opacity:.35;cursor:not-allowed}
+.stepper input{width:42px;height:40px;font-size:16px !important;border:0;text-align:center;font:700 1rem var(--f-body);background:transparent;color:var(--ink);font-variant-numeric:tabular-nums;-moz-appearance:textfield}
+.stepper input:disabled{opacity:.4;cursor:not-allowed}
 .stepper input::-webkit-inner-spin-button,.stepper input::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+.order-summary-box{background:linear-gradient(135deg,rgba(13,74,44,.05),rgba(194,154,62,.08));border:1px solid var(--line);border-radius:14px;padding:14px 16px;display:grid;gap:8px}
+.os-row{display:flex;justify-content:space-between;align-items:center;font-size:.92rem;color:var(--muted)}
+.os-row b,.os-row span:last-child{color:var(--ink);font-weight:600}
+.os-total-row{border-top:1px dashed var(--line);padding-top:8px;font-weight:700;font-size:1.15rem;color:var(--leaf);display:flex;justify-content:space-between;align-items:center}
+.os-total-row span:last-child{color:var(--leaf);font-family:var(--f-display);font-variant-numeric:tabular-nums}
+.os-free-del{display:inline-flex;align-items:center;gap:4px;font-size:.8rem;font-weight:600;color:#1f9d55;background:rgba(31,157,85,.12);padding:2px 8px;border-radius:999px}
+.btn-card-order{display:inline-flex;align-items:center;justify-content:center;gap:6px;font-family:var(--f-display);font-weight:700;font-size:.86rem;padding:7px 16px;border-radius:999px;background:var(--paper);border:1px solid var(--gold);color:var(--green-2);cursor:pointer;transition:all .2s ease;margin-top:8px;text-decoration:none}
+.btn-card-order:hover{background:var(--gold);color:#1a1405;transform:scale(1.03)}
 .two{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
 @media (max-width:520px){.two{grid-template-columns:minmax(0,1fr)}}
 .fld{display:grid;gap:6px;min-width:0}
@@ -379,21 +404,27 @@ html[lang="ta"] .hours b{font-family:var(--f-display);letter-spacing:.02em;text-
           <div class="txt"><h3 data-i18n="cow">மாட்டு தீவனம்</h3>
           <div class="en" data-i18n="cow_alt">Cattle Feed</div>
           <p data-i18n="cow_p">கறவை மாடுகளின் பால்வரவு மற்றும் உடல் ஆரோக்கியத்திற்கு.</p>
-          <div class="pack"><span class="price" data-price="cow" hidden></span><span data-i18n="pack">50 kg மூட்டை</span><span class="stock-out" data-stock="cow" data-i18n="out_of_stock" hidden></span></div></div>
+          <div class="pack"><span class="price" data-price="cow" hidden></span><span data-i18n="pack">50 kg மூட்டை</span><span class="stock-out" data-stock="cow" data-i18n="out_of_stock" hidden></span></div>
+          <button type="button" class="btn-card-order" data-add-id="cow" data-i18n="add_to_order">+ ஆர்டரில் சேர்க்க</button>
+          </div>
         </article>
         <article class="feed">
           <div class="ph"><img src="img/goat.jpg" data-i18n-alt="alt_goat" alt="ஆடு" width="260" height="260"></div>
           <div class="txt"><h3 data-i18n="goat">ஆடு தீவனம்</h3>
           <div class="en" data-i18n="goat_alt">Goat Feed</div>
           <p data-i18n="goat_p">ஆடுகளின் எடை கூடவும் விரைவான வளர்ச்சிக்கும்.</p>
-          <div class="pack"><span class="price" data-price="goat" hidden></span><span data-i18n="pack">50 kg மூட்டை</span><span class="stock-out" data-stock="goat" data-i18n="out_of_stock" hidden></span></div></div>
+          <div class="pack"><span class="price" data-price="goat" hidden></span><span data-i18n="pack">50 kg மூட்டை</span><span class="stock-out" data-stock="goat" data-i18n="out_of_stock" hidden></span></div>
+          <button type="button" class="btn-card-order" data-add-id="goat" data-i18n="add_to_order">+ ஆர்டரில் சேர்க்க</button>
+          </div>
         </article>
         <article class="feed">
           <div class="ph"><img src="img/hen.jpg" data-i18n-alt="alt_hen" alt="கோழி" width="245" height="245"></div>
           <div class="txt"><h3 data-i18n="hen">கோழி தீவனம்</h3>
           <div class="en" data-i18n="hen_alt">Poultry Feed</div>
           <p data-i18n="hen_p">கோழிகளின் வளர்ச்சி மற்றும் நோய் எதிர்ப்பு சக்திக்கு.</p>
-          <div class="pack"><span class="price" data-price="hen" hidden></span><span data-i18n="pack">50 kg மூட்டை</span><span class="stock-out" data-stock="hen" data-i18n="out_of_stock" hidden></span></div></div>
+          <div class="pack"><span class="price" data-price="hen" hidden></span><span data-i18n="pack">50 kg மூட்டை</span><span class="stock-out" data-stock="hen" data-i18n="out_of_stock" hidden></span></div>
+          <button type="button" class="btn-card-order" data-add-id="hen" data-i18n="add_to_order">+ ஆர்டரில் சேர்க்க</button>
+          </div>
         </article>
       </div>
       <p class="price-note" id="priceNote" hidden></p>
@@ -461,10 +492,10 @@ html[lang="ta"] .hours b{font-family:var(--f-display);letter-spacing:.02em;text-
         <h3 class="form-title"><span data-i18n="form_t">ஆர்டர் படிவம்</span> <small data-i18n="form_t2">Order Form</small></h3>
 
         <fieldset class="qty">
-          <legend data-i18n="qty_l">தீவனம் &amp; மூட்டைகள் (50 kg)</legend>
-          <div class="q-row"><label for="q_cow" data-i18n="cow">மாட்டு தீவனம்</label><div class="stepper"><button type="button" data-step="-1" data-for="q_cow" data-i18n-aria="minus" aria-label="குறை">−</button><input id="q_cow" name="cow" type="number" inputmode="numeric" min="0" max="200" value="0"><button type="button" data-step="1" data-for="q_cow" data-i18n-aria="plus" aria-label="கூட்டு">+</button></div></div>
-          <div class="q-row"><label for="q_goat" data-i18n="goat">ஆடு தீவனம்</label><div class="stepper"><button type="button" data-step="-1" data-for="q_goat" data-i18n-aria="minus" aria-label="குறை">−</button><input id="q_goat" name="goat" type="number" inputmode="numeric" min="0" max="200" value="0"><button type="button" data-step="1" data-for="q_goat" data-i18n-aria="plus" aria-label="கூட்டு">+</button></div></div>
-          <div class="q-row"><label for="q_hen" data-i18n="hen">கோழி தீவனம்</label><div class="stepper"><button type="button" data-step="-1" data-for="q_hen" data-i18n-aria="minus" aria-label="குறை">−</button><input id="q_hen" name="hen" type="number" inputmode="numeric" min="0" max="200" value="0"><button type="button" data-step="1" data-for="q_hen" data-i18n-aria="plus" aria-label="கூட்டு">+</button></div></div>
+          <legend><span data-i18n="qty_l">தீவனம் &amp; மூட்டைகள்</span> <small id="orderHint" data-i18n="select_feed_hint" style="display:block;font-size:0.85rem;font-weight:normal;color:var(--muted)">தேவைப்படும் தீவனங்களின் எண்ணிக்கையைத் தேர்ந்தெடுக்கவும்</small></legend>
+          <div id="orderItemsList" class="order-items-list">
+            <!-- Dynamic products rendered here -->
+          </div>
           <p class="err" id="e_qty"></p>
         </fieldset>
 
@@ -487,7 +518,21 @@ html[lang="ta"] .hours b{font-family:var(--f-display);letter-spacing:.02em;text-
         </div>
         <div class="hp" aria-hidden="true"><label for="f_web">Website</label><input id="f_web" name="website" type="text" tabindex="-1" autocomplete="off"></div>
 
-        <div class="total" id="total">மொத்தம்: 0 மூட்டை (0 kg)</div>
+        <div class="order-summary-box" id="orderSummaryBox">
+          <div class="os-row">
+            <span data-i18n="total_bags_lbl">மொத்த மூட்டைகள்</span>
+            <span id="summaryBags">0 மூட்டை (0 kg)</span>
+          </div>
+          <div class="os-row" id="summaryDeliveryRow">
+            <span data-i18n="delivery_charge_lbl">டெலிவரி கட்டணம்</span>
+            <span class="os-free-del" data-i18n="free_delivery_badge">✓ இலவச டோர் டெலிவரி</span>
+          </div>
+          <div class="os-row os-total-row">
+            <span data-i18n="est_total_lbl">தோராய மொத்த தொகை</span>
+            <span id="summaryAmount">₹0</span>
+          </div>
+        </div>
+        <div class="total hp" id="total" aria-hidden="true"></div>
         <button class="btn btn-wa submit" type="submit">
           <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2zm5.3 14.1c-.2.6-1.3 1.2-1.8 1.3-.5.1-1 .1-1.7-.1a15 15 0 0 1-1.5-.6 12 12 0 0 1-4.6-4.1 5.2 5.2 0 0 1-1.1-2.8c0-1.3.7-2 1-2.3a1 1 0 0 1 .7-.3h.5c.2 0 .4 0 .6.5l.8 2c.1.1.1.3 0 .5l-.3.5-.4.5c-.1.1-.3.3-.1.6a8.7 8.7 0 0 0 1.6 2 8 8 0 0 0 2.3 1.4c.3.1.5.1.6-.1l.9-1.1c.2-.3.4-.2.6-.1l2 .9c.3.1.5.2.5.3.1.1.1.6-.1 1.1z"/></svg>
           <span data-i18n="submit">WhatsApp-ல் ஆர்டர் அனுப்பு</span>
@@ -643,7 +688,8 @@ html[lang="ta"] .hours b{font-family:var(--f-display);letter-spacing:.02em;text-
       s1:'தீவனம் &amp; மூட்டை எண்ணிக்கை',s1p:'மாடு, ஆடு, கோழி — எத்தனை மூட்டை வேண்டும் என்று தேர்வு செய்யுங்கள்.',
       s2:'WhatsApp-ல் அனுப்புங்கள்',s2p:'ஆர்டர் விவரம் தயாராக WhatsApp-ல் திறக்கும். "Send" அழுத்தினால் போதும்.',
       s3:'வீட்டு வாசலில் பெறுங்கள்',s3p:'இலவச டோர் டெலிவரி, அல்லது ஆண்டிப்பட்டி கடையில் நேரில் பெறலாம்.',
-      form_t:'ஆர்டர் படிவம்',form_t2:'Order Form',qty_l:'தீவனம் &amp; மூட்டைகள் (50 kg)',minus:'குறை',plus:'கூட்டு',
+      form_t:'ஆர்டர் படிவம்',form_t2:'Order Form',qty_l:'தீவனம் &amp; மூட்டைகள்',minus:'குறை',plus:'கூட்டு',
+      select_feed_hint:'தேவைப்படும் தீவனங்களின் எண்ணிக்கையைத் தேர்ந்தெடுக்கவும்',total_bags_lbl:'மொத்த மூட்டைகள்',delivery_charge_lbl:'டெலிவரி கட்டணம்',free_delivery_badge:'✓ இலவச டோர் டெலிவரி',est_total_lbl:'தோராய மொத்த தொகை',add_to_order:'+ ஆர்டரில் சேர்க்க',per_bag_tag:'/ மூட்டை',
       name_l:'பெயர் *',name_ph:'உங்கள் பெயர்',phone_l:'மொபைல் எண் *',mode_l:'பெறும் முறை',mode_del:'இலவச டோர் டெலிவரி',mode_pick:'கடையில் பெறுகிறேன்',
       addr_l:'டெலிவரி முகவரி / கிராமம் *',addr_ph:'வீட்டு எண், தெரு, கிராமம்',when_l:'எப்போது வேண்டும்?',w_today:'இன்று',w_tom:'நாளை',w_week:'இந்த வாரம்',
       note_l:'குறிப்பு',note_ph:'ஏதேனும் விவரம்',submit:'WhatsApp-ல் ஆர்டர் அனுப்பு',
@@ -685,7 +731,8 @@ html[lang="ta"] .hours b{font-family:var(--f-display);letter-spacing:.02em;text-
       s1:'Pick feed &amp; number of bags',s1p:'Choose how many bags of cattle, goat or poultry feed you need.',
       s2:'Send on WhatsApp',s2p:'WhatsApp opens with your order typed out. Just tap "Send".',
       s3:'Receive at your door',s3p:'Free door delivery, or collect from our shop in Andipatti.',
-      form_t:'Order Form',form_t2:'ஆர்டர் படிவம்',qty_l:'Feed &amp; bags (50 kg)',minus:'Decrease',plus:'Increase',
+      form_t:'Order Form',form_t2:'ஆர்டர் படிவம்',qty_l:'Feeds &amp; Bags',minus:'Decrease',plus:'Increase',
+      select_feed_hint:'Select the quantity for each feed',total_bags_lbl:'Total Bags',delivery_charge_lbl:'Delivery Charge',free_delivery_badge:'✓ Free Door Delivery',est_total_lbl:'Estimated Total',add_to_order:'+ Add to Order',per_bag_tag:'/ bag',
       name_l:'Name *',name_ph:'Your name',phone_l:'Mobile number *',mode_l:'How you’ll receive it',mode_del:'Free door delivery',mode_pick:'Pick up at shop',
       addr_l:'Delivery address / village *',addr_ph:'House no., street, village',when_l:'When do you need it?',w_today:'Today',w_tom:'Tomorrow',w_week:'This week',
       note_l:'Note',note_ph:'Anything else',submit:'Send order on WhatsApp',
@@ -731,6 +778,7 @@ html[lang="ta"] .hours b{font-family:var(--f-display);letter-spacing:.02em;text-
     $('heroWa').href='https://wa.me/'+SHOP_WA+'?text='+encodeURIComponent(t('wa_hello'));
     ['e_qty','e_name','e_phone','e_addr'].forEach(function(id){if($(id).textContent)$(id).textContent=t(id)});
     if(!$('done').hidden&&lastOrder)render(lastOrder);
+    renderOrderItems();
     updateTotal();
     if(CONFIG.hours[lang]||CONFIG.hours.ta){$('hours').hidden=false;$('hoursText').textContent=CONFIG.hours[lang]||CONFIG.hours.ta}
     renderConfig();
@@ -739,16 +787,176 @@ html[lang="ta"] .hours b{font-family:var(--f-display);letter-spacing:.02em;text-
   }
   document.querySelectorAll('[data-lang]').forEach(function(b){b.addEventListener('click',function(){applyLang(b.dataset.lang)})});
 
+  function feedKey(text){
+    text=text||'';
+    if(text.indexOf('மாடு')>-1||/cattle|cow/i.test(text))return 'cow';
+    if(text.indexOf('ஆடு')>-1||/goat/i.test(text))return 'goat';
+    if(text.indexOf('கோழி')>-1||/poultry|hen|chicken/i.test(text))return 'hen';
+    return null;
+  }
+
+  function escapeHtml(s){
+    if(!s)return '';
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  var defaultProducts=[
+    {id:'cow',name:'Cattle Feed',local_name_ta:'மாட்டு தீவனம்',pack_size:50,selling_price:CONFIG.prices.cow||1450,mrp:0,in_stock:true,image_url:'img/cow.jpg',fallbackImg:'img/cow.jpg',qty:0},
+    {id:'goat',name:'Goat Feed',local_name_ta:'ஆடு தீவனம்',pack_size:50,selling_price:CONFIG.prices.goat||1600,mrp:0,in_stock:true,image_url:'img/goat.jpg',fallbackImg:'img/goat.jpg',qty:0},
+    {id:'hen',name:'Poultry Feed',local_name_ta:'கோழி தீவனம்',pack_size:50,selling_price:CONFIG.prices.hen||1750,mrp:0,in_stock:true,image_url:'img/hen.jpg',fallbackImg:'img/hen.jpg',qty:0}
+  ];
+  var orderProducts=defaultProducts.slice();
+  var catalogProducts=null;
+
+  function renderOrderItems(){
+    var list=$('orderItemsList');
+    if(!list)return;
+    var isTa=lang==='ta';
+    var html='';
+    orderProducts.forEach(function(p){
+      var title=isTa?(p.local_name_ta||p.name):(p.name||p.local_name_ta);
+      var sub=isTa?(p.local_name_ta?p.name:''):(p.local_name_ta||'');
+      var oos=!p.in_stock;
+      var activeClass=p.qty>0?' is-active':'';
+      var oosClass=oos?' out-of-stock':'';
+      var packLabel=(p.pack_size||50)+' kg';
+
+      var priceHtml='';
+      if(oos){
+        priceHtml='<span class="q-oos-badge">'+escapeHtml(t('out_of_stock'))+'</span>';
+      }else if(p.selling_price){
+        priceHtml='<span class="q-price-tag">'+rupee(p.selling_price)+' <small class="q-sub">'+t('per_bag_tag')+'</small></span>';
+        if(p.mrp&&p.mrp>p.selling_price){
+          priceHtml+=' <span class="q-mrp">'+rupee(p.mrp)+'</span>';
+        }
+      }
+
+      var subtotalText='';
+      if(!oos&&p.qty>0&&p.selling_price){
+        subtotalText=p.qty+' × '+rupee(p.selling_price)+' = '+rupee(p.qty*p.selling_price);
+      }
+
+      var fallbackImg=p.fallbackImg||'img/sack.jpg';
+      var imgSrc=p.image_url||fallbackImg;
+
+      html+='<div class="q-card'+activeClass+oosClass+'" id="card_'+escapeHtml(p.id)+'" data-prod-id="'+escapeHtml(p.id)+'">'+
+        '<img class="q-thumb" src="' + escapeHtml(imgSrc) + '" alt="' + escapeHtml(title) + '" width="54" height="54" loading="lazy" onerror="if(this.src!==\''+fallbackImg+'\')this.src=\''+fallbackImg+'\'">'+
+        '<div class="q-main">'+
+          '<div class="q-title">'+escapeHtml(title)+'</div>'+
+          (sub?'<div class="q-sub">'+escapeHtml(sub)+'</div>':'')+
+          '<div class="q-meta">'+
+            '<span class="q-badge">'+escapeHtml(packLabel)+'</span>'+
+            priceHtml+
+          '</div>'+
+        '</div>'+
+        '<div class="q-ctrl">'+
+          '<div class="stepper">'+
+            '<button type="button" data-step="-1" data-id="'+escapeHtml(p.id)+'" aria-label="'+t('minus')+'"'+(oos?' disabled':'')+'>−</button>'+
+            '<input id="inp_'+escapeHtml(p.id)+'" data-id="'+escapeHtml(p.id)+'" type="number" inputmode="numeric" min="0" max="200" value="'+(oos?0:p.qty)+'"'+(oos?' disabled':'')+'>'+
+            '<button type="button" data-step="1" data-id="'+escapeHtml(p.id)+'" aria-label="'+t('plus')+'"'+(oos?' disabled':'')+'>+</button>'+
+          '</div>'+
+          '<div class="q-subtotal-val" id="sub_'+escapeHtml(p.id)+'">'+escapeHtml(subtotalText)+'</div>'+
+        '</div>'+
+      '</div>';
+    });
+    list.innerHTML=html;
+  }
+
+  function updateTotal(){
+    var totalBags=0;
+    var totalKg=0;
+    var estimatedTotal=0;
+
+    orderProducts.forEach(function(p){
+      var q=p.in_stock?p.qty:0;
+      totalBags+=q;
+      totalKg+=q*(p.pack_size||50);
+      estimatedTotal+=q*(p.selling_price||0);
+
+      var card=$('card_'+p.id);
+      var subEl=$('sub_'+p.id);
+      if(card)card.classList.toggle('is-active',q>0);
+      if(subEl){
+        if(q>0&&p.selling_price){
+          subEl.textContent=q+' × '+rupee(p.selling_price)+' = '+rupee(q*p.selling_price);
+        }else{
+          subEl.textContent='';
+        }
+      }
+    });
+
+    var bagsText=totalBags+' '+(lang==='en'&&totalBags===1?'bag':t('bags'))+' ('+totalKg+' kg)';
+    if($('summaryBags'))$('summaryBags').textContent=bagsText;
+    if($('summaryAmount'))$('summaryAmount').textContent=rupee(estimatedTotal);
+    if($('total'))$('total').textContent=t('total').replace('{n}',totalBags).replace('{kg}',totalKg).replace('bags',bw(totalBags))+(estimatedTotal?' · '+t('est')+' '+rupee(estimatedTotal):'');
+    return totalBags;
+  }
+
+  function addToOrder(pid){
+    var p=orderProducts.find(function(x){return x.id===pid||x.name===pid||x.local_name_ta===pid});
+    if(!p&&orderProducts.length){
+      var fk=feedKey(pid);
+      if(fk){
+        p=orderProducts.find(function(x){return feedKey(x.name)===fk||feedKey(x.local_name_ta)===fk});
+      }
+      if(!p)p=orderProducts[0];
+    }
+    if(!p||!p.in_stock)return;
+    p.qty=Math.min(200,p.qty+1);
+    var inp=$('inp_'+p.id);
+    if(inp)inp.value=p.qty;
+    updateTotal();
+
+    var card=$('card_'+p.id);
+    if(card){
+      card.scrollIntoView({behavior:'smooth',block:'center'});
+      card.classList.remove('pulse-highlight');
+      void card.offsetWidth;
+      card.classList.add('pulse-highlight');
+    }else{
+      var ordSec=$('order');
+      if(ordSec)ordSec.scrollIntoView({behavior:'smooth',block:'start'});
+    }
+  }
+
   var form=$('orderForm');
-  var feeds=[['q_cow','cow','மாட்டு தீவனம்'],['q_goat','goat','ஆடு தீவனம்'],['q_hen','hen','கோழி தீவனம்']];
-  function qty(id){var v=parseInt($(id).value,10);return isNaN(v)||v<0?0:Math.min(v,200)}
-  function estimate(){return feeds.reduce(function(s,f){return s+qty(f[0])*price(f[1])},0)}
-  function updateTotal(){var n=feeds.reduce(function(s,f){return s+qty(f[0])},0),e=estimate();$('total').textContent=t('total').replace('{n}',n).replace('{kg}',n*50).replace('bags',bw(n))+(e?' · '+t('est')+' '+rupee(e):'');return n}
-  form.addEventListener('click',function(e){
-    var b=e.target.closest('[data-step]');if(!b)return;
-    var inp=$(b.dataset.for);inp.value=Math.max(0,Math.min(200,qty(inp.id)+parseInt(b.dataset.step,10)));updateTotal();
-  });
-  feeds.forEach(function(f){$(f[0]).addEventListener('input',updateTotal)});
+  var orderList=$('orderItemsList');
+  if(orderList){
+    orderList.addEventListener('click',function(e){
+      var b=e.target.closest('[data-step]');
+      if(!b||b.disabled)return;
+      var pid=b.dataset.id;
+      var p=orderProducts.find(function(x){return x.id===pid});
+      if(!p||!p.in_stock)return;
+      var step=parseInt(b.dataset.step,10);
+      p.qty=Math.max(0,Math.min(200,p.qty+step));
+      var inp=$('inp_'+pid);
+      if(inp)inp.value=p.qty;
+      updateTotal();
+    });
+
+    orderList.addEventListener('input',function(e){
+      var inp=e.target.closest('input[data-id]');
+      if(!inp)return;
+      var pid=inp.dataset.id;
+      var p=orderProducts.find(function(x){return x.id===pid});
+      if(!p||!p.in_stock)return;
+      var v=parseInt(inp.value,10);
+      p.qty=isNaN(v)||v<0?0:Math.min(v,200);
+      inp.value=p.qty;
+      updateTotal();
+    });
+  }
+
+  var feedsContainer=document.querySelector('.feeds');
+  if(feedsContainer){
+    feedsContainer.addEventListener('click',function(e){
+      var btn=e.target.closest('.btn-card-order');
+      if(!btn)return;
+      addToOrder(btn.dataset.addId);
+    });
+  }
+
   function syncMode(){$('addrWrap').hidden=!$('m_del').checked}
   $('m_del').addEventListener('change',syncMode);$('m_pick').addEventListener('change',syncMode);syncMode();
 
@@ -757,13 +965,19 @@ html[lang="ta"] .hours b{font-family:var(--f-display);letter-spacing:.02em;text-
   var lastOrder=null;
 
   function render(o){
-    var total=o.items.reduce(function(s,i){return s+i.bags},0);
     var whenLabel=t({today:'w_today',tomorrow:'w_tom',week:'w_week'}[o.whenKey]);
     var lines=[t('m_title'),'',t('m_name')+': '+o.name,t('m_phone')+': '+o.phone,''];
-    o.items.forEach(function(i){lines.push('• '+t(i.key)+' × '+i.bags+' '+bw(i.bags))});
-    lines.push(t('m_total')+': '+total+' '+bw(total)+' ('+total*50+' kg)');
-    var est=o.items.reduce(function(s,i){return s+i.bags*price(i.key)},0);
-    if(est)lines.push(t('est')+': '+rupee(est));
+    o.items.forEach(function(i){
+      var itemLine='• '+i.name+' ('+i.packSize+' kg) × '+i.bags+' '+(lang==='en'&&i.bags===1?'bag':t('bags'));
+      if(i.subtotal){
+        itemLine+=' = '+rupee(i.subtotal);
+      }
+      lines.push(itemLine);
+    });
+    lines.push(t('m_total')+': '+o.totalBags+' '+(lang==='en'&&o.totalBags===1?'bag':t('bags'))+' ('+o.totalKg+' kg)');
+    if(o.estimatedTotal){
+      lines.push(t('est')+': '+rupee(o.estimatedTotal));
+    }
     lines.push('');
     lines.push(t('m_mode')+': '+t(o.mode==='delivery'?'m_del':'m_pick'));
     if(o.mode==='delivery')lines.push(t('m_addr')+': '+o.address);
@@ -786,16 +1000,66 @@ html[lang="ta"] .hours b{font-family:var(--f-display);letter-spacing:.02em;text-
     setErr('e_qty',null,bad.qty);setErr('e_name','f_name',bad.name);setErr('e_phone','f_phone',bad.phone);setErr('e_addr','f_addr',bad.addr);
     if(bad.qty||bad.name||bad.phone||bad.addr){var first=form.querySelector('.err:not(:empty)');if(first)first.scrollIntoView({block:'center',behavior:'smooth'});return}
 
-    var items=feeds.filter(function(f){return qty(f[0])>0}).map(function(f){return {key:f[1],feed:f[2],bags:qty(f[0])}});
-    lastOrder={name:name,phone:phone,mode:del?'delivery':'pickup',address:del?addr:'',whenKey:$('f_when').value,note:$('f_note').value.trim(),items:items,sent:false};
+    var isTa=lang==='ta';
+    var activeItems=orderProducts.filter(function(p){return p.in_stock&&p.qty>0}).map(function(p){
+      var title=isTa?(p.local_name_ta||p.name):(p.name||p.local_name_ta);
+      var subtotal=p.qty*(p.selling_price||0);
+      return {
+        id:p.id,
+        name:title,
+        feed_ta:p.local_name_ta||p.name,
+        feed_en:p.name||p.local_name_ta,
+        bags:p.qty,
+        packSize:p.pack_size||50,
+        price:p.selling_price||0,
+        subtotal:subtotal
+      };
+    });
+
+    var totalKg=activeItems.reduce(function(s,i){return s+(i.bags*i.packSize)},0);
+    var estTotal=activeItems.reduce(function(s,i){return s+i.subtotal},0);
+
+    lastOrder={
+      name:name,
+      phone:phone,
+      mode:del?'delivery':'pickup',
+      address:del?addr:'',
+      whenKey:$('f_when').value,
+      note:$('f_note').value.trim(),
+      items:activeItems,
+      totalBags:total,
+      totalKg:totalKg,
+      estimatedTotal:estTotal,
+      sent:false
+    };
     var url=render(lastOrder);
     $('done').hidden=false;
     try{window.open(url,'_blank','noopener')}catch(err){}
     $('done').scrollIntoView({block:'nearest',behavior:'smooth'});
 
-    // Background alert to the shop via the Cloudflare worker (Telegram / WhatsApp bot). Always sent in Tamil for the owner.
-    var payload={name:name,phone:phone,mode:lastOrder.mode,address:lastOrder.address,when:T.ta[{today:'w_today',tomorrow:'w_tom',week:'w_week'}[lastOrder.whenKey]],note:lastOrder.note,
-      items:items.map(function(i){return {feed:i.feed,bags:i.bags}}),lang:lang,website:''};
+    // Background alert to shop worker
+    var payload={
+      name:name,
+      phone:phone,
+      mode:lastOrder.mode,
+      address:lastOrder.address,
+      when:T.ta[{today:'w_today',tomorrow:'w_tom',week:'w_week'}[lastOrder.whenKey]],
+      note:lastOrder.note,
+      items:activeItems.map(function(i){
+        return {
+          feed:i.feed_ta,
+          bags:i.bags,
+          packSize:i.packSize,
+          price:i.price,
+          subtotal:i.subtotal
+        };
+      }),
+      estimatedTotal:estTotal,
+      total_bags:total,
+      total_weight_kg:totalKg,
+      lang:lang,
+      website:''
+    };
     var order=lastOrder;
     try{
       fetch('/api/order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
@@ -814,10 +1078,6 @@ html[lang="ta"] .hours b{font-family:var(--f-display);letter-spacing:.02em;text-
     var anyPrice=false;
     document.querySelectorAll('[data-price]').forEach(function(el){var v=price(el.dataset.price);el.hidden=!v;if(el.nextElementSibling)el.nextElementSibling.hidden=!!v;if(v){anyPrice=true;el.innerHTML=rupee(v)+' <small>'+t('per_bag')+'</small>'}});
     $('priceNote').hidden=!(anyPrice&&CONFIG.priceDate);if(anyPrice)$('priceNote').textContent=t('price_note').replace('{d}',CONFIG.priceDate);
-    // CONFIG.stock[k]===false means the live ERP catalog reported this feed
-    // type out of stock — undefined (sample data, or the fetch below never
-    // resolved) means "unknown", which is treated as in-stock so the badge
-    // never shows for data we don't actually have.
     document.querySelectorAll('[data-stock]').forEach(function(el){
       var k=el.dataset.stock,oos=CONFIG.stock&&CONFIG.stock[k]===false;
       el.hidden=!oos;el.textContent=oos?t('out_of_stock'):'';
@@ -862,37 +1122,6 @@ html[lang="ta"] .hours b{font-family:var(--f-display);letter-spacing:.02em;text-
     if(ld){var sc=document.createElement('script');sc.type='application/ld+json';sc.textContent=JSON.stringify(ld);document.head.appendChild(sc)}
   }catch(e){}
 
-  // Tamil is the default. ?lang=en (or a saved choice) switches to English.
-  var start='ta';
-  try{var q=new URLSearchParams(location.search).get('lang');if(q==='en'||q==='ta')start=q;else{var s=localStorage.getItem('bpks-lang');if(s==='en'||s==='ta')start=s}}catch(e){}
-  applyLang(start);
-
-  // Live prices/stock from the real ERP backend (services/api), fetched
-  // directly by the browser — see BPKS-FeedMate-Production-Credentials.md
-  // §2E/§8F for the full picture. CONFIG above stays as the fallback: if
-  // this never resolves (offline, slow cold start, API down), the page
-  // already rendered the sample values and nothing looks broken. Feed
-  // type is matched by the same Tamil words the order form already uses
-  // (மாடு/ஆடு/கோழி — see allowedFeeds in _worker.js) rather than any
-  // category id, so it works regardless of how categories are named in
-  // the ERP. When more than one product matches a feed type, the first
-  // one returned (alphabetical, from the API) is shown — the public site
-  // only has room for one price per feed type.
-  function feedKey(text){
-    text=text||'';
-    if(text.indexOf('மாடு')>-1||/cattle|cow/i.test(text))return 'cow';
-    if(text.indexOf('ஆடு')>-1||/goat/i.test(text))return 'goat';
-    if(text.indexOf('கோழி')>-1||/poultry|hen|chicken/i.test(text))return 'hen';
-    return null;
-  }
-
-  var catalogProducts = null;
-
-  function escapeHtml(s){
-    if(!s)return '';
-    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-  }
-
   function renderDynamicProducts(){
     if(!catalogProducts||!catalogProducts.length)return;
     var container=document.querySelector('.feeds');
@@ -921,6 +1150,11 @@ html[lang="ta"] .hours b{font-family:var(--f-display);letter-spacing:.02em;text-
         packHtml='<span>'+escapeHtml(packText)+'</span>';
       }
 
+      var btnOrderHtml='';
+      if(p.in_stock!==false){
+        btnOrderHtml='<button type="button" class="btn-card-order" data-add-id="'+escapeHtml(p.id||p.name)+'">'+escapeHtml(t('add_to_order'))+'</button>';
+      }
+
       html+='<article class="feed">'+
         '<div class="ph"><img src="'+escapeHtml(imgSrc)+'" alt="'+escapeHtml(title)+'" width="250" height="250" loading="lazy" onerror="if(this.src!==\''+fallbackImg+'\')this.src=\''+fallbackImg+'\'"></div>'+
         '<div class="txt">'+
@@ -928,6 +1162,7 @@ html[lang="ta"] .hours b{font-family:var(--f-display);letter-spacing:.02em;text-
           (sub?'<div class="en">'+escapeHtml(sub)+'</div>':'')+
           (p.category?'<div class="cat">'+escapeHtml(p.category)+'</div>':'')+
           '<div class="pack">'+packHtml+'</div>'+
+          btnOrderHtml+
         '</div>'+
       '</article>';
     });
@@ -938,8 +1173,48 @@ html[lang="ta"] .hours b{font-family:var(--f-display);letter-spacing:.02em;text-
     if(!data||!Array.isArray(data.products))return;
     if(data.products.length>0){
       catalogProducts=data.products;
+
+      var prevQtyMap={};
+      orderProducts.forEach(function(p){
+        if(p.qty>0){
+          prevQtyMap[p.id]=p.qty;
+          if(p.name)prevQtyMap[p.name]=p.qty;
+        }
+      });
+
+      orderProducts=data.products.map(function(p,idx){
+        var key=p.id||('prod_'+idx);
+        var fk=feedKey(p.name)||feedKey(p.local_name_ta)||feedKey(p.category);
+        var fallbackImg='img/sack.jpg';
+        if(fk==='cow')fallbackImg='img/cow.jpg';
+        else if(fk==='goat')fallbackImg='img/goat.jpg';
+        else if(fk==='hen')fallbackImg='img/hen.jpg';
+
+        var sp=parseFloat(p.selling_price)||0;
+        var mrp=parseFloat(p.mrp)||0;
+        var pack=parseInt(p.pack_size,10)||50;
+        var existingQty=prevQtyMap[p.id]||prevQtyMap[p.name]||0;
+
+        return {
+          id:key,
+          name:p.name||'',
+          local_name_ta:p.local_name_ta||'',
+          category:p.category||'',
+          selling_price:sp,
+          mrp:mrp,
+          pack_size:pack,
+          in_stock:p.in_stock!==false,
+          image_url:p.image_url||fallbackImg,
+          fallbackImg:fallbackImg,
+          qty:p.in_stock===false?0:existingQty
+        };
+      });
+
       renderDynamicProducts();
+      renderOrderItems();
+      updateTotal();
     }
+
     var byKey={};
     data.products.forEach(function(p){
       var key=feedKey(p.name)||feedKey(p.local_name_ta)||feedKey(p.category);
@@ -964,13 +1239,19 @@ html[lang="ta"] .hours b{font-family:var(--f-display);letter-spacing:.02em;text-
     renderConfig();
     updateTotal();
   }
+
+  // Tamil is the default. ?lang=en (or a saved choice) switches to English.
+  var start='ta';
+  try{var q=new URLSearchParams(location.search).get('lang');if(q==='en'||q==='ta')start=q;else{var s=localStorage.getItem('bpks-lang');if(s==='en'||s==='ta')start=s}}catch(e){}
+  applyLang(start);
+
   try{
     var catalogCtrl=new AbortController();
     var catalogTimer=setTimeout(function(){catalogCtrl.abort()},3000);
     fetch('https://api.bpkscattlefeeds.com/api/v1/public/catalog',{signal:catalogCtrl.signal})
       .then(function(r){clearTimeout(catalogTimer);return r.ok?r.json():null})
       .then(function(j){if(j)applyPublicCatalog(j)})
-      .catch(function(){/* offline, slow cold start, or API down — the sample data already on screen stays as-is */});
+      .catch(function(){});
   }catch(e){}
 })();
 </script>

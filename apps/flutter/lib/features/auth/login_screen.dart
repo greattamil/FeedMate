@@ -154,6 +154,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     if (!mounted) return;
                     final messenger = ScaffoldMessenger.of(context);
                     if (registered == true) {
+                      context.read<AuthSession>().clearError();
                       messenger.showSnackBar(
                         const SnackBar(content: Text('Device registered — you can log in now')),
                       );

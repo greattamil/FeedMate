@@ -65,6 +65,16 @@ class AuthSession extends ChangeNotifier {
 
   bool hasPermission(String code) => permissions.contains(code);
 
+  /// Clears a stale error left over from a prior failed login attempt — the
+  /// login screen calls this after the device-pairing flow succeeds so a
+  /// "device not registered" message doesn't keep showing once it no longer
+  /// applies, without the user having to retry the login form first.
+  void clearError() {
+    if (lastError == null) return;
+    lastError = null;
+    notifyListeners();
+  }
+
   Future<bool> login({required String username, required String password}) async {
     lastError = null;
     try {

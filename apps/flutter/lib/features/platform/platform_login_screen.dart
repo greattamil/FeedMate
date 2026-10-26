@@ -63,6 +63,12 @@ class _PlatformLoginScreenState extends State<PlatformLoginScreen> {
 
     return Scaffold(
       backgroundColor: AppColors.background,
+      appBar: AppBar(
+        backgroundColor: AppColors.background,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        iconTheme: const IconThemeData(color: AppColors.textPrimary),
+      ),
       body: isDesktop
           ? Row(
               children: [

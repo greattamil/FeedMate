@@ -50,6 +50,13 @@ type Product struct {
 	// unless a shop owner explicitly turns it off for one they don't want
 	// nagging them about (e.g. a made-to-order or rarely-stocked item).
 	StockAlertEnabled bool
+	// ShowOnWebsite controls whether this product appears in the public,
+	// unauthenticated catalog the marketing website fetches (see
+	// ListPublicCatalog and httpapi.PublicHandlers.GetPublicCatalog).
+	// Defaults to false (opt-in, not opt-out) — the ERP's internal catalog
+	// may hold items a shop never wants listed publicly, so nothing is
+	// exposed until explicitly marked.
+	ShowOnWebsite bool
 }
 
 type Barcode struct {
@@ -73,15 +80,15 @@ func Create(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, p *Product) erro
 			hsn_code, tax_profile_id, pack_size, standard_weight_kg, mrp, selling_price,
 			reorder_level, reorder_target, min_price_floor,
 			batch_required, expiry_required, loose_sale_allowed, scale_required, product_type,
-			stock_alert_enabled
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
+			stock_alert_enabled, show_on_website
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
 		RETURNING id, active
 	`, tenantID, p.SKU, p.Name, p.LocalNameTa, p.CategoryID, p.BrandID,
 		p.DefaultSaleUOMID, p.DefaultPurchaseUOMID, p.BaseInventoryUOMID,
 		p.HSNCode, p.TaxProfileID, p.PackSize, p.StandardWeightKg, p.MRP, p.SellingPrice,
 		p.ReorderLevel, p.ReorderTarget, p.MinPriceFloor,
 		p.BatchRequired, p.ExpiryRequired, p.LooseSaleAllowed, p.ScaleRequired, p.ProductType,
-		p.StockAlertEnabled,
+		p.StockAlertEnabled, p.ShowOnWebsite,
 	)
 	// Scan back every server-defaulted column (not just id) so the in-memory
 	// struct returned to the caller reflects the true persisted row rather
@@ -96,7 +103,7 @@ func GetByID(ctx context.Context, tx pgx.Tx, id uuid.UUID) (*Product, error) {
 		       hsn_code, tax_profile_id, pack_size, standard_weight_kg, mrp, selling_price,
 		       reorder_level, reorder_target, min_price_floor,
 		       batch_required, expiry_required, loose_sale_allowed, scale_required, product_type, active,
-		       stock_alert_enabled
+		       stock_alert_enabled, show_on_website
 		FROM products WHERE id = $1
 	`, id)
 	return scanProduct(row)
@@ -116,14 +123,14 @@ func Update(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, p *Product) erro
 			mrp = $14, selling_price = $15, reorder_level = $16, reorder_target = $17,
 			min_price_floor = $18, batch_required = $19, expiry_required = $20,
 			loose_sale_allowed = $21, scale_required = $22, product_type = $23,
-			stock_alert_enabled = $24, updated_at = now()
+			stock_alert_enabled = $24, show_on_website = $25, updated_at = now()
 		WHERE tenant_id = $1 AND id = $2
 	`, tenantID, p.ID, p.Name, p.LocalNameTa, p.CategoryID, p.BrandID,
 		p.DefaultSaleUOMID, p.DefaultPurchaseUOMID, p.BaseInventoryUOMID,
 		p.HSNCode, p.TaxProfileID, p.PackSize, p.StandardWeightKg, p.MRP, p.SellingPrice,
 		p.ReorderLevel, p.ReorderTarget, p.MinPriceFloor,
 		p.BatchRequired, p.ExpiryRequired, p.LooseSaleAllowed, p.ScaleRequired, p.ProductType,
-		p.StockAlertEnabled,
+		p.StockAlertEnabled, p.ShowOnWebsite,
 	)
 	if err != nil {
 		return err
@@ -196,7 +203,7 @@ func List(ctx context.Context, tx pgx.Tx, opts ListOptions) ([]Product, int, err
 		       hsn_code, tax_profile_id, pack_size, standard_weight_kg, mrp, selling_price,
 		       reorder_level, reorder_target, min_price_floor,
 		       batch_required, expiry_required, loose_sale_allowed, scale_required, product_type, active,
-		       stock_alert_enabled
+		       stock_alert_enabled, show_on_website
 		FROM products WHERE %s ORDER BY name ASC LIMIT $%d OFFSET $%d
 	`, where, argN, argN+1)
 	rows, err := tx.Query(ctx, listSQL, listArgs...)
@@ -223,7 +230,7 @@ func scanProductRow(rows pgx.Rows) (*Product, error) {
 		&p.HSNCode, &p.TaxProfileID, &p.PackSize, &p.StandardWeightKg, &p.MRP, &p.SellingPrice,
 		&p.ReorderLevel, &p.ReorderTarget, &p.MinPriceFloor,
 		&p.BatchRequired, &p.ExpiryRequired, &p.LooseSaleAllowed, &p.ScaleRequired, &p.ProductType, &p.Active,
-		&p.StockAlertEnabled)
+		&p.StockAlertEnabled, &p.ShowOnWebsite)
 	return &p, err
 }
 
@@ -234,7 +241,7 @@ func GetByBarcode(ctx context.Context, tx pgx.Tx, barcode string) (*Product, err
 		       p.hsn_code, p.tax_profile_id, p.pack_size, p.standard_weight_kg, p.mrp, p.selling_price,
 		       p.reorder_level, p.reorder_target, p.min_price_floor,
 		       p.batch_required, p.expiry_required, p.loose_sale_allowed, p.scale_required, p.product_type, p.active,
-		       p.stock_alert_enabled
+		       p.stock_alert_enabled, p.show_on_website
 		FROM products p
 		JOIN product_barcodes b ON b.product_id = p.id
 		WHERE b.barcode = $1 AND b.active AND p.active
@@ -251,7 +258,7 @@ func scanProduct(row pgx.Row) (*Product, error) {
 		&p.HSNCode, &p.TaxProfileID, &p.PackSize, &p.StandardWeightKg, &p.MRP, &p.SellingPrice,
 		&p.ReorderLevel, &p.ReorderTarget, &p.MinPriceFloor,
 		&p.BatchRequired, &p.ExpiryRequired, &p.LooseSaleAllowed, &p.ScaleRequired, &p.ProductType, &p.Active,
-		&p.StockAlertEnabled)
+		&p.StockAlertEnabled, &p.ShowOnWebsite)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -430,4 +437,54 @@ func DeleteBarcodes(ctx context.Context, tx pgx.Tx, tenantID, productID uuid.UUI
 func DeleteAliases(ctx context.Context, tx pgx.Tx, tenantID, productID uuid.UUID) error {
 	_, err := tx.Exec(ctx, `DELETE FROM product_aliases WHERE tenant_id = $1 AND product_id = $2`, tenantID, productID)
 	return err
+}
+
+// PublicCatalogItem is the deliberately narrow shape exposed by the public,
+// unauthenticated marketing-website catalog (see
+// httpapi.PublicHandlers.GetPublicCatalog) — only what a shop window
+// display would show, never internal fields like cost price, reorder
+// thresholds, SKU, or exact stock quantity.
+type PublicCatalogItem struct {
+	Name         string
+	LocalNameTa  *string
+	CategoryName *string
+	PackSize     *decimal.Decimal
+	MRP          *decimal.Decimal
+	SellingPrice *decimal.Decimal
+	InStock      bool
+}
+
+// ListPublicCatalog returns every active product a shop has explicitly
+// opted into the public catalog (show_on_website = true — see migration
+// 0032's doc comment on why this is opt-in, not opt-out). The on-hand
+// aggregate is the same batches.available_qty sum used throughout this
+// package (see reports.GetStockSummary's doc comment for why that column,
+// not a separate cache, is always the right source) but is reduced to a
+// boolean here before it ever leaves the database — the public response
+// must never reveal exact stock counts.
+func ListPublicCatalog(ctx context.Context, tx pgx.Tx) ([]PublicCatalogItem, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT p.name, p.local_name_ta, c.name, p.pack_size, p.mrp, p.selling_price,
+		       COALESCE(SUM(b.available_qty), 0) > 0 AS in_stock
+		FROM products p
+		LEFT JOIN categories c ON c.id = p.category_id
+		LEFT JOIN batches b ON b.product_id = p.id AND b.status = 'ACTIVE'
+		WHERE p.active AND p.show_on_website
+		GROUP BY p.id, p.name, p.local_name_ta, c.name, p.pack_size, p.mrp, p.selling_price
+		ORDER BY c.name, p.name
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []PublicCatalogItem
+	for rows.Next() {
+		var item PublicCatalogItem
+		if err := rows.Scan(&item.Name, &item.LocalNameTa, &item.CategoryName, &item.PackSize, &item.MRP, &item.SellingPrice, &item.InStock); err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
 }

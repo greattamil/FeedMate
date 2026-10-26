@@ -124,6 +124,19 @@ func main() {
 	dbBackupTrigger := &dbbackup.Trigger{HTTPClient: http.DefaultClient, ProjectID: cfg.GCPProjectID, Region: cfg.GCPRegion, JobName: cfg.DBBackupJobName}
 	cronHandlers := &httpapi.CronHandlers{Subscription: subscriptionSvc, CloudUsage: cloudUsageSvc, Customer: customerSvc, Notify: notifySvc, DBBackup: dbBackupTrigger, CronSecret: cfg.CronSecret}
 
+	// PublicWebsiteTenantID is parsed once here, not per-request — an
+	// unset/invalid value leaves this nil, and PublicHandlers.GetPublicCatalog
+	// fails closed (500) rather than guessing a tenant on every call.
+	var publicWebsiteTenantID *uuid.UUID
+	if cfg.PublicWebsiteTenantID != "" {
+		if id, err := uuid.Parse(cfg.PublicWebsiteTenantID); err == nil {
+			publicWebsiteTenantID = &id
+		} else {
+			slog.Error("invalid PUBLIC_WEBSITE_TENANT_ID, public catalog endpoint disabled", "error", err)
+		}
+	}
+	publicHandlers := &httpapi.PublicHandlers{DB: db, PublicWebsiteTenantID: publicWebsiteTenantID}
+
 	// Full debug-level detail for every error response — not just
 	// CodeInternal — is persisted here so the platform admin's error log
 	// screen can show more than "check docker logs" — see
@@ -230,6 +243,13 @@ func main() {
 		// on another device (see devicepairing.Service). Deliberately not
 		// behind RequireAuth.
 		r.Post("/devices/register", deviceHandlers.RegisterDevice)
+
+		// The marketing website (bpks-website/, a separate static site, not
+		// FeedMate itself) fetches this directly from the visitor's browser
+		// with no credential at all — see httpapi.PublicHandlers's doc
+		// comment for why that's safe (pinned to one tenant via server
+		// config, never request input).
+		r.Get("/public/catalog", publicHandlers.GetPublicCatalog)
 
 		// Google Cloud Scheduler calls these on a schedule to drive the
 		// billing cycle and cloud-usage poll on Cloud Run — see

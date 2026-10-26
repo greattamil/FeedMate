@@ -25,6 +25,14 @@
 #                         Worker reverse proxy instead; see ../cloudflare/worker)
 #   CLOUD_RUN_SERVICE    e.g. feedmate-api
 #
+# Optional env vars:
+#   PUBLIC_WEBSITE_TENANT_ID   pins the public, unauthenticated catalog
+#                         endpoint (GET /api/v1/public/catalog, see
+#                         httpapi.PublicHandlers) to one tenant — the
+#                         marketing website's own tenant UUID, not a
+#                         secret. Leave unset to disable that endpoint
+#                         (it fails closed, 500, rather than guessing).
+#
 # Secrets are NOT set by this script — see ../ENVIRONMENT.md for how to
 # create/mount them via GCP Secret Manager. Every production secret
 # (DATABASE_URL, DATABASE_ADMIN_URL, JWT_SIGNING_KEY,
@@ -63,7 +71,7 @@ gcloud run deploy "$CLOUD_RUN_SERVICE" \
   --region="$GCP_REGION" \
   --project="$GCP_PROJECT_ID" \
   --max-instances=1 \
-  --update-env-vars="GCP_PROJECT_ID=$GCP_PROJECT_ID,ENABLE_IN_PROCESS_SCHEDULER=false,FIREBASE_PROJECT_ID=$GCP_PROJECT_ID" \
+  --update-env-vars="GCP_PROJECT_ID=$GCP_PROJECT_ID,ENABLE_IN_PROCESS_SCHEDULER=false,FIREBASE_PROJECT_ID=$GCP_PROJECT_ID${PUBLIC_WEBSITE_TENANT_ID:+,PUBLIC_WEBSITE_TENANT_ID=$PUBLIC_WEBSITE_TENANT_ID}" \
   --quiet
 
 # The service's own runtime identity needs read access to Cloud Monitoring

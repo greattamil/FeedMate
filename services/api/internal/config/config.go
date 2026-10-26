@@ -81,6 +81,15 @@ type Config struct {
 	// isn't reliable — see cron_handlers.go's doc comment for why.
 	CronSecret string
 
+	// PublicWebsiteTenantID pins the public, unauthenticated catalog
+	// endpoint (GET /api/v1/public/catalog — see httpapi.PublicHandlers)
+	// to exactly one tenant, read from server config rather than any
+	// request input, so a website visitor can never choose whose catalog
+	// they see. Empty disables the endpoint (503) rather than guessing —
+	// see PublicHandlers.GetPublicCatalog. Not a secret: a tenant UUID
+	// reveals nothing sensitive on its own.
+	PublicWebsiteTenantID string
+
 	// EnableInProcessScheduler controls whether the in-process ticker
 	// goroutines (subscription.StartBillingScheduler,
 	// cloudusage.StartUsagePollScheduler) run at all. Default true — the
@@ -161,6 +170,7 @@ func Load() (Config, error) {
 		EdgeSharedSecret:       firstNonEmpty(os.Getenv("EDGE_SHARED_SECRET"), appSecrets["edge_secret"]),
 
 		CronSecret:               firstNonEmpty(os.Getenv("CRON_SECRET"), appSecrets["cron_secret"]),
+		PublicWebsiteTenantID:    os.Getenv("PUBLIC_WEBSITE_TENANT_ID"),
 		EnableInProcessScheduler: getBool("ENABLE_IN_PROCESS_SCHEDULER", true),
 	}
 

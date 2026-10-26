@@ -59,8 +59,15 @@ type productRequest struct {
 	// true precisely so a client that's silent on this never flips a
 	// product's alerts off by omission. nil means "use the default".
 	StockAlertEnabled *bool    `json:"stock_alert_enabled,omitempty"`
-	Barcodes          []string `json:"barcodes,omitempty"`
-	Aliases           []string `json:"aliases,omitempty"`
+	// ShowOnWebsite opts this product into the public marketing-website
+	// catalog (see product.ListPublicCatalog). Unlike StockAlertEnabled
+	// above, the column default is false (opt-in, not opt-out — see
+	// migration 0032), so nil here means "not shown" rather than "use
+	// the default of true" — the edit screen always sends the real
+	// current value explicitly, since it pre-fills from GetDetail first.
+	ShowOnWebsite *bool    `json:"show_on_website,omitempty"`
+	Barcodes      []string `json:"barcodes,omitempty"`
+	Aliases       []string `json:"aliases,omitempty"`
 }
 
 // toProduct converts the wire request into a product.Product, validating
@@ -81,6 +88,7 @@ func (req *productRequest) toProduct(w http.ResponseWriter, r *http.Request) (pr
 	p.LooseSaleAllowed, p.ScaleRequired = req.LooseSaleAllowed, req.ScaleRequired
 	p.ProductType = req.ProductType
 	p.StockAlertEnabled = req.StockAlertEnabled == nil || *req.StockAlertEnabled
+	p.ShowOnWebsite = req.ShowOnWebsite != nil && *req.ShowOnWebsite
 
 	if req.LocalNameTa != "" {
 		p.LocalNameTa = &req.LocalNameTa
@@ -163,6 +171,7 @@ type productResponse struct {
 	ProductType          string `json:"product_type"`
 	Active               bool   `json:"active"`
 	StockAlertEnabled    bool   `json:"stock_alert_enabled"`
+	ShowOnWebsite        bool   `json:"show_on_website"`
 }
 
 func toProductResponse(p *product.Product) productResponse {
@@ -180,6 +189,7 @@ func toProductResponse(p *product.Product) productResponse {
 		ProductType:          p.ProductType,
 		Active:               p.Active,
 		StockAlertEnabled:    p.StockAlertEnabled,
+		ShowOnWebsite:        p.ShowOnWebsite,
 	}
 	if p.LocalNameTa != nil {
 		resp.LocalNameTa = *p.LocalNameTa

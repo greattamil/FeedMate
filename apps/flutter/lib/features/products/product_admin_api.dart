@@ -38,6 +38,12 @@ class ProductDetail {
   // a made-to-order or rarely-stocked item a shop owner doesn't want
   // nagging them. Defaults to true (opt-out, not opt-in).
   final bool stockAlertEnabled;
+  // Opts this product into the public, unauthenticated catalog the
+  // marketing website (bpkscattlefeeds.com, a separate site from this app)
+  // fetches — see product.Product.ShowOnWebsite server-side. Defaults to
+  // false (opt-in, not opt-out — unlike stockAlertEnabled above): nothing
+  // shows publicly until a shop explicitly turns it on for that product.
+  final bool showOnWebsite;
   final List<String> barcodes;
   final List<String> aliases;
 
@@ -67,6 +73,7 @@ class ProductDetail {
     required this.productType,
     required this.active,
     this.stockAlertEnabled = true,
+    this.showOnWebsite = false,
     this.barcodes = const [],
     this.aliases = const [],
   });
@@ -105,6 +112,7 @@ class ProductDetail {
       productType: json['product_type'] as String? ?? 'FEED',
       active: json['active'] as bool? ?? true,
       stockAlertEnabled: json['stock_alert_enabled'] as bool? ?? true,
+      showOnWebsite: json['show_on_website'] as bool? ?? false,
       barcodes: (json['barcodes'] as List<dynamic>? ?? []).cast<String>(),
       aliases: (json['aliases'] as List<dynamic>? ?? []).cast<String>(),
     );
@@ -115,7 +123,7 @@ class ProductDetail {
   /// since the update endpoint replaces the whole record (see
   /// product.repository.Update's doc comment — there is no partial-patch
   /// endpoint for a single field).
-  ProductDetail copyWith({bool? stockAlertEnabled}) {
+  ProductDetail copyWith({bool? stockAlertEnabled, bool? showOnWebsite}) {
     return ProductDetail(
       id: id, sku: sku, name: name, localNameTa: localNameTa, categoryId: categoryId, brandId: brandId,
       defaultSaleUomId: defaultSaleUomId, defaultPurchaseUomId: defaultPurchaseUomId, baseInventoryUomId: baseInventoryUomId,
@@ -124,6 +132,7 @@ class ProductDetail {
       batchRequired: batchRequired, expiryRequired: expiryRequired, looseSaleAllowed: looseSaleAllowed, scaleRequired: scaleRequired,
       productType: productType, active: active,
       stockAlertEnabled: stockAlertEnabled ?? this.stockAlertEnabled,
+      showOnWebsite: showOnWebsite ?? this.showOnWebsite,
       barcodes: barcodes, aliases: aliases,
     );
   }
@@ -162,6 +171,7 @@ class ProductDetail {
       'scale_required': scaleRequired,
       'product_type': productType,
       'stock_alert_enabled': stockAlertEnabled,
+      'show_on_website': showOnWebsite,
       'barcodes': barcodes,
       'aliases': aliases,
     };

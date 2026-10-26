@@ -51,6 +51,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   bool _looseSaleAllowed = false;
   bool _scaleRequired = false;
   bool _stockAlertEnabled = true;
+  bool _showOnWebsite = false;
   final List<String> _barcodes = [];
   final List<String> _aliases = [];
 
@@ -93,6 +94,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       _looseSaleAllowed = e.looseSaleAllowed;
       _scaleRequired = e.scaleRequired;
       _stockAlertEnabled = e.stockAlertEnabled;
+      _showOnWebsite = e.showOnWebsite;
       _barcodes.addAll(e.barcodes);
       _aliases.addAll(e.aliases);
     }
@@ -235,6 +237,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       productType: _productType,
       active: widget.existing?.active ?? true,
       stockAlertEnabled: _stockAlertEnabled,
+      showOnWebsite: _showOnWebsite,
       barcodes: _barcodes,
       aliases: _aliases,
     );
@@ -652,6 +655,29 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                         ),
                         value: _stockAlertEnabled,
                         onChanged: (v) => setState(() => _stockAlertEnabled = v),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: AppColors.surfaceSecondary,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: AppColors.border),
+                      ),
+                      child: SwitchListTile(
+                        key: const Key('product_form_show_on_website_switch'),
+                        contentPadding: EdgeInsets.zero,
+                        activeColor: AppColors.primary,
+                        title: const Text('Show on website', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                        subtitle: const Text(
+                          'When on, this product\'s name, price and stock status appear '
+                          'on the public marketing website. Off by default — turn on only '
+                          'for products the shop wants listed publicly.',
+                          style: TextStyle(fontSize: 12),
+                        ),
+                        value: _showOnWebsite,
+                        onChanged: (v) => setState(() => _showOnWebsite = v),
                       ),
                     ),
                   ],

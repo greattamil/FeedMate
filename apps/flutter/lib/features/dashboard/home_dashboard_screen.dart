@@ -9,7 +9,6 @@ import '../../core/api_error.dart';
 import '../../core/auth_session.dart';
 import '../../core/branding_provider.dart';
 import '../../core/local_db.dart';
-import '../../core/responsive.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_decorations.dart';
 import '../../core/theme/app_typography.dart';
@@ -249,18 +248,24 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
             _buildKpiMetricsRow(),
             const SizedBox(height: 24),
 
-            // 4. Bento Action Launchers
-            Text('QUICK OPERATIONS', style: AppTypography.caption.copyWith(fontWeight: FontWeight.bold, letterSpacing: 0.8)),
-            const SizedBox(height: 12),
-            _buildQuickActionGrid(session),
+            // 4. Primary actions — only the handful of things a cashier
+            // reaches for constantly. Kept as a compact row, not the large
+            // near-square tiles every item used to get (see
+            // _buildPrimaryActionsRow's doc comment for why that mattered).
+            Text('QUICK ACTIONS', style: AppTypography.caption.copyWith(fontWeight: FontWeight.bold, letterSpacing: 0.8)),
+            const SizedBox(height: 10),
+            _buildPrimaryActionsRow(session),
             const SizedBox(height: 24),
 
-            // 5. Manage — everything else, so it's reachable from Home and
-            // not only from the Counter tab's overflow menu.
-            Text('MANAGE', style: AppTypography.caption.copyWith(fontWeight: FontWeight.bold, letterSpacing: 0.8)),
-            const SizedBox(height: 12),
-            _buildManageGrid(session),
-            const SizedBox(height: 32),
+            // 5. Everything else — grouped into a compact, scannable list
+            // instead of more big tiles, so it's reachable from Home
+            // without turning the page into a long wall of near-identical
+            // colorful squares. See _buildMenuSection's doc comment.
+            _buildMenuSection('Sales & Operations', _operationsItems(session)),
+            _buildMenuSection('Catalog', _catalogItems(session)),
+            _buildMenuSection('People & Devices', _peopleItems(session)),
+            _buildMenuSection('Administration', _adminItems(session)),
+            const SizedBox(height: 16),
           ],
         ),
       ),
@@ -608,374 +613,393 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     );
   }
 
-  Widget _buildQuickActionGrid(AuthSession session) {
+  /// The small handful of things a cashier reaches for constantly —
+  /// everything else moved into _buildMenuSection's compact list. This
+  /// used to be a 9-item grid of near-square tiles (icon + title +
+  /// subtitle, ~150px tall each); combined with a second 13-item grid
+  /// below it ("Manage"), the Home screen was a long, visually loud wall
+  /// of 22 similarly-sized colorful squares — exactly what made it feel
+  /// cluttered and hard to scan on a phone. Down to 4 items here, each a
+  /// compact fixed-height tile (icon + single-line label only, no
+  /// subtitle, no near-square aspect ratio forcing extra height).
+  Widget _buildPrimaryActionsRow(AuthSession session) {
     final actions = [
       _ActionItem(
-        title: 'New Bill / POS',
-        subtitle: 'Search, scan & checkout',
+        title: 'New Bill',
         icon: Icons.add_shopping_cart_rounded,
-        gradient: AppColors.gradientEmerald,
+        color: AppColors.primary,
         onTap: widget.onOpenPos,
       ),
       _ActionItem(
-        title: 'Customer Ledger',
-        subtitle: 'Customers & receipts',
+        title: 'Customers',
         icon: Icons.people_alt_rounded,
-        gradient: AppColors.gradientIndigo,
+        color: AppColors.secondary,
         onTap: () => Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => const CustomerListScreen()),
         ),
       ),
       _ActionItem(
-        title: 'Stock Management',
-        subtitle: _outOfStockCount + _lowStockCount > 0
-            ? '${_outOfStockCount + _lowStockCount} need attention'
-            : 'Real-time stock & reorder',
+        title: 'Stock',
+        badge: _outOfStockCount + _lowStockCount > 0 ? _outOfStockCount + _lowStockCount : null,
         icon: Icons.inventory_2_rounded,
-        gradient: const LinearGradient(colors: [Color(0xFF0D9488), Color(0xFF0F766E)]),
+        color: const Color(0xFF0D9488),
         onTap: () => Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => const StockManagementScreen()),
         ),
       ),
-      if (session.hasPermission('grn.post'))
-        _ActionItem(
-          title: 'Receive Stock',
-          subtitle: 'GRN & tare inward',
-          icon: Icons.move_to_inbox_rounded,
-          gradient: const LinearGradient(colors: [Color(0xFF0284C7), Color(0xFF0EA5E9)]),
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const GrnScreen()),
-          ),
-        ),
-      if (session.hasPermission('supplier.manage'))
-        _ActionItem(
-          title: 'Suppliers',
-          subtitle: 'Payables & invoices',
-          icon: Icons.local_shipping_rounded,
-          gradient: const LinearGradient(colors: [Color(0xFF6366F1), Color(0xFF8B5CF6)]),
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const SupplierListScreen()),
-          ),
-        ),
-      if (session.hasPermission('cash.eod_close'))
-        _ActionItem(
-          title: 'Cash Drawer EOD',
-          subtitle: 'Reconciliation & float',
-          icon: Icons.lock_clock_rounded,
-          gradient: AppColors.gradientAmber,
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const EodScreen()),
-          ),
-        ),
       if (session.hasPermission('report.view'))
         _ActionItem(
-          title: 'Analytics & Reports',
-          subtitle: 'Sales, stock & balances',
+          title: 'Reports',
           icon: Icons.analytics_rounded,
-          gradient: const LinearGradient(colors: [Color(0xFF9333EA), Color(0xFFA855F7)]),
+          color: const Color(0xFF9333EA),
           onTap: widget.onOpenReports ?? () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const ReportsScreen()),
               ),
         ),
-      if (session.hasPermission('report.view'))
-        _ActionItem(
-          title: 'Business Insights',
-          subtitle: 'Trends, top sellers & more',
-          icon: Icons.insights_rounded,
-          gradient: AppColors.gradientSunset,
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const AnalyticsDashboardScreen()),
+    ];
+
+    return Row(
+      children: [
+        for (final a in actions) ...[
+          Expanded(child: _buildPrimaryTile(a)),
+          if (a != actions.last) const SizedBox(width: 10),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildPrimaryTile(_ActionItem a) {
+    return Material(
+      color: AppColors.surface,
+      borderRadius: AppDecorations.borderRadiusMd,
+      child: InkWell(
+        key: a.title == 'New Bill' ? const Key('home_primary_new_bill') : null,
+        onTap: a.onTap,
+        borderRadius: AppDecorations.borderRadiusMd,
+        hoverColor: AppColors.surfaceHover,
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: AppDecorations.borderRadiusMd,
+            border: Border.all(color: AppColors.border),
           ),
-        ),
-      _ActionItem(
-        title: 'Offline Outbox',
-        subtitle: '$_pendingSyncCount pending sync',
-        icon: Icons.cloud_sync_rounded,
-        gradient: const LinearGradient(colors: [Color(0xFF475569), Color(0xFF64748B)]),
-        onTap: () => Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const OutboxScreen()),
+          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 6),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(9),
+                    decoration: BoxDecoration(
+                      color: a.color.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(11),
+                    ),
+                    child: Icon(a.icon, color: a.color, size: 20),
+                  ),
+                  if (a.badge != null)
+                    Positioned(
+                      top: -4,
+                      right: -4,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: AppColors.danger,
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(color: AppColors.surface, width: 1.5),
+                        ),
+                        child: Text(
+                          '${a.badge}',
+                          style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text(
+                a.title,
+                style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
         ),
       ),
-      if (session.hasPermission('device.manage'))
-        _ActionItem(
-          title: 'Pair New Device',
-          subtitle: 'Generate pairing code',
-          icon: Icons.qr_code_2_rounded,
-          gradient: const LinearGradient(colors: [Color(0xFF0D9488), Color(0xFF14B8A6)]),
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const GeneratePairingCodeScreen()),
-          ),
-        ),
-    ];
-
-    return _buildActionGrid(actions);
+    );
   }
 
-  /// Everything else this app can do, grouped so it's reachable from Home
-  /// and not only from the Counter tab's overflow menu — each item gated
-  /// on the same permission the menu item itself requires.
-  Widget _buildManageGrid(AuthSession session) {
-    final actions = [
-      if (session.hasPermission('product.manage'))
-        _ActionItem(
-          title: 'Products',
-          subtitle: 'Catalog & pricing',
-          icon: Icons.inventory_2_rounded,
-          gradient: const LinearGradient(colors: [Color(0xFF0F766E), Color(0xFF14B8A6)]),
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const ProductListScreen()),
+  List<_ActionItem> _operationsItems(AuthSession session) => [
+        if (session.hasPermission('grn.post'))
+          _ActionItem(
+            title: 'Receive Stock',
+            subtitle: 'GRN & tare inward',
+            icon: Icons.move_to_inbox_rounded,
+            color: const Color(0xFF0284C7),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const GrnScreen())),
           ),
-        ),
-      if (session.hasPermission('product.manage'))
-        _ActionItem(
-          title: 'Categories & Brands',
-          subtitle: 'Product lookups',
-          icon: Icons.category_rounded,
-          gradient: const LinearGradient(colors: [Color(0xFF7C3AED), Color(0xFFA78BFA)]),
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const MasterDataScreen()),
+        if (session.hasPermission('grn.post'))
+          _ActionItem(
+            title: 'GRN History',
+            subtitle: 'Past goods receipts',
+            icon: Icons.history_rounded,
+            color: const Color(0xFF0284C7),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const GrnHistoryScreen())),
           ),
-        ),
-      if (session.hasPermission('product.manage'))
-        _ActionItem(
-          title: 'Locations',
-          subtitle: 'Shops, godowns & warehouses',
-          icon: Icons.warehouse_rounded,
-          gradient: const LinearGradient(colors: [Color(0xFF0D9488), Color(0xFF5EEAD4)]),
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const LocationScreen()),
+        if (session.hasPermission('pos.sell'))
+          _ActionItem(
+            title: 'Invoice History',
+            subtitle: 'Past sales & reprint',
+            icon: Icons.receipt_long_rounded,
+            color: const Color(0xFF059669),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const InvoiceHistoryScreen())),
           ),
-        ),
-      if (session.hasPermission('product.manage'))
-        _ActionItem(
-          title: 'Tax Profiles',
-          subtitle: 'GST rates & inclusive pricing',
-          icon: Icons.receipt_long_rounded,
-          gradient: const LinearGradient(colors: [Color(0xFF0891B2), Color(0xFF67E8F9)]),
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const TaxProfileScreen()),
+        if (session.hasPermission('return.create'))
+          _ActionItem(
+            title: 'Sales Return',
+            subtitle: 'Look up & refund',
+            icon: Icons.assignment_return_rounded,
+            color: const Color(0xFFB45309),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ReturnScreen())),
           ),
-        ),
-      if (session.hasPermission('stock.count'))
-        _ActionItem(
-          title: 'Stock Counts',
-          subtitle: 'Physical audit',
-          icon: Icons.playlist_add_check_rounded,
-          gradient: const LinearGradient(colors: [Color(0xFF0369A1), Color(0xFF0EA5E9)]),
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const StockCountHistoryScreen()),
+        if (session.hasPermission('contra.approve'))
+          _ActionItem(
+            title: 'Contra / Buy-Back',
+            subtitle: 'Farmer barter credit',
+            icon: Icons.undo_rounded,
+            color: const Color(0xFF7C3AED),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ContraScreen())),
           ),
-        ),
-      if (session.hasPermission('pos.sell'))
-        _ActionItem(
-          title: 'Invoice History',
-          subtitle: 'Past sales & reprint',
-          icon: Icons.receipt_long_rounded,
-          gradient: const LinearGradient(colors: [Color(0xFF059669), Color(0xFF34D399)]),
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const InvoiceHistoryScreen()),
+        if (session.hasPermission('supplier.manage'))
+          _ActionItem(
+            title: 'Suppliers',
+            subtitle: 'Payables & invoices',
+            icon: Icons.local_shipping_rounded,
+            color: const Color(0xFF6366F1),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SupplierListScreen())),
           ),
-        ),
-      if (session.hasPermission('grn.post'))
-        _ActionItem(
-          title: 'GRN History',
-          subtitle: 'Past goods receipts',
-          icon: Icons.history_rounded,
-          gradient: const LinearGradient(colors: [Color(0xFF0284C7), Color(0xFF38BDF8)]),
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const GrnHistoryScreen()),
+        if (session.hasPermission('cash.eod_close'))
+          _ActionItem(
+            title: 'Cash Drawer EOD',
+            subtitle: 'Reconciliation & float',
+            icon: Icons.lock_clock_rounded,
+            color: const Color(0xFFD97706),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const EodScreen())),
           ),
-        ),
-      if (session.hasPermission('return.create'))
-        _ActionItem(
-          title: 'Sales Return',
-          subtitle: 'Look up & refund',
-          icon: Icons.assignment_return_rounded,
-          gradient: const LinearGradient(colors: [Color(0xFFB45309), Color(0xFFF59E0B)]),
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const ReturnScreen()),
+        if (session.hasPermission('stock.count'))
+          _ActionItem(
+            title: 'Stock Counts',
+            subtitle: 'Physical audit',
+            icon: Icons.playlist_add_check_rounded,
+            color: const Color(0xFF0369A1),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const StockCountHistoryScreen())),
           ),
-        ),
-      if (session.hasPermission('contra.approve'))
         _ActionItem(
-          title: 'Contra / Buy-Back',
-          subtitle: 'Farmer barter credit',
-          icon: Icons.undo_rounded,
-          gradient: const LinearGradient(colors: [Color(0xFF7C3AED), Color(0xFFC084FC)]),
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const ContraScreen()),
-          ),
+          title: 'Offline Outbox',
+          subtitle: '$_pendingSyncCount pending sync',
+          icon: Icons.cloud_sync_rounded,
+          color: const Color(0xFF64748B),
+          onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const OutboxScreen())),
         ),
-      if (session.hasPermission('user.manage'))
-        _ActionItem(
-          title: 'Staff',
-          subtitle: 'Accounts & roles',
-          icon: Icons.badge_rounded,
-          gradient: const LinearGradient(colors: [Color(0xFF4338CA), Color(0xFF818CF8)]),
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const StaffListScreen()),
-          ),
-        ),
-      if (session.hasPermission('device.manage'))
-        _ActionItem(
-          title: 'Manage Devices',
-          subtitle: 'Terminals & revoke',
-          icon: Icons.devices_other_rounded,
-          gradient: const LinearGradient(colors: [Color(0xFF334155), Color(0xFF64748B)]),
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const DeviceManagementScreen()),
-          ),
-        ),
-      if (session.hasPermission('tenant.admin'))
-        _ActionItem(
-          title: 'Financial Years',
-          subtitle: 'Document numbering',
-          icon: Icons.calendar_month_rounded,
-          gradient: const LinearGradient(colors: [Color(0xFF9A3412), Color(0xFFF97316)]),
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const DocSeriesScreen()),
-          ),
-        ),
-      if (session.hasPermission('tenant.admin'))
-        _ActionItem(
-          title: 'Audit Log',
-          subtitle: 'Overrides & history',
-          icon: Icons.fact_check_rounded,
-          gradient: const LinearGradient(colors: [Color(0xFF475569), Color(0xFF94A3B8)]),
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const AuditLogScreen()),
-          ),
-        ),
-      if (session.hasPermission('tenant.admin'))
-        _ActionItem(
-          title: 'Store Settings',
-          subtitle: 'Profile & receipt text',
-          icon: Icons.storefront_rounded,
-          gradient: const LinearGradient(colors: [Color(0xFF7C2D12), Color(0xFFEA580C)]),
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const StoreSettingsScreen()),
-          ),
-        ),
-    ];
+      ];
 
-    return _buildActionGrid(actions);
+  List<_ActionItem> _catalogItems(AuthSession session) => [
+        if (session.hasPermission('product.manage'))
+          _ActionItem(
+            title: 'Products',
+            subtitle: 'Catalog & pricing',
+            icon: Icons.inventory_2_rounded,
+            color: const Color(0xFF0F766E),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ProductListScreen())),
+          ),
+        if (session.hasPermission('product.manage'))
+          _ActionItem(
+            title: 'Categories & Brands',
+            subtitle: 'Product lookups',
+            icon: Icons.category_rounded,
+            color: const Color(0xFF7C3AED),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MasterDataScreen())),
+          ),
+        if (session.hasPermission('product.manage'))
+          _ActionItem(
+            title: 'Locations',
+            subtitle: 'Shops, godowns & warehouses',
+            icon: Icons.warehouse_rounded,
+            color: const Color(0xFF0D9488),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LocationScreen())),
+          ),
+        if (session.hasPermission('product.manage'))
+          _ActionItem(
+            title: 'Tax Profiles',
+            subtitle: 'GST rates & inclusive pricing',
+            icon: Icons.receipt_long_rounded,
+            color: const Color(0xFF0891B2),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const TaxProfileScreen())),
+          ),
+      ];
+
+  List<_ActionItem> _peopleItems(AuthSession session) => [
+        if (session.hasPermission('user.manage'))
+          _ActionItem(
+            title: 'Staff',
+            subtitle: 'Accounts & roles',
+            icon: Icons.badge_rounded,
+            color: const Color(0xFF4338CA),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const StaffListScreen())),
+          ),
+        if (session.hasPermission('device.manage'))
+          _ActionItem(
+            title: 'Manage Devices',
+            subtitle: 'Terminals & revoke',
+            icon: Icons.devices_other_rounded,
+            color: const Color(0xFF334155),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DeviceManagementScreen())),
+          ),
+        if (session.hasPermission('device.manage'))
+          _ActionItem(
+            title: 'Pair New Device',
+            subtitle: 'Generate pairing code',
+            icon: Icons.qr_code_2_rounded,
+            color: const Color(0xFF0D9488),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const GeneratePairingCodeScreen())),
+          ),
+      ];
+
+  List<_ActionItem> _adminItems(AuthSession session) => [
+        if (session.hasPermission('report.view'))
+          _ActionItem(
+            title: 'Business Insights',
+            subtitle: 'Trends, top sellers & more',
+            icon: Icons.insights_rounded,
+            color: const Color(0xFFEA580C),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AnalyticsDashboardScreen())),
+          ),
+        if (session.hasPermission('tenant.admin'))
+          _ActionItem(
+            title: 'Financial Years',
+            subtitle: 'Document numbering',
+            icon: Icons.calendar_month_rounded,
+            color: const Color(0xFF9A3412),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DocSeriesScreen())),
+          ),
+        if (session.hasPermission('tenant.admin'))
+          _ActionItem(
+            title: 'Audit Log',
+            subtitle: 'Overrides & history',
+            icon: Icons.fact_check_rounded,
+            color: const Color(0xFF475569),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AuditLogScreen())),
+          ),
+        if (session.hasPermission('tenant.admin'))
+          _ActionItem(
+            title: 'Store Settings',
+            subtitle: 'Profile & receipt text',
+            icon: Icons.storefront_rounded,
+            color: const Color(0xFF7C2D12),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const StoreSettingsScreen())),
+          ),
+      ];
+
+  /// A compact, settings-style list — this is what replaced the second
+  /// 13-tile grid ("Manage"). Each row is a fixed ~56px regardless of
+  /// label length (versus a near-square tile per item before), icons sit
+  /// in a small flat-tinted circle instead of a bright gradient square
+  /// (loud at icon-grid size, calmer at list-row size), and grouping
+  /// related actions under a small header makes the whole thing scannable
+  /// instead of one undifferentiated wall of icons. An empty list (every
+  /// item in the section gated out by permission) renders nothing at all.
+  Widget _buildMenuSection(String title, List<_ActionItem> items) {
+    if (items.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8, left: 2),
+            child: Text(title, style: AppTypography.caption.copyWith(fontWeight: FontWeight.bold, letterSpacing: 0.8)),
+          ),
+          Container(
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: AppDecorations.borderRadiusMd,
+              border: Border.all(color: AppColors.border),
+              boxShadow: AppDecorations.cardShadow,
+            ),
+            child: Column(
+              children: [
+                for (var i = 0; i < items.length; i++) ...[
+                  if (i > 0) const Divider(height: 1, indent: 56, color: AppColors.border),
+                  _buildMenuRow(items[i]),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
-  /// A modern icon-over-label tile grid (the pattern used by Google Pay/
-  /// PhonePe-style service launchers), replacing an older icon-left/text-
-  /// right row layout that squeezed the title into roughly half a narrow
-  /// phone's width — the actual cause of titles/subtitles wrapping badly
-  /// on mobile. Giving the label the tile's full width fixes that
-  /// directly, and the subtitle (redundant with the title on a small
-  /// screen, and the thing most prone to overflow) only shows on tablet
-  /// and desktop, where there's room for it to add real information.
-  Widget _buildActionGrid(List<_ActionItem> actions) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final width = constraints.maxWidth;
-        final isMobile = width < ResponsiveBreakpoints.tabletMin;
-        final crossAxisCount = width >= ResponsiveBreakpoints.desktopMin
-            ? 4
-            : width >= ResponsiveBreakpoints.tabletMin
-                ? 3
-                : 2;
-        final childAspectRatio = isMobile ? 1.02 : 1.18;
-
-        return GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: actions.length,
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: crossAxisCount,
-            crossAxisSpacing: 12,
-            mainAxisSpacing: 12,
-            childAspectRatio: childAspectRatio,
-          ),
-          itemBuilder: (context, index) {
-            final a = actions[index];
-            final accentColor = a.gradient is LinearGradient ? (a.gradient as LinearGradient).colors.first : AppColors.primary;
-            // The tile's solid background lives on Material itself, not on
-            // an opaque child Container: InkWell paints its splash as one
-            // of the ancestor Material's own ink features, which render
-            // before (i.e. below) the widget subtree — so an opaque
-            // Container child painted on top of that layer would hide the
-            // ripple almost entirely. Border/shadow stay on the Container
-            // since Material doesn't offer an easy equivalent for those.
-            return Container(
-              decoration: BoxDecoration(
-                borderRadius: AppDecorations.borderRadiusMd,
-                border: Border.all(color: AppColors.border),
-                boxShadow: AppDecorations.cardShadow,
+  Widget _buildMenuRow(_ActionItem a) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: a.onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: Row(
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: a.color.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: Icon(a.icon, color: a.color, size: 17),
               ),
-              child: Material(
-                color: AppColors.surface,
-                borderRadius: AppDecorations.borderRadiusMd,
-                child: InkWell(
-                  onTap: a.onTap,
-                  borderRadius: AppDecorations.borderRadiusMd,
-                  hoverColor: AppColors.surfaceHover,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            gradient: a.gradient,
-                            borderRadius: BorderRadius.circular(12),
-                            boxShadow: [
-                              BoxShadow(
-                                color: accentColor.withValues(alpha: 0.3),
-                                blurRadius: 10,
-                                offset: const Offset(0, 4),
-                              ),
-                            ],
-                          ),
-                          child: Icon(a.icon, color: Colors.white, size: 20),
-                        ),
-                        const SizedBox(height: 10),
-                        Text(
-                          a.title,
-                          style: AppTypography.title.copyWith(fontSize: 13.5, fontWeight: FontWeight.bold),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        if (!isMobile) ...[
-                          const SizedBox(height: 3),
-                          Text(
-                            a.subtitle,
-                            style: AppTypography.caption.copyWith(color: AppColors.textSecondary),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(a.title, style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                    if (a.subtitle != null) ...[
+                      const SizedBox(height: 1),
+                      Text(
+                        a.subtitle!,
+                        style: AppTypography.caption.copyWith(color: AppColors.textSecondary),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ],
                 ),
               ),
-            );
-          },
-        );
-      },
+              const Icon(Icons.chevron_right_rounded, size: 18, color: AppColors.textTertiary),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
 
 class _ActionItem {
   final String title;
-  final String subtitle;
+  final String? subtitle;
   final IconData icon;
-  final Gradient gradient;
+  final Color color;
+  final int? badge;
   final VoidCallback onTap;
 
   _ActionItem({
     required this.title,
-    required this.subtitle,
+    this.subtitle,
     required this.icon,
-    required this.gradient,
+    required this.color,
+    this.badge,
     required this.onTap,
   });
 }
